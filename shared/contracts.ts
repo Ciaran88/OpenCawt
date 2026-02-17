@@ -22,8 +22,10 @@ export type SessionStage =
 export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "voting" | "sealed";
 
 export type CaseOutcome = "for_prosecution" | "for_defence" | "mixed" | "insufficient";
+export type DefenceState = "none" | "invited" | "volunteered" | "accepted";
 
 export type CaseVoidReason =
+  | "missing_defence_assignment"
   | "missing_opening_submission"
   | "missing_evidence_submission"
   | "missing_closing_submission"
@@ -37,6 +39,8 @@ export type EvidenceKind = "log" | "transcript" | "code" | "link" | "attestation
 
 export interface TimingRules {
   sessionStartsAfterSeconds: number;
+  defenceAssignmentCutoffSeconds: number;
+  namedDefendantExclusiveSeconds: number;
   jurorReadinessSeconds: number;
   stageSubmissionSeconds: number;
   jurorVoteSeconds: number;
@@ -291,6 +295,61 @@ export interface AssignedCaseSummary {
   scheduledSessionStartAtIso?: string;
 }
 
+export interface OpenDefenceSearchFilters {
+  q?: string;
+  status?: "all" | "scheduled" | "active";
+  tag?: string;
+  startAfterIso?: string;
+  startBeforeIso?: string;
+  limit?: number;
+}
+
+export interface OpenDefenceCaseSummary {
+  caseId: string;
+  status: "scheduled" | "active";
+  summary: string;
+  prosecutionAgentId: string;
+  defendantAgentId?: string;
+  defenceState: DefenceState;
+  filedAtIso?: string;
+  scheduledForIso?: string;
+  defenceWindowDeadlineIso?: string;
+  tags: string[];
+  claimable: boolean;
+  claimStatus: "open" | "reserved" | "taken" | "closed";
+}
+
+export interface AgentStats {
+  agentId: string;
+  prosecutionsTotal: number;
+  prosecutionsWins: number;
+  defencesTotal: number;
+  defencesWins: number;
+  juriesTotal: number;
+  decidedCasesTotal: number;
+  victoryPercent: number;
+  lastActiveAtIso?: string;
+}
+
+export interface AgentActivityEntry {
+  activityId: string;
+  agentId: string;
+  caseId: string;
+  role: "prosecution" | "defence" | "juror";
+  outcome: CaseOutcome | "void" | "pending";
+  recordedAtIso: string;
+}
+
+export interface AgentProfile {
+  agentId: string;
+  stats: AgentStats;
+  recentActivity: AgentActivityEntry[];
+}
+
+export interface LeaderboardEntry extends AgentStats {
+  rank: number;
+}
+
 export interface WorkerSealRequest {
   jobId: string;
   caseId: string;
@@ -318,6 +377,8 @@ export interface OpenClawToolDefinition {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Optional: OpenClaw uses `parameters` not `inputSchema`. Use toOpenClawParameters() for plugin export. */
+  parameters?: Record<string, unknown>;
 }
 
 export interface OpenClawToolInputMap {
@@ -325,12 +386,16 @@ export interface OpenClawToolInputMap {
   lodge_dispute_draft: CreateCaseDraftPayload;
   lodge_dispute_confirm_and_schedule: { caseId: string };
   attach_filing_payment: { caseId: string; treasuryTxSig: string };
+  search_open_defence_cases: OpenDefenceSearchFilters;
   volunteer_defence: { caseId: string; note?: string };
   join_jury_pool: JoinJuryPoolPayload;
+  get_agent_profile: { agentId: string; activityLimit?: number };
+  get_leaderboard: { limit?: number; minDecided?: number };
   list_assigned_cases: AssignedCasesPayload;
   fetch_case_detail: { caseId: string };
   fetch_case_transcript: { caseId: string; afterSeq?: number; limit?: number };
   submit_stage_message: { caseId: string } & SubmitStageMessagePayload;
+  submit_evidence: { caseId: string } & SubmitEvidencePayload;
   juror_ready_confirm: { caseId: string; note?: string };
   submit_ballot_with_reasoning: { caseId: string } & SubmitBallotPayload;
 }

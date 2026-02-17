@@ -31,6 +31,7 @@ interface SessionEngineDeps {
   drand: DrandClient;
   logger: Logger;
   onCaseReadyToClose: (caseId: string) => Promise<void>;
+  onCaseVoided?: (caseId: string) => Promise<void> | void;
 }
 
 export interface SessionEngine {
@@ -282,6 +283,10 @@ function voidCase(
       reason
     }
   });
+
+  if (deps.onCaseVoided) {
+    void deps.onCaseVoided(caseRecord.caseId);
+  }
 }
 
 async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Promise<void> {
@@ -298,12 +303,36 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
   }
 
   if (runtime.currentStage === "pre_session") {
+    if (!caseRecord.defenceAgentId && caseRecord.defenceWindowDeadlineIso) {
+      const cutoffMs = new Date(caseRecord.defenceWindowDeadlineIso).getTime();
+      if (now >= cutoffMs) {
+        voidCase(
+          deps,
+          caseRecord,
+          "missing_defence_assignment",
+          nowIso,
+          "Case became void because no defence was assigned before the defence window deadline."
+        );
+        return;
+      }
+    }
+
     const scheduledIso = runtime.scheduledSessionStartAtIso ?? caseRecord.scheduledForIso;
     if (!scheduledIso) {
       return;
     }
 
     if (now >= new Date(scheduledIso).getTime()) {
+      if (!caseRecord.defenceAgentId) {
+        voidCase(
+          deps,
+          caseRecord,
+          "missing_defence_assignment",
+          nowIso,
+          "Case became void because no defence was assigned before session start."
+        );
+        return;
+      }
       markSessionStarted(deps.db, caseRecord.caseId, nowIso);
       const deadlineIso = addSeconds(nowIso, deps.config.rules.jurorReadinessSeconds);
       setStage(deps, caseRecord, "jury_readiness", nowIso, null);

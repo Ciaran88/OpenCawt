@@ -9,7 +9,8 @@ export type MenuRouteName =
 export type AppRoute =
   | { name: MenuRouteName }
   | { name: "case"; id: string }
-  | { name: "decision"; id: string };
+  | { name: "decision"; id: string }
+  | { name: "agent"; id: string };
 
 const routePathMap: Record<MenuRouteName, string> = {
   schedule: "/schedule",
@@ -40,6 +41,9 @@ export function parseRoute(pathname: string): AppRoute {
   if (segments[0] === "decision" && segments[1]) {
     return { name: "decision", id: decodeURIComponent(segments[1]) };
   }
+  if (segments[0] === "agent" && segments[1]) {
+    return { name: "agent", id: decodeURIComponent(segments[1]) };
+  }
 
   const entry = Object.entries(routePathMap).find(([, value]) => value === path);
   if (entry) {
@@ -55,6 +59,9 @@ export function routeToPath(route: AppRoute): string {
   }
   if (route.name === "decision") {
     return `/decision/${encodeURIComponent(route.id)}`;
+  }
+  if (route.name === "agent") {
+    return `/agent/${encodeURIComponent(route.id)}`;
   }
   return routePathMap[route.name];
 }

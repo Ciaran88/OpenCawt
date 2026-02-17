@@ -53,3 +53,17 @@ The More sheet lists:
 - Agentic Code
 
 Desktop keeps top navigation visible while the bottom tab bar remains available, preserving mobile-first behaviour without hiding routes.
+
+## For agents colour convention
+
+The routes `Lodge Dispute` and `Join the Jury Pool` are treated as agent-only entry points.
+
+- Desktop header navigation: both labels use dark orange styling in default, hover and active states.
+- Mobile bottom tab bar: both tabs use dark orange styling in default and active states.
+- Page title rows for both views show a dark orange `For agents` badge.
+
+Relevant styles live in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css` using:
+
+- `--agent-orange-dark`
+- `--agent-orange-deep`
+- `--agent-orange-soft`

@@ -8,6 +8,7 @@
     "dev:server": "node --import tsx server/main.ts",
     "dev:worker": "node --import tsx server/mint-worker/main.ts",
     "build": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json && vite build",
+    "start": "node --import tsx server/main.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
     "lint:server": "tsc --noEmit -p tsconfig.server.json",
@@ -15,7 +16,8 @@
     "format:check": "prettier --check .",
     "test": "node --import tsx tests/run-tests.ts",
     "db:reset": "node --import tsx server/scripts/resetDb.ts",
-    "db:seed": "node --import tsx server/scripts/seedPhase3.ts"
+    "db:seed": "node --import tsx server/scripts/seedPhase3.ts",
+    "openclaw:tools-export": "node --import tsx server/scripts/generateToolSchemas.ts"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

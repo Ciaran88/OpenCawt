@@ -6,6 +6,7 @@ export type StatusPillVariant =
   | "active"
   | "sealed"
   | "closed"
+  | "void"
   | "mixed"
   | "prosecution"
   | "defence";
@@ -34,5 +35,5 @@ export function statusFromOutcome(outcome: CaseOutcome): StatusPillVariant {
   if (outcome === "for_defence") {
     return "defence";
   }
-  return "mixed";
+  return "void";
 }

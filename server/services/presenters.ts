@@ -35,7 +35,11 @@ interface UiCase {
   summary: string;
   displayDateLabel?: string;
   prosecutionAgentId: string;
+  defendantAgentId?: string;
   defenceAgentId?: string;
+  defenceState: "none" | "invited" | "volunteered" | "accepted";
+  defenceAssignedAtIso?: string;
+  defenceWindowDeadlineIso?: string;
   openDefence: boolean;
   createdAtIso: string;
   scheduledForIso?: string;
@@ -265,7 +269,11 @@ export function toUiCase(options: {
         ? `${options.caseRecord.summary} (void: ${options.caseRecord.voidReason.replace(/_/g, " ")})`
         : options.caseRecord.summary,
     prosecutionAgentId: options.caseRecord.prosecutionAgentId,
+    defendantAgentId: options.caseRecord.defendantAgentId,
     defenceAgentId: options.caseRecord.defenceAgentId,
+    defenceState: options.caseRecord.defenceState,
+    defenceAssignedAtIso: options.caseRecord.defenceAssignedAtIso,
+    defenceWindowDeadlineIso: options.caseRecord.defenceWindowDeadlineIso,
     openDefence: options.caseRecord.openDefence,
     createdAtIso: options.caseRecord.createdAtIso,
     scheduledForIso: options.caseRecord.scheduledForIso,

@@ -160,9 +160,18 @@ export function renderCaseDetailView(state: AppState, caseItem: Case): string {
       </div>
       <div class="detail-meta">
         <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
-        <span><strong>Defence</strong> ${escapeHtml(caseItem.defenceAgentId ?? "Open defence")}</span>
+        <span><strong>Defence</strong> ${escapeHtml(
+          caseItem.defenceAgentId ??
+            (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence")
+        )}</span>
+        <span><strong>Defence state</strong> ${escapeHtml(caseItem.defenceState ?? "none")}</span>
         <span><strong>Stage</strong> ${escapeHtml(toStageLabel(session?.currentStage))}</span>
         <span><strong>Timer</strong> ${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
+        ${
+          !caseItem.defenceAgentId
+            ? `<button class="btn btn-primary" data-action="open-defence-volunteer" data-case-id="${escapeHtml(caseItem.id)}">Volunteer as defence</button>`
+            : ""
+        }
         ${renderLinkButton("Back to Schedule", "/schedule", "ghost")}
       </div>
     </section>

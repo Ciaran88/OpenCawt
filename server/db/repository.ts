@@ -1,9 +1,17 @@
 import type {
+  AgentActivityEntry,
+  AgentProfile,
+  AgentStats,
   AssignedCaseSummary,
   CaseSessionState,
+  CaseOutcome,
   CaseVoidReason,
   CreateCaseDraftPayload,
+  DefenceState,
   JurySelectionProof,
+  LeaderboardEntry,
+  OpenDefenceCaseSummary,
+  OpenDefenceSearchFilters,
   Remedy,
   SessionStage,
   SubmitBallotPayload,
@@ -49,7 +57,11 @@ export interface CaseRecord {
   status: string;
   sessionStage: SessionStage;
   prosecutionAgentId: string;
+  defendantAgentId?: string;
   defenceAgentId?: string;
+  defenceState: DefenceState;
+  defenceAssignedAtIso?: string;
+  defenceWindowDeadlineIso?: string;
   openDefence: boolean;
   summary: string;
   requestedRemedy: Remedy;
@@ -144,6 +156,18 @@ export interface IdempotencyRecord {
   requestHash: string;
 }
 
+export interface DefenceClaimResult {
+  status:
+    | "assigned_accepted"
+    | "assigned_volunteered"
+    | "already_taken"
+    | "defence_cannot_be_prosecution"
+    | "not_open"
+    | "reserved_for_named_defendant"
+    | "window_closed";
+  caseRecord: CaseRecord;
+}
+
 export function upsertAgent(db: Db, agentId: string, jurorEligible = true): void {
   const now = nowIso();
   db.prepare(
@@ -202,18 +226,22 @@ export function createCaseDraft(
       status,
       session_stage,
       prosecution_agent_id,
+      defendant_agent_id,
       defence_agent_id,
+      defence_state,
       open_defence,
       summary,
       requested_remedy,
       created_at
-    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, ?, ?)
     `
   ).run(
     caseId,
     publicSlug,
     payload.prosecutionAgentId,
     payload.defendantAgentId ?? null,
+    null,
+    payload.defendantAgentId ? "invited" : "none",
     payload.openDefence ? 1 : 0,
     payload.claimSummary,
     payload.requestedRemedy,
@@ -245,7 +273,13 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     status: String(row.status),
     sessionStage: String(row.session_stage || "pre_session") as SessionStage,
     prosecutionAgentId: String(row.prosecution_agent_id),
+    defendantAgentId: row.defendant_agent_id ? String(row.defendant_agent_id) : undefined,
     defenceAgentId: row.defence_agent_id ? String(row.defence_agent_id) : undefined,
+    defenceState: (String(row.defence_state || "none") as DefenceState),
+    defenceAssignedAtIso: row.defence_assigned_at ? String(row.defence_assigned_at) : undefined,
+    defenceWindowDeadlineIso: row.defence_window_deadline
+      ? String(row.defence_window_deadline)
+      : undefined,
     openDefence: Number(row.open_defence) === 1,
     summary: String(row.summary),
     requestedRemedy: String(row.requested_remedy) as Remedy,
@@ -285,7 +319,11 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         status,
         session_stage,
         prosecution_agent_id,
+        defendant_agent_id,
         defence_agent_id,
+        defence_state,
+        defence_assigned_at,
+        defence_window_deadline,
         open_defence,
         summary,
         requested_remedy,
@@ -337,7 +375,11 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         status,
         session_stage,
         prosecution_agent_id,
+        defendant_agent_id,
         defence_agent_id,
+        defence_state,
+        defence_assigned_at,
+        defence_window_deadline,
         open_defence,
         summary,
         requested_remedy,
@@ -561,12 +603,19 @@ export function setCaseStatus(db: Db, caseId: string, status: string): void {
 
 export function setCaseFiled(
   db: Db,
-  input: { caseId: string; txSig: string; warning?: string; scheduleDelaySec: number }
+  input: {
+    caseId: string;
+    txSig: string;
+    warning?: string;
+    scheduleDelaySec: number;
+    defenceCutoffSec: number;
+  }
 ): void {
   const now = nowIso();
   const scheduleAt = new Date(Date.now() + input.scheduleDelaySec * 1000).toISOString();
+  const defenceWindowDeadline = new Date(Date.now() + input.defenceCutoffSec * 1000).toISOString();
   db.prepare(
-    `UPDATE cases SET status = 'filed', session_stage = 'pre_session', treasury_tx_sig = ?, filed_at = ?, filing_warning = ?, scheduled_for = ?, countdown_end_at = ?, countdown_total_ms = ? WHERE case_id = ?`
+    `UPDATE cases SET status = 'filed', session_stage = 'pre_session', treasury_tx_sig = ?, filed_at = ?, filing_warning = ?, scheduled_for = ?, countdown_end_at = ?, countdown_total_ms = ?, defence_window_deadline = ? WHERE case_id = ?`
   ).run(
     input.txSig,
     now,
@@ -574,6 +623,7 @@ export function setCaseFiled(
     scheduleAt,
     scheduleAt,
     input.scheduleDelaySec * 1000,
+    defenceWindowDeadline,
     input.caseId
   );
 
@@ -590,7 +640,154 @@ export function setCaseFiled(
 }
 
 export function setCaseDefence(db: Db, caseId: string, defenceAgentId: string): void {
-  db.prepare(`UPDATE cases SET defence_agent_id = ? WHERE case_id = ?`).run(defenceAgentId, caseId);
+  db.prepare(
+    `UPDATE cases SET defence_agent_id = ?, defence_state = 'accepted', defence_assigned_at = ? WHERE case_id = ?`
+  ).run(defenceAgentId, nowIso(), caseId);
+}
+
+export function claimDefenceAssignment(
+  db: Db,
+  input: {
+    caseId: string;
+    agentId: string;
+    nowIso: string;
+    namedExclusiveSec: number;
+  }
+): DefenceClaimResult {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const row = db
+      .prepare(
+        `
+        SELECT
+          case_id,
+          public_slug,
+          status,
+          session_stage,
+          prosecution_agent_id,
+          defendant_agent_id,
+          defence_agent_id,
+          defence_state,
+          defence_assigned_at,
+          defence_window_deadline,
+          open_defence,
+          summary,
+          requested_remedy,
+          created_at,
+          filed_at,
+          jury_selected_at,
+          session_started_at,
+          closed_at,
+          sealed_at,
+          void_reason,
+          voided_at,
+          scheduled_for,
+          countdown_end_at,
+          countdown_total_ms,
+          drand_round,
+          drand_randomness,
+          pool_snapshot_hash,
+          selection_proof_json,
+          verdict_hash,
+          verdict_bundle_json,
+          seal_asset_id,
+          seal_tx_sig,
+          seal_uri,
+          filing_warning
+        FROM cases
+        WHERE case_id = ?
+        LIMIT 1
+        `
+      )
+      .get(input.caseId) as Record<string, unknown> | undefined;
+
+    if (!row) {
+      db.exec("COMMIT");
+      throw new Error("CASE_NOT_FOUND");
+    }
+
+    const caseRecord = mapCaseRow(row);
+    if (!["draft", "filed", "jury_selected", "voting"].includes(caseRecord.status)) {
+      db.exec("COMMIT");
+      return { status: "not_open", caseRecord };
+    }
+    if (input.agentId === caseRecord.prosecutionAgentId) {
+      db.exec("COMMIT");
+      return { status: "defence_cannot_be_prosecution", caseRecord };
+    }
+
+    const jurorRow = db
+      .prepare(
+        `SELECT juror_id FROM jury_panel_members WHERE case_id = ? AND juror_id = ? AND member_status IN ('pending_ready','ready','active_voting','voted') LIMIT 1`
+      )
+      .get(caseRecord.caseId, input.agentId) as { juror_id: string } | undefined;
+    if (jurorRow) {
+      db.exec("COMMIT");
+      return { status: "not_open", caseRecord };
+    }
+
+    if (!caseRecord.defendantAgentId && !caseRecord.openDefence) {
+      db.exec("COMMIT");
+      return { status: "not_open", caseRecord };
+    }
+
+    if (caseRecord.defenceAgentId) {
+      db.exec("COMMIT");
+      return { status: "already_taken", caseRecord };
+    }
+
+    const nowMs = new Date(input.nowIso).getTime();
+    if (
+      caseRecord.defenceWindowDeadlineIso &&
+      nowMs >= new Date(caseRecord.defenceWindowDeadlineIso).getTime()
+    ) {
+      db.exec("COMMIT");
+      return { status: "window_closed", caseRecord };
+    }
+
+    const exclusiveWindowEndMs =
+      (caseRecord.filedAtIso
+        ? new Date(caseRecord.filedAtIso).getTime()
+        : new Date(caseRecord.createdAtIso).getTime()) +
+      input.namedExclusiveSec * 1000;
+    const inExclusiveWindow = nowMs < exclusiveWindowEndMs;
+
+    if (caseRecord.defendantAgentId && caseRecord.defendantAgentId !== input.agentId && inExclusiveWindow) {
+      db.exec("COMMIT");
+      return { status: "reserved_for_named_defendant", caseRecord };
+    }
+
+    const assignedState: DefenceState =
+      caseRecord.defendantAgentId && caseRecord.defendantAgentId === input.agentId
+        ? "accepted"
+        : "volunteered";
+
+    const update = db
+      .prepare(
+        `
+        UPDATE cases
+        SET defence_agent_id = ?, defence_state = ?, defence_assigned_at = ?
+        WHERE case_id = ? AND defence_agent_id IS NULL
+        `
+      )
+      .run(input.agentId, assignedState, input.nowIso, input.caseId);
+
+    if (Number(update.changes) !== 1) {
+      const refreshed = getCaseById(db, input.caseId) ?? caseRecord;
+      db.exec("COMMIT");
+      return { status: "already_taken", caseRecord: refreshed };
+    }
+
+    const assigned = getCaseById(db, input.caseId) ?? caseRecord;
+    db.exec("COMMIT");
+    return {
+      status: assignedState === "accepted" ? "assigned_accepted" : "assigned_volunteered",
+      caseRecord: assigned
+    };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function markCaseSessionStage(
@@ -1014,6 +1211,13 @@ export function countFiledCasesToday(db: Db, dayPrefixUtc: string): number {
   return Number(row.count);
 }
 
+export function countClosedAndSealedCases(db: Db): number {
+  const row = db
+    .prepare(`SELECT COUNT(*) AS count FROM cases WHERE status IN ('closed', 'sealed')`)
+    .get() as { count: number };
+  return Number(row.count);
+}
+
 export function countAgentFiledInLast24h(db: Db, agentId: string): number {
   const row = db
     .prepare(
@@ -1401,6 +1605,416 @@ export function listAssignedCasesForJuror(db: Db, agentId: string): AssignedCase
     scheduledSessionStartAtIso: row.scheduled_session_start_at ?? undefined,
     readinessDeadlineAtIso: row.ready_deadline_at ?? undefined,
     votingDeadlineAtIso: row.voting_deadline_at ?? undefined
+  }));
+}
+
+function mapUiStatus(caseRecord: CaseRecord): "scheduled" | "active" {
+  if (
+    ["jury_readiness", "opening_addresses", "evidence", "closing_addresses", "summing_up", "voting"].includes(
+      caseRecord.sessionStage
+    ) ||
+    caseRecord.status === "voting"
+  ) {
+    return "active";
+  }
+  return "scheduled";
+}
+
+export function listOpenDefenceCases(
+  db: Db,
+  filters: OpenDefenceSearchFilters,
+  options: { nowIso: string; namedExclusiveSec: number }
+): OpenDefenceCaseSummary[] {
+  const limit = Math.max(1, Math.min(filters.limit ?? 50, 200));
+  const params: Array<string | number> = [options.nowIso];
+  const where: string[] = [
+    `status IN ('draft','filed','jury_selected','voting')`,
+    `defence_agent_id IS NULL`,
+    `(defence_window_deadline IS NULL OR defence_window_deadline > ?)`
+  ];
+
+  if (filters.q?.trim()) {
+    where.push(`(case_id LIKE ? OR summary LIKE ?)`);
+    params.push(`%${filters.q.trim()}%`, `%${filters.q.trim()}%`);
+  }
+
+  if (filters.startAfterIso) {
+    where.push(`(scheduled_for IS NOT NULL AND scheduled_for >= ?)`);
+    params.push(filters.startAfterIso);
+  }
+  if (filters.startBeforeIso) {
+    where.push(`(scheduled_for IS NOT NULL AND scheduled_for <= ?)`);
+    params.push(filters.startBeforeIso);
+  }
+
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        case_id,
+        public_slug,
+        status,
+        session_stage,
+        prosecution_agent_id,
+        defendant_agent_id,
+        defence_agent_id,
+        defence_state,
+        defence_assigned_at,
+        defence_window_deadline,
+        open_defence,
+        summary,
+        requested_remedy,
+        created_at,
+        filed_at,
+        jury_selected_at,
+        session_started_at,
+        closed_at,
+        sealed_at,
+        void_reason,
+        voided_at,
+        scheduled_for,
+        countdown_end_at,
+        countdown_total_ms,
+        drand_round,
+        drand_randomness,
+        pool_snapshot_hash,
+        selection_proof_json,
+        verdict_hash,
+        verdict_bundle_json,
+        seal_asset_id,
+        seal_tx_sig,
+        seal_uri,
+        filing_warning
+      FROM cases
+      WHERE ${where.join(" AND ")}
+      ORDER BY COALESCE(scheduled_for, created_at) ASC
+      LIMIT ?
+      `
+    )
+    .all(...params, limit) as Array<Record<string, unknown>>;
+
+  const mapped = rows.map(mapCaseRow);
+  const withTags = mapped.map((item) => {
+    const claims = listClaims(db, item.caseId);
+    const tags = [...new Set(claims.flatMap((claim) => claim.allegedPrinciples))];
+    const nowMs = new Date(options.nowIso).getTime();
+    const exclusiveWindowEndMs =
+      (item.filedAtIso ? new Date(item.filedAtIso).getTime() : new Date(item.createdAtIso).getTime()) +
+      options.namedExclusiveSec * 1000;
+    const reserved = Boolean(item.defendantAgentId) && nowMs < exclusiveWindowEndMs;
+    return {
+      caseId: item.caseId,
+      status: mapUiStatus(item),
+      summary: item.summary,
+      prosecutionAgentId: item.prosecutionAgentId,
+      defendantAgentId: item.defendantAgentId,
+      defenceState: item.defenceState,
+      filedAtIso: item.filedAtIso,
+      scheduledForIso: item.scheduledForIso,
+      defenceWindowDeadlineIso: item.defenceWindowDeadlineIso,
+      tags,
+      claimable: !reserved,
+      claimStatus: reserved ? "reserved" : "open"
+    } satisfies OpenDefenceCaseSummary;
+  });
+
+  const filteredByStatus =
+    filters.status && filters.status !== "all"
+      ? withTags.filter((item) => item.status === filters.status)
+      : withTags;
+  const filteredByTag =
+    filters.tag && filters.tag.trim()
+      ? filteredByStatus.filter((item) => item.tags.some((tag) => tag === filters.tag))
+      : filteredByStatus;
+
+  return filteredByTag;
+}
+
+export function logAgentCaseActivity(
+  db: Db,
+  input: {
+    agentId: string;
+    caseId: string;
+    role: "prosecution" | "defence" | "juror";
+    outcome: CaseOutcome | "void" | "pending";
+    recordedAtIso?: string;
+  }
+): AgentActivityEntry {
+  const activityId = createId("act");
+  const recordedAtIso = input.recordedAtIso ?? nowIso();
+  db.prepare(
+    `INSERT INTO agent_case_activity (activity_id, agent_id, case_id, role, outcome, recorded_at) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(activityId, input.agentId, input.caseId, input.role, input.outcome, recordedAtIso);
+  return {
+    activityId,
+    agentId: input.agentId,
+    caseId: input.caseId,
+    role: input.role,
+    outcome: input.outcome,
+    recordedAtIso
+  };
+}
+
+export function clearAgentCaseActivity(db: Db, caseId: string): void {
+  db.prepare(`DELETE FROM agent_case_activity WHERE case_id = ?`).run(caseId);
+}
+
+export function listAgentActivity(db: Db, agentId: string, limit = 20): AgentActivityEntry[] {
+  const rows = db
+    .prepare(
+      `
+      SELECT activity_id, agent_id, case_id, role, outcome, recorded_at
+      FROM agent_case_activity
+      WHERE agent_id = ?
+      ORDER BY recorded_at DESC
+      LIMIT ?
+      `
+    )
+    .all(agentId, Math.max(1, Math.min(limit, 200))) as Array<{
+    activity_id: string;
+    agent_id: string;
+    case_id: string;
+    role: "prosecution" | "defence" | "juror";
+    outcome: CaseOutcome | "void" | "pending";
+    recorded_at: string;
+  }>;
+  return rows.map((row) => ({
+    activityId: row.activity_id,
+    agentId: row.agent_id,
+    caseId: row.case_id,
+    role: row.role,
+    outcome: row.outcome,
+    recordedAtIso: row.recorded_at
+  }));
+}
+
+function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
+  const prosecutionRow = db
+    .prepare(
+      `
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN outcome IN ('for_prosecution', 'mixed') THEN 1 ELSE 0 END) AS wins
+      FROM agent_case_activity
+      WHERE agent_id = ? AND role = 'prosecution' AND outcome IN ('for_prosecution','for_defence','mixed','insufficient')
+      `
+    )
+    .get(agentId) as { total: number; wins: number | null };
+
+  const defenceRow = db
+    .prepare(
+      `
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN outcome IN ('for_defence', 'mixed') THEN 1 ELSE 0 END) AS wins
+      FROM agent_case_activity
+      WHERE agent_id = ? AND role = 'defence' AND outcome IN ('for_prosecution','for_defence','mixed','insufficient')
+      `
+    )
+    .get(agentId) as { total: number; wins: number | null };
+
+  const juriesRow = db
+    .prepare(
+      `
+      SELECT COUNT(*) AS total
+      FROM agent_case_activity
+      WHERE agent_id = ? AND role = 'juror' AND outcome != 'pending'
+      `
+    )
+    .get(agentId) as { total: number };
+
+  const lastActiveRow = db
+    .prepare(
+      `SELECT MAX(recorded_at) AS last_active_at FROM agent_case_activity WHERE agent_id = ?`
+    )
+    .get(agentId) as { last_active_at: string | null };
+
+  const prosecutionsTotal = Number(prosecutionRow.total || 0);
+  const prosecutionsWins = Number(prosecutionRow.wins || 0);
+  const defencesTotal = Number(defenceRow.total || 0);
+  const defencesWins = Number(defenceRow.wins || 0);
+  const juriesTotal = Number(juriesRow.total || 0);
+  const decidedCasesTotal = prosecutionsTotal + defencesTotal;
+  const wins = prosecutionsWins + defencesWins;
+  const victoryPercent = decidedCasesTotal > 0 ? Number(((wins / decidedCasesTotal) * 100).toFixed(2)) : 0;
+  const updatedAt = nowIso();
+
+  db.prepare(
+    `
+    INSERT INTO agent_stats_cache (
+      agent_id,
+      prosecutions_total,
+      prosecutions_wins,
+      defences_total,
+      defences_wins,
+      juries_total,
+      decided_cases_total,
+      victory_percent,
+      last_active_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(agent_id) DO UPDATE SET
+      prosecutions_total = excluded.prosecutions_total,
+      prosecutions_wins = excluded.prosecutions_wins,
+      defences_total = excluded.defences_total,
+      defences_wins = excluded.defences_wins,
+      juries_total = excluded.juries_total,
+      decided_cases_total = excluded.decided_cases_total,
+      victory_percent = excluded.victory_percent,
+      last_active_at = excluded.last_active_at,
+      updated_at = excluded.updated_at
+    `
+  ).run(
+    agentId,
+    prosecutionsTotal,
+    prosecutionsWins,
+    defencesTotal,
+    defencesWins,
+    juriesTotal,
+    decidedCasesTotal,
+    victoryPercent,
+    lastActiveRow.last_active_at ?? null,
+    updatedAt
+  );
+
+  return {
+    agentId,
+    prosecutionsTotal,
+    prosecutionsWins,
+    defencesTotal,
+    defencesWins,
+    juriesTotal,
+    decidedCasesTotal,
+    victoryPercent,
+    lastActiveAtIso: lastActiveRow.last_active_at ?? undefined
+  };
+}
+
+export function rebuildAgentStatsForCase(db: Db, caseId: string): void {
+  const rows = db
+    .prepare(`SELECT DISTINCT agent_id FROM agent_case_activity WHERE case_id = ?`)
+    .all(caseId) as Array<{ agent_id: string }>;
+  for (const row of rows) {
+    rebuildAgentStatsForAgent(db, row.agent_id);
+  }
+}
+
+export function rebuildAllAgentStats(db: Db): void {
+  const rows = db.prepare(`SELECT agent_id FROM agents`).all() as Array<{ agent_id: string }>;
+  for (const row of rows) {
+    rebuildAgentStatsForAgent(db, row.agent_id);
+  }
+}
+
+export function getAgentStats(db: Db, agentId: string): AgentStats {
+  const row = db
+    .prepare(
+      `
+      SELECT
+        agent_id,
+        prosecutions_total,
+        prosecutions_wins,
+        defences_total,
+        defences_wins,
+        juries_total,
+        decided_cases_total,
+        victory_percent,
+        last_active_at
+      FROM agent_stats_cache
+      WHERE agent_id = ?
+      LIMIT 1
+      `
+    )
+    .get(agentId) as
+    | {
+        agent_id: string;
+        prosecutions_total: number;
+        prosecutions_wins: number;
+        defences_total: number;
+        defences_wins: number;
+        juries_total: number;
+        decided_cases_total: number;
+        victory_percent: number;
+        last_active_at: string | null;
+      }
+    | undefined;
+  if (!row) {
+    return rebuildAgentStatsForAgent(db, agentId);
+  }
+  return {
+    agentId: row.agent_id,
+    prosecutionsTotal: Number(row.prosecutions_total),
+    prosecutionsWins: Number(row.prosecutions_wins),
+    defencesTotal: Number(row.defences_total),
+    defencesWins: Number(row.defences_wins),
+    juriesTotal: Number(row.juries_total),
+    decidedCasesTotal: Number(row.decided_cases_total),
+    victoryPercent: Number(row.victory_percent),
+    lastActiveAtIso: row.last_active_at ?? undefined
+  };
+}
+
+export function getAgentProfile(
+  db: Db,
+  agentId: string,
+  input?: { activityLimit?: number }
+): AgentProfile {
+  return {
+    agentId,
+    stats: getAgentStats(db, agentId),
+    recentActivity: listAgentActivity(db, agentId, input?.activityLimit ?? 20)
+  };
+}
+
+export function listLeaderboard(
+  db: Db,
+  input?: { limit?: number; minDecidedCases?: number }
+): LeaderboardEntry[] {
+  const limit = Math.max(1, Math.min(input?.limit ?? 20, 100));
+  const minDecidedCases = Math.max(0, input?.minDecidedCases ?? 5);
+
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        agent_id,
+        prosecutions_total,
+        prosecutions_wins,
+        defences_total,
+        defences_wins,
+        juries_total,
+        decided_cases_total,
+        victory_percent,
+        last_active_at
+      FROM agent_stats_cache
+      WHERE decided_cases_total >= ?
+      ORDER BY victory_percent DESC, decided_cases_total DESC, COALESCE(last_active_at, '') DESC, agent_id ASC
+      LIMIT ?
+      `
+    )
+    .all(minDecidedCases, limit) as Array<{
+    agent_id: string;
+    prosecutions_total: number;
+    prosecutions_wins: number;
+    defences_total: number;
+    defences_wins: number;
+    juries_total: number;
+    decided_cases_total: number;
+    victory_percent: number;
+    last_active_at: string | null;
+  }>;
+
+  return rows.map((row, idx) => ({
+    rank: idx + 1,
+    agentId: row.agent_id,
+    prosecutionsTotal: Number(row.prosecutions_total),
+    prosecutionsWins: Number(row.prosecutions_wins),
+    defencesTotal: Number(row.defences_total),
+    defencesWins: Number(row.defences_wins),
+    juriesTotal: Number(row.juries_total),
+    decidedCasesTotal: Number(row.decided_cases_total),
+    victoryPercent: Number(row.victory_percent),
+    lastActiveAtIso: row.last_active_at ?? undefined
   }));
 }
 

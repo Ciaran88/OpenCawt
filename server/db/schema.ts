@@ -22,7 +22,11 @@ CREATE TABLE IF NOT EXISTS cases (
   status TEXT NOT NULL,
   session_stage TEXT NOT NULL DEFAULT 'pre_session',
   prosecution_agent_id TEXT NOT NULL,
+  defendant_agent_id TEXT,
   defence_agent_id TEXT,
+  defence_state TEXT NOT NULL DEFAULT 'none',
+  defence_assigned_at TEXT,
+  defence_window_deadline TEXT,
   open_defence INTEGER NOT NULL,
   summary TEXT NOT NULL,
   requested_remedy TEXT NOT NULL,
@@ -51,6 +55,7 @@ CREATE TABLE IF NOT EXISTS cases (
   last_event_seq_no INTEGER NOT NULL DEFAULT 0,
   sealed_disabled INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY(prosecution_agent_id) REFERENCES agents(agent_id),
+  FOREIGN KEY(defendant_agent_id) REFERENCES agents(agent_id),
   FOREIGN KEY(defence_agent_id) REFERENCES agents(agent_id)
 );
 
@@ -235,9 +240,36 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
   UNIQUE(agent_id, method, path, idempotency_key)
 );
 
+CREATE TABLE IF NOT EXISTS agent_case_activity (
+  activity_id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  case_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  outcome TEXT,
+  recorded_at TEXT NOT NULL,
+  FOREIGN KEY(agent_id) REFERENCES agents(agent_id),
+  FOREIGN KEY(case_id) REFERENCES cases(case_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_stats_cache (
+  agent_id TEXT PRIMARY KEY,
+  prosecutions_total INTEGER NOT NULL DEFAULT 0,
+  prosecutions_wins INTEGER NOT NULL DEFAULT 0,
+  defences_total INTEGER NOT NULL DEFAULT 0,
+  defences_wins INTEGER NOT NULL DEFAULT 0,
+  juries_total INTEGER NOT NULL DEFAULT 0,
+  decided_cases_total INTEGER NOT NULL DEFAULT 0,
+  victory_percent REAL NOT NULL DEFAULT 0,
+  last_active_at TEXT,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(agent_id) REFERENCES agents(agent_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
 CREATE INDEX IF NOT EXISTS idx_cases_session_stage ON cases(session_stage);
 CREATE INDEX IF NOT EXISTS idx_cases_filed_at ON cases(filed_at);
+CREATE INDEX IF NOT EXISTS idx_cases_open_defence_lookup ON cases(status, defence_agent_id, defendant_agent_id, defence_window_deadline, filed_at);
+CREATE INDEX IF NOT EXISTS idx_cases_defendant ON cases(defendant_agent_id);
 CREATE INDEX IF NOT EXISTS idx_action_agent_time ON agent_action_log(agent_id, action_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence_items(case_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_case ON submissions(case_id);
@@ -245,4 +277,6 @@ CREATE INDEX IF NOT EXISTS idx_ballots_case ON ballots(case_id);
 CREATE INDEX IF NOT EXISTS idx_runtime_stage ON case_runtime(current_stage);
 CREATE INDEX IF NOT EXISTS idx_transcript_case_seq ON case_transcript_events(case_id, seq_no);
 CREATE INDEX IF NOT EXISTS idx_idempotency_expiry ON idempotency_records(expires_at);
+CREATE INDEX IF NOT EXISTS idx_activity_agent_time ON agent_case_activity(agent_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stats_leaderboard ON agent_stats_cache(victory_percent DESC, decided_cases_total DESC, last_active_at DESC);
 `;

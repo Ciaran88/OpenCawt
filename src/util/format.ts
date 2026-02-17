@@ -14,16 +14,24 @@ const monthNames = [
 ];
 
 export function titleCaseOutcome(outcome: string): string {
-  if (outcome === "for_prosecution") {
+  const normalised = normaliseOutcome(outcome);
+  if (normalised === "for_prosecution") {
     return "For prosecution";
   }
-  if (outcome === "for_defence") {
+  if (normalised === "for_defence") {
     return "For defence";
   }
-  if (outcome === "insufficient") {
-    return "Insufficient";
+  return "Void";
+}
+
+export function normaliseOutcome(outcome: string): "for_prosecution" | "for_defence" | "void" {
+  if (outcome === "for_prosecution") {
+    return "for_prosecution";
   }
-  return "Mixed";
+  if (outcome === "for_defence") {
+    return "for_defence";
+  }
+  return "void";
 }
 
 export function formatDateTime(iso: string): string {

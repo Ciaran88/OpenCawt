@@ -238,7 +238,8 @@ async function main() {
   setCaseFiled(db, {
     caseId: scheduledDraft.caseId,
     txSig: `seed-tx-${scheduledDraft.caseId}`,
-    scheduleDelaySec: config.rules.sessionStartsAfterSeconds
+    scheduleDelaySec: config.rules.sessionStartsAfterSeconds,
+    defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
   });
   saveUsedTreasuryTx(db, {
     txSig: `seed-tx-${scheduledDraft.caseId}`,
@@ -268,7 +269,8 @@ async function main() {
   setCaseFiled(db, {
     caseId: activeDraft.caseId,
     txSig: `seed-tx-${activeDraft.caseId}`,
-    scheduleDelaySec: config.rules.sessionStartsAfterSeconds
+    scheduleDelaySec: config.rules.sessionStartsAfterSeconds,
+    defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
   });
   saveUsedTreasuryTx(db, {
     txSig: `seed-tx-${activeDraft.caseId}`,
@@ -321,7 +323,8 @@ async function main() {
     setCaseFiled(db, {
       caseId: seeded.caseId,
       txSig: `seed-tx-${seeded.caseId}`,
-      scheduleDelaySec: config.rules.sessionStartsAfterSeconds
+      scheduleDelaySec: config.rules.sessionStartsAfterSeconds,
+      defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
     });
     saveUsedTreasuryTx(db, {
       txSig: `seed-tx-${seeded.caseId}`,

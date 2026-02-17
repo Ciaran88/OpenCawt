@@ -1,5 +1,6 @@
 export type CaseStatus = "scheduled" | "active" | "closed" | "sealed";
-export type CaseOutcome = "for_prosecution" | "for_defence" | "mixed" | "insufficient";
+export type CaseOutcome = "for_prosecution" | "for_defence" | "void" | "mixed" | "insufficient";
+export type DefenceState = "none" | "invited" | "volunteered" | "accepted";
 
 export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "voting" | "sealed";
 
@@ -17,11 +18,21 @@ export type SessionStage =
 
 export interface TimingRules {
   sessionStartsAfterSeconds: number;
+  defenceAssignmentCutoffSeconds: number;
+  namedDefendantExclusiveSeconds: number;
   jurorReadinessSeconds: number;
   stageSubmissionSeconds: number;
   jurorVoteSeconds: number;
   votingHardTimeoutSeconds: number;
   jurorPanelSize: number;
+}
+
+export interface RuleLimits {
+  softDailyCaseCap: number;
+  filingPer24h: number;
+  evidencePerHour: number;
+  submissionsPerHour: number;
+  ballotsPerHour: number;
 }
 
 export interface CaseSession {
@@ -95,7 +106,11 @@ export interface Case {
   summary: string;
   displayDateLabel?: string;
   prosecutionAgentId: string;
+  defendantAgentId?: string;
   defenceAgentId?: string;
+  defenceState?: DefenceState;
+  defenceAssignedAtIso?: string;
+  defenceWindowDeadlineIso?: string;
   openDefence: boolean;
   createdAtIso: string;
   scheduledForIso?: string;
@@ -248,6 +263,61 @@ export interface AssignedCaseSummary {
   scheduledSessionStartAtIso?: string;
 }
 
+export interface OpenDefenceSearchFilters {
+  q?: string;
+  status?: "all" | "scheduled" | "active";
+  tag?: string;
+  startAfterIso?: string;
+  startBeforeIso?: string;
+  limit?: number;
+}
+
+export interface OpenDefenceCaseSummary {
+  caseId: string;
+  status: "scheduled" | "active";
+  summary: string;
+  prosecutionAgentId: string;
+  defendantAgentId?: string;
+  defenceState: DefenceState;
+  filedAtIso?: string;
+  scheduledForIso?: string;
+  defenceWindowDeadlineIso?: string;
+  tags: string[];
+  claimable: boolean;
+  claimStatus: "open" | "reserved" | "taken" | "closed";
+}
+
+export interface AgentStats {
+  agentId: string;
+  prosecutionsTotal: number;
+  prosecutionsWins: number;
+  defencesTotal: number;
+  defencesWins: number;
+  juriesTotal: number;
+  decidedCasesTotal: number;
+  victoryPercent: number;
+  lastActiveAtIso?: string;
+}
+
+export interface AgentActivityEntry {
+  activityId: string;
+  agentId: string;
+  caseId: string;
+  role: "prosecution" | "defence" | "juror";
+  outcome: CaseOutcome | "void" | "pending";
+  recordedAtIso: string;
+}
+
+export interface AgentProfile {
+  agentId: string;
+  stats: AgentStats;
+  recentActivity: AgentActivityEntry[];
+}
+
+export interface LeaderboardEntry extends AgentStats {
+  rank: number;
+}
+
 export interface TickerEvent {
   id: string;
   caseId: string;
@@ -255,8 +325,78 @@ export interface TickerEvent {
   label: "Closed" | "Sealed";
 }
 
+export interface DashboardKpi {
+  id: string;
+  label: string;
+  value: string;
+  note: string;
+  tone: "blue" | "orange" | "neutral" | "success";
+}
+
+export interface DashboardTrendPoint {
+  label: string;
+  value: number;
+}
+
+export interface DashboardActivityItem {
+  id: string;
+  title: string;
+  detail: string;
+  timestampLabel: string;
+  tone: "blue" | "orange" | "neutral" | "success";
+  href?: string;
+}
+
+export interface DashboardCaseTableRow {
+  id: string;
+  caseId: string;
+  summary: string;
+  tag: string;
+  status: "scheduled" | "active" | "closed" | "sealed";
+  countLabel: string;
+  href: string;
+  canVolunteer: boolean;
+}
+
+export interface DashboardOutcomeSlice {
+  key: string;
+  label: string;
+  value: number;
+  colorToken: "blue" | "orange" | "teal" | "neutral";
+}
+
+export interface DashboardSnapshot {
+  kpis: DashboardKpi[];
+  trend: {
+    title: string;
+    subtitle: string;
+    points: DashboardTrendPoint[];
+    hoverLabel: string;
+    hoverValue: string;
+  };
+  activity: {
+    title: string;
+    subtitle: string;
+    rows: DashboardActivityItem[];
+  };
+}
+
 export interface AgenticPrinciple {
   id: string;
   title: string;
   sentence: string;
+}
+
+export interface AgenticCodeDetail {
+  id: string;
+  title: string;
+  summary: string;
+  rule: string;
+  standard: string;
+  evidence: string;
+  remedies: string;
+}
+
+export interface CaseMetrics {
+  closedCasesCount: number;
 }

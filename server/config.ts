@@ -109,9 +109,11 @@ function optionalStringEnv(name: string): string | undefined {
 
 export function getConfig(): AppConfig {
   loadEnvFile();
+  const port = process.env.PORT ? Number(process.env.PORT) : numberEnv("API_PORT", 8787);
+  const host = process.env.PORT ? "0.0.0.0" : stringEnv("API_HOST", "127.0.0.1");
   return {
-    apiHost: stringEnv("API_HOST", "127.0.0.1"),
-    apiPort: numberEnv("API_PORT", 8787),
+    apiHost: host,
+    apiPort: port,
     corsOrigin: stringEnv("CORS_ORIGIN", "http://127.0.0.1:5173"),
     dbPath: stringEnv("DB_PATH", "./runtime/opencawt.sqlite"),
     signatureSkewSec: numberEnv("SIGNATURE_SKEW_SEC", 300),
@@ -133,6 +135,8 @@ export function getConfig(): AppConfig {
     heliusWebhookToken: optionalStringEnv("HELIUS_WEBHOOK_TOKEN"),
     rules: {
       sessionStartsAfterSeconds: numberEnv("RULE_SESSION_START_DELAY_SEC", 3600),
+      defenceAssignmentCutoffSeconds: numberEnv("RULE_DEFENCE_ASSIGNMENT_CUTOFF_SEC", 2700),
+      namedDefendantExclusiveSeconds: numberEnv("RULE_NAMED_DEFENDANT_EXCLUSIVE_SEC", 900),
       jurorReadinessSeconds: numberEnv("RULE_JUROR_READINESS_SEC", 60),
       stageSubmissionSeconds: numberEnv("RULE_STAGE_SUBMISSION_SEC", 1800),
       jurorVoteSeconds: numberEnv("RULE_JUROR_VOTE_SEC", 900),

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
 import { canonicalJson } from "../shared/canonicalJson";
 import { encodeBase58 } from "../shared/base58";
 import { canonicalHashHex } from "../shared/hash";
@@ -10,15 +11,25 @@ import { getConfig } from "../server/config";
 import { openDatabase, resetDatabase } from "../server/db/sqlite";
 import {
   appendTranscriptEvent,
+  claimDefenceAssignment,
+  clearAgentCaseActivity,
   createCaseDraft,
+  getCaseById,
   getCaseRuntime,
+  getAgentProfile,
   getIdempotencyRecord,
   isTreasuryTxUsed,
+  listLeaderboard,
+  listOpenDefenceCases,
+  logAgentCaseActivity,
+  rebuildAllAgentStats,
   saveIdempotencyRecord,
   saveUsedTreasuryTx,
   setCaseFiled,
   upsertAgent
 } from "../server/db/repository";
+import { createSessionEngine } from "../server/services/sessionEngine";
+import { createDrandClient } from "../server/services/drand";
 import {
   computeCountdownState,
   computeRingDashOffset,
@@ -49,9 +60,11 @@ function testRouteParsing() {
     name: "decision",
     id: "OC-26-0214-R91"
   });
+  assert.deepEqual(parseRoute("/agent/agent_abc"), { name: "agent", id: "agent_abc" });
   assert.deepEqual(parseRoute("/unknown"), { name: "schedule" });
   assert.equal(routeToPath({ name: "about" }), "/about");
   assert.equal(routeToPath({ name: "case", id: "OC-26-0217-A11" }), "/case/OC-26-0217-A11");
+  assert.equal(routeToPath({ name: "agent", id: "agent_abc" }), "/agent/agent_abc");
 }
 
 async function testCanonicalHashing() {
@@ -176,6 +189,7 @@ async function testVerdictDeterminism() {
 function testTreasuryReplayPrevention() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase4_test.sqlite";
+  rmSync(config.dbPath, { force: true });
   const db = openDatabase(config);
   resetDatabase(db);
 
@@ -201,6 +215,7 @@ function testTreasuryReplayPrevention() {
 function testCaseRuntimeInitialisation() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase4_runtime_test.sqlite";
+  rmSync(config.dbPath, { force: true });
   const db = openDatabase(config);
   resetDatabase(db);
 
@@ -215,7 +230,8 @@ function testCaseRuntimeInitialisation() {
   setCaseFiled(db, {
     caseId: seededCase.caseId,
     txSig: "tx-runtime-1",
-    scheduleDelaySec: 3600
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
   });
 
   const runtime = getCaseRuntime(db, seededCase.caseId);
@@ -229,6 +245,7 @@ function testCaseRuntimeInitialisation() {
 function testTranscriptSequence() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase4_transcript_test.sqlite";
+  rmSync(config.dbPath, { force: true });
   const db = openDatabase(config);
   resetDatabase(db);
 
@@ -261,6 +278,7 @@ function testTranscriptSequence() {
 function testIdempotencyRecordStorage() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase4_idempotency_test.sqlite";
+  rmSync(config.dbPath, { force: true });
   const db = openDatabase(config);
   resetDatabase(db);
 
@@ -289,6 +307,315 @@ function testIdempotencyRecordStorage() {
   db.close();
 }
 
+function testDefenceClaimRace() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_race_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-prosecution", true);
+  upsertAgent(db, "agent-def-1", true);
+  upsertAgent(db, "agent-def-2", true);
+  const draft = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    openDefence: true,
+    claimSummary: "Race claim.",
+    requestedRemedy: "warn"
+  });
+
+  setCaseFiled(db, {
+    caseId: draft.caseId,
+    txSig: "tx-race-1",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
+  });
+
+  const now = new Date().toISOString();
+  const first = claimDefenceAssignment(db, {
+    caseId: draft.caseId,
+    agentId: "agent-def-1",
+    nowIso: now,
+    namedExclusiveSec: 900
+  });
+  const second = claimDefenceAssignment(db, {
+    caseId: draft.caseId,
+    agentId: "agent-def-2",
+    nowIso: now,
+    namedExclusiveSec: 900
+  });
+
+  assert.equal(first.status, "assigned_volunteered");
+  assert.equal(second.status, "already_taken");
+  assert.equal(getCaseById(db, draft.caseId)?.defenceAgentId, "agent-def-1");
+  db.close();
+}
+
+function testNamedDefendantExclusivity() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_exclusive_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-prosecution", true);
+  upsertAgent(db, "agent-named", true);
+  upsertAgent(db, "agent-other", true);
+
+  const draftA = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    defendantAgentId: "agent-named",
+    openDefence: false,
+    claimSummary: "Named window claim A.",
+    requestedRemedy: "warn"
+  });
+  setCaseFiled(db, {
+    caseId: draftA.caseId,
+    txSig: "tx-exclusive-a",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
+  });
+  const filedA = getCaseById(db, draftA.caseId);
+  assert.ok(filedA?.filedAtIso);
+  const inWindow = new Date(new Date(filedA!.filedAtIso!).getTime() + 5 * 60 * 1000).toISOString();
+  const reserved = claimDefenceAssignment(db, {
+    caseId: draftA.caseId,
+    agentId: "agent-other",
+    nowIso: inWindow,
+    namedExclusiveSec: 900
+  });
+  assert.equal(reserved.status, "reserved_for_named_defendant");
+  const accepted = claimDefenceAssignment(db, {
+    caseId: draftA.caseId,
+    agentId: "agent-named",
+    nowIso: inWindow,
+    namedExclusiveSec: 900
+  });
+  assert.equal(accepted.status, "assigned_accepted");
+
+  const draftB = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    defendantAgentId: "agent-named",
+    openDefence: false,
+    claimSummary: "Named window claim B.",
+    requestedRemedy: "warn"
+  });
+  setCaseFiled(db, {
+    caseId: draftB.caseId,
+    txSig: "tx-exclusive-b",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
+  });
+  const filedB = getCaseById(db, draftB.caseId);
+  assert.ok(filedB?.filedAtIso);
+  const afterWindow = new Date(new Date(filedB!.filedAtIso!).getTime() + 16 * 60 * 1000).toISOString();
+  const volunteer = claimDefenceAssignment(db, {
+    caseId: draftB.caseId,
+    agentId: "agent-other",
+    nowIso: afterWindow,
+    namedExclusiveSec: 900
+  });
+  assert.equal(volunteer.status, "assigned_volunteered");
+
+  db.close();
+}
+
+async function testDefenceCutoffVoiding() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_cutoff_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-prosecution", true);
+  const draft = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    openDefence: true,
+    claimSummary: "Cutoff void claim.",
+    requestedRemedy: "warn"
+  });
+  setCaseFiled(db, {
+    caseId: draft.caseId,
+    txSig: "tx-cutoff",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
+  });
+
+  db.prepare(`UPDATE cases SET defence_window_deadline = ? WHERE case_id = ?`).run(
+    new Date(Date.now() - 60 * 1000).toISOString(),
+    draft.caseId
+  );
+
+  const engine = createSessionEngine({
+    db,
+    config,
+    drand: {
+      async getRoundAtOrAfter() {
+        return {
+          round: 1,
+          randomness: "stub",
+          chainInfo: {}
+        };
+      }
+    },
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined
+    } as any,
+    async onCaseReadyToClose() {
+      return;
+    }
+  });
+
+  await engine.tickNow();
+  const updated = getCaseById(db, draft.caseId);
+  assert.equal(updated?.status, "void");
+  assert.equal(updated?.voidReason, "missing_defence_assignment");
+  db.close();
+}
+
+function testVictoryScoreAndLeaderboard() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_leaderboard_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  const agents = ["agent-a", "agent-b", "agent-c"];
+  for (const agent of agents) {
+    upsertAgent(db, agent, true);
+  }
+
+  const caseIds: string[] = [];
+  for (let i = 0; i < 6; i += 1) {
+    const draft = createCaseDraft(db, {
+      prosecutionAgentId: "agent-a",
+      defendantAgentId: "agent-b",
+      openDefence: false,
+      claimSummary: `Stats case ${i}.`,
+      requestedRemedy: "warn"
+    });
+    caseIds.push(draft.caseId);
+  }
+
+  clearAgentCaseActivity(db, caseIds[0]);
+  for (let i = 0; i < caseIds.length; i += 1) {
+    const outcome = i < 4 ? "for_prosecution" : i === 4 ? "for_defence" : "mixed";
+    logAgentCaseActivity(db, {
+      agentId: "agent-a",
+      caseId: caseIds[i],
+      role: "prosecution",
+      outcome
+    });
+    logAgentCaseActivity(db, {
+      agentId: "agent-b",
+      caseId: caseIds[i],
+      role: "defence",
+      outcome
+    });
+    logAgentCaseActivity(db, {
+      agentId: "agent-c",
+      caseId: caseIds[i],
+      role: "juror",
+      outcome
+    });
+  }
+
+  rebuildAllAgentStats(db);
+  const leaderboard = listLeaderboard(db, {
+    limit: 20,
+    minDecidedCases: 5
+  });
+  assert.ok(leaderboard.length >= 2);
+  assert.equal(leaderboard[0].agentId, "agent-a");
+  assert.equal(leaderboard[0].decidedCasesTotal, 6);
+  assert.ok(leaderboard[0].victoryPercent > leaderboard[1].victoryPercent);
+
+  const profile = getAgentProfile(db, "agent-a", { activityLimit: 10 });
+  assert.equal(profile.stats.prosecutionsTotal, 6);
+  assert.equal(profile.stats.prosecutionsWins, 5);
+  assert.equal(profile.stats.defencesTotal, 0);
+  assert.equal(profile.recentActivity.length, 6);
+
+  db.close();
+}
+
+function testOpenDefenceQuery() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_open_defence_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-prosecution", true);
+  upsertAgent(db, "agent-named", true);
+
+  const openCase = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    openDefence: true,
+    claimSummary: "Open defence case summary.",
+    requestedRemedy: "warn",
+    allegedPrinciples: ["P2", "P8"]
+  });
+  setCaseFiled(db, {
+    caseId: openCase.caseId,
+    txSig: "tx-open",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
+  });
+
+  const reservedCase = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    defendantAgentId: "agent-named",
+    openDefence: false,
+    claimSummary: "Reserved case summary.",
+    requestedRemedy: "warn",
+    allegedPrinciples: ["P7"]
+  });
+  setCaseFiled(db, {
+    caseId: reservedCase.caseId,
+    txSig: "tx-reserved",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
+  });
+
+  const results = listOpenDefenceCases(
+    db,
+    { q: "summary", status: "all", tag: "P2", limit: 50 },
+    { nowIso: new Date().toISOString(), namedExclusiveSec: 900 }
+  );
+
+  assert.ok(results.some((item) => item.caseId === openCase.caseId));
+  assert.ok(results.every((item) => item.tags.includes("P2")));
+  assert.ok(!results.some((item) => item.caseId === reservedCase.caseId));
+
+  const broadResults = listOpenDefenceCases(
+    db,
+    { q: "summary", status: "all", limit: 50 },
+    { nowIso: new Date().toISOString(), namedExclusiveSec: 900 }
+  );
+  const reserved = broadResults.find((item) => item.caseId === reservedCase.caseId);
+  assert.ok(reserved);
+  assert.equal(reserved?.claimStatus, "reserved");
+  assert.equal(reserved?.claimable, false);
+
+  db.close();
+}
+
+async function testDrandHttpIntegration() {
+  const config = getConfig();
+  if (config.drandMode !== "http") {
+    return;
+  }
+  const client = createDrandClient(config);
+  const result = await client.getRoundAtOrAfter(Date.now());
+  assert.ok(typeof result.round === "number" && result.round >= 1);
+  assert.ok(typeof result.randomness === "string" && result.randomness.length >= 32);
+  assert.ok(result.chainInfo);
+}
+
 async function run() {
   await testCountdownMaths();
   testRouteParsing();
@@ -300,6 +627,12 @@ async function run() {
   testCaseRuntimeInitialisation();
   testTranscriptSequence();
   testIdempotencyRecordStorage();
+  testDefenceClaimRace();
+  testNamedDefendantExclusivity();
+  await testDefenceCutoffVoiding();
+  testVictoryScoreAndLeaderboard();
+  testOpenDefenceQuery();
+  await testDrandHttpIntegration();
   process.stdout.write("All tests passed\n");
 }
 

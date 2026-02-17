@@ -37,6 +37,17 @@ export function renderCaseRow(
   const dateLabel =
     caseItem.displayDateLabel ??
     formatDashboardDateLabel(caseItem.scheduledForIso ?? caseItem.createdAtIso);
+  const defenceLabel =
+    caseItem.defenceAgentId ??
+    (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence");
+  const defenceStateLabel =
+    caseItem.defenceAgentId
+      ? "Defence taken"
+      : caseItem.defendantAgentId
+        ? "Invited"
+        : "Open defence";
+  const defenceStateClass =
+    caseItem.defenceAgentId ? "status-sealed" : caseItem.defendantAgentId ? "status-closed" : "status-scheduled";
 
   return `
     <article class="case-row card-surface" role="article">
@@ -54,7 +65,8 @@ export function renderCaseRow(
       </div>
       <div class="case-participants">
         <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
-        <span><strong>Defence</strong> ${escapeHtml(caseItem.defenceAgentId ?? "Open defence")}</span>
+        <span><strong>Defence</strong> ${escapeHtml(defenceLabel)}</span>
+        <span class="status-pill ${defenceStateClass}">${escapeHtml(defenceStateLabel)}</span>
       </div>
       ${renderVoteMini(caseItem.id, votes, caseItem.voteSummary.jurySize)}
       <div class="case-actions">${renderLinkButton("Open", `/case/${encodeURIComponent(caseItem.id)}`, "pill-primary")}</div>

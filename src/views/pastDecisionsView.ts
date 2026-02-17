@@ -3,7 +3,7 @@ import { renderLinkButton } from "../components/button";
 import { renderSegmentedControl } from "../components/segmentedControl";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
 import type { Decision } from "../data/types";
-import { formatDashboardDateLabel, titleCaseOutcome } from "../util/format";
+import { formatDashboardDateLabel, normaliseOutcome, titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
@@ -13,7 +13,8 @@ function applyDecisionFilters(state: AppState): Decision[] {
 
   return state.decisions
     .filter((decision) => {
-      if (outcome !== "all" && decision.outcome !== outcome) {
+      const normalisedOutcome = normaliseOutcome(decision.outcome);
+      if (outcome !== "all" && normalisedOutcome !== outcome) {
         return false;
       }
       if (!query) {
@@ -45,7 +46,7 @@ export function renderPastDecisionsView(state: AppState): string {
           { value: "all", label: "All" },
           { value: "for_prosecution", label: "For prosecution" },
           { value: "for_defence", label: "For defence" },
-          { value: "mixed", label: "Mixed" }
+          { value: "void", label: "Void" }
         ]
       })}
       <p class="toolbar-note">${rows.length} decisions shown</p>
@@ -55,6 +56,7 @@ export function renderPastDecisionsView(state: AppState): string {
   const list = rows
     .map((decision) => {
       const dateLabel = decision.displayDateLabel ?? formatDashboardDateLabel(decision.closedAtIso);
+      const normalisedOutcome = normaliseOutcome(decision.outcome);
       return `
         <article class="decision-row card-surface" role="article">
           <div>
@@ -63,7 +65,7 @@ export function renderPastDecisionsView(state: AppState): string {
             <small>${escapeHtml(dateLabel)}</small>
           </div>
           <div class="decision-statuses">
-            ${renderStatusPill(titleCaseOutcome(decision.outcome), statusFromOutcome(decision.outcome))}
+            ${renderStatusPill(titleCaseOutcome(normalisedOutcome), statusFromOutcome(normalisedOutcome))}
             ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
           </div>
           <div class="decision-actions">

@@ -32,6 +32,15 @@ Jury and verdict functions are deterministic and testable in isolation:
 - claim tally and outcome computation with stable tie behaviour
 - verdict bundle hashing
 
+## Entry points and validation (security audit)
+
+Server-side validation on write endpoints:
+
+- **Defence self-assignment**: Prosecution cannot assign themselves or volunteer as defence for their own case. `claimDefenceAssignment` returns `defence_cannot_be_prosecution`; both volunteer-defence and defence-assign handlers honour it.
+- **Evidence stage**: Evidence accepted during draft (prosecution only) or during `evidence` session stage when case is `filed` / `jury_selected` / `voting`.
+- **Ballot validation**: Each vote validates `finding`, `severity` (1–3), and `recommendedRemedy`; invalid enums rejected with `badRequest`.
+- **Evidence kind**: `body.kind` must be one of `["log","transcript","code","link","attestation","other"]`.
+
 ## Integration path to Go API and Solana mint worker
 
 The current backend intentionally isolates external providers behind interfaces:

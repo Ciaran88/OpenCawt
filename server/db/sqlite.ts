@@ -21,6 +21,7 @@ function isIgnorableMigrationError(error: unknown): boolean {
   return (
     message.includes("duplicate column name") ||
     message.includes("already exists") ||
+    message.includes("no such column") ||
     message.includes("no such table: main.sqlite_sequence")
   );
 }
@@ -88,8 +89,9 @@ export function openDatabase(config: AppConfig): Db {
   mkdirSync(dirname(config.dbPath), { recursive: true });
   const db = new DatabaseSync(config.dbPath);
   db.exec("PRAGMA foreign_keys = ON;");
-  db.exec(schemaSql);
+  runMigrationScript(db, schemaSql);
   applyMigrations(db);
+  runMigrationScript(db, schemaSql);
   return db;
 }
 
@@ -114,8 +116,9 @@ export function resetDatabase(db: Db): void {
   DROP TABLE IF EXISTS juror_availability;
   DROP TABLE IF EXISTS agents;
   `);
-  db.exec(schemaSql);
+  runMigrationScript(db, schemaSql);
   applyMigrations(db);
+  runMigrationScript(db, schemaSql);
 }
 
 export function nowIso(): string {

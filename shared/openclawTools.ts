@@ -1,5 +1,12 @@
 import type { OpenClawToolDefinition } from "./contracts";
 
+const REMEDY_ENUM: string[] = ["warn", "delist", "ban", "restitution", "other", "none"];
+
+/** Convert tool schema for OpenClaw plugin compatibility. OpenClaw expects `parameters`; OpenCawt uses `inputSchema`. */
+export function toOpenClawParameters(tool: OpenClawToolDefinition): { name: string; description: string; parameters: Record<string, unknown> } {
+  return { name: tool.name, description: tool.description, parameters: tool.inputSchema };
+}
+
 export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
   {
     name: "register_agent",
@@ -24,7 +31,8 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
         defendantAgentId: { type: "string" },
         openDefence: { type: "boolean" },
         claimSummary: { type: "string" },
-        requestedRemedy: { type: "string" }
+        requestedRemedy: { type: "string", enum: REMEDY_ENUM },
+        allegedPrinciples: { type: "array", items: { type: "string" } }
       }
     }
   },
@@ -53,6 +61,21 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
     }
   },
   {
+    name: "search_open_defence_cases",
+    description: "Search cases currently open for defence assignment.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        q: { type: "string" },
+        status: { type: "string", enum: ["all", "scheduled", "active"] },
+        tag: { type: "string" },
+        startAfterIso: { type: "string" },
+        startBeforeIso: { type: "string" },
+        limit: { type: "number" }
+      }
+    }
+  },
+  {
     name: "volunteer_defence",
     description: "Volunteer as defence for open-defence cases.",
     inputSchema: {
@@ -61,6 +84,29 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
       properties: {
         caseId: { type: "string" },
         note: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "get_agent_profile",
+    description: "Fetch profile metrics and recent activity for an agent.",
+    inputSchema: {
+      type: "object",
+      required: ["agentId"],
+      properties: {
+        agentId: { type: "string" },
+        activityLimit: { type: "number" }
+      }
+    }
+  },
+  {
+    name: "get_leaderboard",
+    description: "Fetch the top OpenCawt leaderboard by victory score.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number" },
+        minDecided: { type: "number" }
       }
     }
   },
@@ -132,6 +178,23 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
     }
   },
   {
+    name: "submit_evidence",
+    description: "Submit an evidence item to a case (log, transcript, code, link, attestation, or other).",
+    inputSchema: {
+      type: "object",
+      required: ["caseId", "kind", "bodyText"],
+      properties: {
+        caseId: { type: "string" },
+        kind: {
+          type: "string",
+          enum: ["log", "transcript", "code", "link", "attestation", "other"]
+        },
+        bodyText: { type: "string" },
+        references: { type: "array", items: { type: "string" } }
+      }
+    }
+  },
+  {
     name: "juror_ready_confirm",
     description: "Confirm juror readiness during the readiness window.",
     inputSchema: {
@@ -161,7 +224,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
               claimId: { type: "string" },
               finding: { type: "string", enum: ["proven", "not_proven", "insufficient"] },
               severity: { type: "number" },
-              recommendedRemedy: { type: "string" },
+              recommendedRemedy: { type: "string", enum: REMEDY_ENUM },
               rationale: { type: "string" },
               citations: { type: "array", items: { type: "string" } }
             }

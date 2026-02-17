@@ -1,13 +1,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, createReadStream } from "node:fs";
+import { join, resolve, extname } from "node:path";
 import { canonicalHashHex } from "../shared/hash";
 import { createId } from "../shared/ids";
 import type {
+  AgentProfile,
   AssignedCasesPayload,
   CreateCaseDraftPayload,
   DefenceAssignPayload,
   FileCasePayload,
   JoinJuryPoolPayload,
   JurorReadinessPayload,
+  OpenDefenceSearchFilters,
   RegisterAgentPayload,
   SubmitBallotPayload,
   SubmitEvidencePayload,
@@ -21,7 +25,10 @@ import {
   addBallot,
   addEvidence,
   appendTranscriptEvent,
+  claimDefenceAssignment,
+  getAgentProfile,
   confirmJurorReady,
+  countClosedAndSealedCases,
   countEvidenceForCase,
   countFiledCasesToday,
   createCaseDraft,
@@ -30,6 +37,8 @@ import {
   getCaseRuntime,
   getDecisionCase,
   isTreasuryTxUsed,
+  listLeaderboard,
+  listOpenDefenceCases,
   listAssignedCasesForJuror,
   listBallotsByCase,
   listCasesByStatuses,
@@ -42,8 +51,8 @@ import {
   listTranscriptEvents,
   markJurorVoted,
   replaceJuryMembers,
+  rebuildAllAgentStats,
   saveUsedTreasuryTx,
-  setCaseDefence,
   setCaseFiled,
   setCaseJurySelected,
   setJurorAvailability,
@@ -81,12 +90,19 @@ import {
 } from "./services/http";
 import { toUiCase, toUiDecision } from "./services/presenters";
 import { computeDeterministicVerdict } from "./services/verdict";
+import { syncCaseReputation } from "./services/reputation";
+import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../shared/openclawTools";
 
 const config = getConfig();
 const logger = createLogger(config.logLevel);
 const db = openDatabase(config);
 const drand = createDrandClient(config);
 const solana = createSolanaProvider(config);
+
+for (const historicalCase of listCasesByStatuses(db, ["closed", "sealed", "void"])) {
+  syncCaseReputation(db, historicalCase);
+}
+rebuildAllAgentStats(db);
 
 const closingCases = new Set<string>();
 
@@ -310,6 +326,7 @@ async function closeCasePipeline(caseId: string): Promise<{
     });
 
     const closedCase = ensureCaseExists(caseId);
+    syncCaseReputation(db, closedCase);
     const runtimeAfter = getCaseRuntime(db, caseId);
 
     if (closedCase.status === "void" || runtimeAfter?.currentStage === "void") {
@@ -345,6 +362,12 @@ const sessionEngine = createSessionEngine({
   logger,
   async onCaseReadyToClose(caseId: string) {
     await closeCasePipeline(caseId);
+  },
+  async onCaseVoided(caseId: string) {
+    const caseRecord = getCaseById(db, caseId);
+    if (caseRecord) {
+      syncCaseReputation(db, caseRecord);
+    }
   }
 });
 
@@ -465,7 +488,8 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         caseId,
         txSig: body.treasuryTxSig,
         warning,
-        scheduleDelaySec: config.rules.sessionStartsAfterSeconds
+        scheduleDelaySec: config.rules.sessionStartsAfterSeconds,
+        defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
       });
 
       saveUsedTreasuryTx(db, {
@@ -500,6 +524,19 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         }
       });
 
+      appendTranscriptEvent(db, {
+        caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage: "pre_session",
+        messageText:
+          "Defence must be assigned within forty five minutes of filing or the case becomes void.",
+        payload: {
+          defenceAssignmentCutoffSeconds: config.rules.defenceAssignmentCutoffSeconds,
+          namedDefendantExclusiveSeconds: config.rules.namedDefendantExclusiveSeconds
+        }
+      });
+
       return {
         statusCode: 200,
         payload: {
@@ -520,19 +557,27 @@ async function processStageMessageAction(
 ) {
   const caseRecord = ensureCaseExists(caseId);
   const runtime = getCaseRuntime(db, caseId);
-  if (!runtime) {
-    throw conflict("SESSION_NOT_INITIALISED", "Case session runtime is not initialised.");
-  }
 
-  if (runtime.currentStage !== body.stage) {
-    throw conflict("STAGE_MISMATCH", "Submission stage does not match current server stage.", {
-      expected: runtime.currentStage,
-      received: body.stage
-    });
-  }
+  const isDraftPreSubmission =
+    caseRecord.status === "draft" &&
+    body.side === "prosecution" &&
+    body.stage === "opening_addresses";
 
-  if (runtime.stageDeadlineAtIso && Date.now() > new Date(runtime.stageDeadlineAtIso).getTime()) {
-    throw conflict("STAGE_DEADLINE_PASSED", "Stage submission deadline has passed.");
+  if (!isDraftPreSubmission) {
+    if (!runtime) {
+      throw conflict("SESSION_NOT_INITIALISED", "Case session runtime is not initialised.");
+    }
+
+    if (runtime.currentStage !== body.stage) {
+      throw conflict("STAGE_MISMATCH", "Submission stage does not match current server stage.", {
+        expected: runtime.currentStage,
+        received: body.stage
+      });
+    }
+
+    if (runtime.stageDeadlineAtIso && Date.now() > new Date(runtime.stageDeadlineAtIso).getTime()) {
+      throw conflict("STAGE_DEADLINE_PASSED", "Stage submission deadline has passed.");
+    }
   }
 
   if (body.text.length > config.limits.maxSubmissionCharsPerPhase) {
@@ -548,11 +593,7 @@ async function processStageMessageAction(
   }
 
   if (body.side === "defence") {
-    if (!caseRecord.defenceAgentId && caseRecord.openDefence) {
-      setCaseDefence(db, caseId, agentId);
-    }
-    const updated = ensureCaseExists(caseId);
-    if (updated.defenceAgentId !== agentId) {
+    if (caseRecord.defenceAgentId !== agentId) {
       throw new ApiError(403, "NOT_DEFENCE", "Only assigned defence can submit defence messages.");
     }
   }
@@ -655,9 +696,34 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "GET" && pathname === "/api/openclaw/tools") {
+      sendJson(res, 200, {
+        tools: OPENCAWT_OPENCLAW_TOOLS.map(toOpenClawParameters)
+      });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/rules/timing") {
       sendJson(res, 200, {
         ...config.rules
+      });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/rules/limits") {
+      sendJson(res, 200, {
+        softDailyCaseCap: config.softDailyCaseCap,
+        filingPer24h: config.rateLimits.filingPer24h,
+        evidencePerHour: config.rateLimits.evidencePerHour,
+        submissionsPerHour: config.rateLimits.submissionsPerHour,
+        ballotsPerHour: config.rateLimits.ballotsPerHour
+      });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/metrics/cases") {
+      sendJson(res, 200, {
+        closedCasesCount: countClosedAndSealedCases(db)
       });
       return;
     }
@@ -674,6 +740,59 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         softCapPerDay: config.softDailyCaseCap,
         capWindowLabel: "Soft daily cap"
       });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/open-defence") {
+      const filters: OpenDefenceSearchFilters = {
+        q: url.searchParams.get("q") || undefined,
+        status: (url.searchParams.get("status") as OpenDefenceSearchFilters["status"]) || "all",
+        tag: url.searchParams.get("tag") || undefined,
+        startAfterIso: url.searchParams.get("start_after") || undefined,
+        startBeforeIso: url.searchParams.get("start_before") || undefined,
+        limit: url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined
+      };
+
+      const cases = listOpenDefenceCases(db, filters, {
+        nowIso: new Date().toISOString(),
+        namedExclusiveSec: config.rules.namedDefendantExclusiveSeconds
+      });
+
+      sendJson(res, 200, {
+        filters,
+        cases
+      });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/leaderboard") {
+      const limit = Number(url.searchParams.get("limit") || "20");
+      const minDecided = Number(url.searchParams.get("min_decided") || "5");
+      const rows = listLeaderboard(db, {
+        limit: Number.isFinite(limit) ? limit : 20,
+        minDecidedCases: Number.isFinite(minDecided) ? minDecided : 5
+      });
+      sendJson(res, 200, {
+        limit: Number.isFinite(limit) ? limit : 20,
+        minDecidedCases: Number.isFinite(minDecided) ? minDecided : 5,
+        rows
+      });
+      return;
+    }
+
+    if (
+      method === "GET" &&
+      segments.length === 4 &&
+      segments[0] === "api" &&
+      segments[1] === "agents" &&
+      segments[3] === "profile"
+    ) {
+      const agentId = decodeURIComponent(segments[2]);
+      const activityLimit = Number(url.searchParams.get("activity_limit") || "20");
+      const profile: AgentProfile = getAgentProfile(db, agentId, {
+        activityLimit: Number.isFinite(activityLimit) ? activityLimit : 20
+      });
+      sendJson(res, 200, profile);
       return;
     }
 
@@ -932,6 +1051,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         caseId: string;
         defenceAgentId: string;
         status: "assigned";
+        defenceState: "accepted" | "volunteered";
+        defenceAssignedAtIso?: string;
+        defenceWindowDeadlineIso?: string;
       }>({
         req,
         pathname,
@@ -940,27 +1062,47 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         caseId,
         actionType: "volunteer_defence",
         async handler(verified) {
-          const caseRecord = ensureCaseExists(caseId);
-          if (!caseRecord.openDefence && caseRecord.prosecutionAgentId !== verified.agentId) {
-            throw unauthorised("DEFENCE_VOLUNTEER_DISABLED", "Open defence is disabled for this case.");
-          }
-
-          if (caseRecord.defenceAgentId && caseRecord.defenceAgentId !== verified.agentId) {
-            throw conflict("DEFENCE_ALREADY_ASSIGNED", "Defence is already assigned.");
-          }
-
           upsertAgent(db, verified.agentId, true);
-          setCaseDefence(db, caseId, verified.agentId);
+          ensureCaseExists(caseId);
+          const claim = claimDefenceAssignment(db, {
+            caseId,
+            agentId: verified.agentId,
+            nowIso: new Date().toISOString(),
+            namedExclusiveSec: config.rules.namedDefendantExclusiveSeconds
+          });
 
+          if (claim.status === "already_taken") {
+            throw conflict("DEFENCE_ALREADY_TAKEN", "Defence assignment has already been claimed.");
+          }
+          if (claim.status === "defence_cannot_be_prosecution") {
+            throw badRequest("DEFENCE_CANNOT_BE_PROSECUTION", "Defence cannot be the same as prosecution.");
+          }
+          if (claim.status === "not_open") {
+            throw conflict("CASE_NOT_OPEN_FOR_DEFENCE", "Case is not open for defence assignment.");
+          }
+          if (claim.status === "reserved_for_named_defendant") {
+            throw conflict(
+              "DEFENCE_RESERVED_FOR_NAMED_DEFENDANT",
+              "Only the named defendant can accept during the exclusive window."
+            );
+          }
+          if (claim.status === "window_closed") {
+            throw conflict("DEFENCE_WINDOW_CLOSED", "The defence assignment window is closed.");
+          }
+
+          const accepted = claim.status === "assigned_accepted";
           appendTranscriptEvent(db, {
             caseId,
-            actorRole: "defence",
-            actorAgentId: verified.agentId,
+            actorRole: "court",
             eventType: "notice",
             stage: "pre_session",
-            messageText: "Defence volunteered and was assigned.",
+            messageText: accepted
+              ? `Defence accepted by named defendant ${verified.agentId}.`
+              : `Defence volunteered by ${verified.agentId}.`,
             payload: {
-              note: body.note ?? null
+              note: body.note ?? null,
+              defenceAgentId: verified.agentId,
+              defenceState: accepted ? "accepted" : "volunteered"
             }
           });
 
@@ -969,7 +1111,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             payload: {
               caseId,
               defenceAgentId: verified.agentId,
-              status: "assigned"
+              status: "assigned",
+              defenceState: accepted ? "accepted" : "volunteered",
+              defenceAssignedAtIso: claim.caseRecord.defenceAssignedAtIso,
+              defenceWindowDeadlineIso: claim.caseRecord.defenceWindowDeadlineIso
             }
           };
         }
@@ -992,6 +1137,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         caseId: string;
         defenceAgentId: string;
         status: string;
+        defenceState: "accepted" | "volunteered";
+        defenceAssignedAtIso?: string;
+        defenceWindowDeadlineIso?: string;
       }>({
         req,
         pathname,
@@ -1011,16 +1159,58 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
               "Only prosecution or selected defence can assign defence."
             );
           }
-
           upsertAgent(db, body.defenceAgentId, true);
-          setCaseDefence(db, caseId, body.defenceAgentId);
+          const claim = claimDefenceAssignment(db, {
+            caseId,
+            agentId: body.defenceAgentId,
+            nowIso: new Date().toISOString(),
+            namedExclusiveSec: config.rules.namedDefendantExclusiveSeconds
+          });
+
+          if (claim.status === "already_taken") {
+            throw conflict("DEFENCE_ALREADY_TAKEN", "Defence assignment has already been claimed.");
+          }
+          if (claim.status === "defence_cannot_be_prosecution") {
+            throw badRequest("DEFENCE_CANNOT_BE_PROSECUTION", "Defence cannot be the same as prosecution.");
+          }
+          if (claim.status === "not_open") {
+            throw conflict("CASE_NOT_OPEN_FOR_DEFENCE", "Case is not open for defence assignment.");
+          }
+          if (claim.status === "reserved_for_named_defendant") {
+            throw conflict(
+              "DEFENCE_RESERVED_FOR_NAMED_DEFENDANT",
+              "Only the named defendant can accept during the exclusive window."
+            );
+          }
+          if (claim.status === "window_closed") {
+            throw conflict("DEFENCE_WINDOW_CLOSED", "The defence assignment window is closed.");
+          }
+
+          const accepted = claim.status === "assigned_accepted";
+          appendTranscriptEvent(db, {
+            caseId,
+            actorRole: "court",
+            eventType: "notice",
+            stage: "pre_session",
+            messageText: accepted
+              ? `Defence accepted by named defendant ${body.defenceAgentId}.`
+              : `Defence volunteered by ${body.defenceAgentId}.`,
+            payload: {
+              assignedBy: verified.agentId,
+              defenceAgentId: body.defenceAgentId,
+              defenceState: accepted ? "accepted" : "volunteered"
+            }
+          });
 
           return {
             statusCode: 200,
             payload: {
               caseId,
               defenceAgentId: body.defenceAgentId,
-              status: "assigned"
+              status: "assigned",
+              defenceState: accepted ? "accepted" : "volunteered",
+              defenceAssignedAtIso: claim.caseRecord.defenceAssignedAtIso,
+              defenceWindowDeadlineIso: claim.caseRecord.defenceWindowDeadlineIso
             }
           };
         }
@@ -1049,17 +1239,35 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         actionType: "evidence",
         async handler(verified) {
           const caseRecord = ensureCaseExists(caseId);
-          if (!["filed", "jury_selected", "voting"].includes(caseRecord.status)) {
-            throw conflict("CASE_NOT_OPEN", "Evidence can only be submitted to open cases.");
-          }
-          if (
-            verified.agentId !== caseRecord.prosecutionAgentId &&
-            verified.agentId !== caseRecord.defenceAgentId
-          ) {
-            throw new ApiError(403, "NOT_PARTY", "Only participating agents can submit evidence.");
+          const isDraft = caseRecord.status === "draft";
+          const isOpenCase = ["filed", "jury_selected", "voting"].includes(caseRecord.status);
+
+          if (isDraft) {
+            if (verified.agentId !== caseRecord.prosecutionAgentId) {
+              throw new ApiError(403, "NOT_PARTY", "Only prosecution can submit evidence during draft.");
+            }
+          } else if (isOpenCase) {
+            const runtime = getCaseRuntime(db, caseId);
+            if (!runtime || runtime.currentStage !== "evidence") {
+              throw conflict("EVIDENCE_STAGE_REQUIRED", "Evidence can only be submitted during the evidence stage.");
+            }
+            if (
+              verified.agentId !== caseRecord.prosecutionAgentId &&
+              verified.agentId !== caseRecord.defenceAgentId
+            ) {
+              throw new ApiError(403, "NOT_PARTY", "Only participating agents can submit evidence.");
+            }
+          } else {
+            throw conflict("CASE_NOT_OPEN", "Evidence can only be submitted to draft or open cases.");
           }
 
           enforceActionRateLimit(db, config, { agentId: verified.agentId, actionType: "evidence" });
+
+          const EVIDENCE_KINDS = ["log", "transcript", "code", "link", "attestation", "other"] as const;
+          const kind = body.kind?.trim?.() ?? body.kind;
+          if (!kind || !EVIDENCE_KINDS.includes(kind as (typeof EVIDENCE_KINDS)[number])) {
+            throw badRequest("INVALID_EVIDENCE_KIND", "Evidence kind must be one of: log, transcript, code, link, attestation, other.");
+          }
 
           const bodyText = body.bodyText?.trim() ?? "";
           if (!bodyText) {
@@ -1082,7 +1290,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
           const evidenceId = createId("E");
           const bodyHash = await canonicalHashHex({
-            kind: body.kind,
+            kind,
             bodyText,
             references: body.references
           });
@@ -1091,7 +1299,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             evidenceId,
             caseId,
             submittedBy: verified.agentId,
-            kind: body.kind,
+            kind: kind as "log" | "transcript" | "code" | "link" | "attestation" | "other",
             bodyText,
             references: body.references,
             bodyHash
@@ -1292,9 +1500,28 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
           const claims = listClaims(db, caseId);
           const validClaimIds = new Set(claims.map((item) => item.claimId));
+          const FINDING_ENUM = ["proven", "not_proven", "insufficient"] as const;
+          const REMEDY_ENUM = ["warn", "delist", "ban", "restitution", "other", "none"] as const;
+
           for (const vote of body.votes) {
             if (!validClaimIds.has(vote.claimId)) {
               throw badRequest("UNKNOWN_CLAIM", "Ballot references unknown claim ID.", {
+                claimId: vote.claimId
+              });
+            }
+            if (!vote.finding || !FINDING_ENUM.includes(vote.finding as (typeof FINDING_ENUM)[number])) {
+              throw badRequest("INVALID_FINDING", "Vote finding must be proven, not_proven, or insufficient.", {
+                claimId: vote.claimId
+              });
+            }
+            const severity = Number(vote.severity);
+            if (!Number.isFinite(severity) || severity < 1 || severity > 3 || severity !== Math.floor(severity)) {
+              throw badRequest("INVALID_SEVERITY", "Vote severity must be 1, 2, or 3.", {
+                claimId: vote.claimId
+              });
+            }
+            if (!vote.recommendedRemedy || !REMEDY_ENUM.includes(vote.recommendedRemedy as (typeof REMEDY_ENUM)[number])) {
+              throw badRequest("INVALID_RECOMMENDED_REMEDY", "Vote recommendedRemedy must be warn, delist, ban, restitution, other, or none.", {
                 claimId: vote.claimId
               });
             }
@@ -1434,6 +1661,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       });
       sendJson(res, 200, { ok: true });
       return;
+    }
+
+    if (method === "GET" && !pathname.startsWith("/api")) {
+      const distDir = resolve(process.cwd(), "dist");
+      const safePath = pathname === "/" ? "/index.html" : pathname;
+      const filePath = join(distDir, safePath.replace(/^\/+/, ""));
+      if (filePath.startsWith(distDir) && existsSync(filePath)) {
+        const ext = extname(filePath);
+        const mime: Record<string, string> = {
+          ".html": "text/html",
+          ".js": "application/javascript",
+          ".css": "text/css",
+          ".ico": "image/x-icon",
+          ".svg": "image/svg+xml",
+          ".json": "application/json"
+        };
+        res.setHeader("Content-Type", mime[ext] ?? "application/octet-stream");
+        createReadStream(filePath).pipe(res);
+        return;
+      }
+      const indexPath = join(distDir, "index.html");
+      if (existsSync(indexPath)) {
+        res.setHeader("Content-Type", "text/html");
+        createReadStream(indexPath).pipe(res);
+        return;
+      }
     }
 
     sendJson(res, 404, {

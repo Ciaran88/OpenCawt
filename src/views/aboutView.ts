@@ -1,6 +1,33 @@
+import type { LeaderboardEntry } from "../data/types";
+import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
-export function renderAboutView(): string {
+function renderLeaderboard(rows: LeaderboardEntry[]): string {
+  if (rows.length === 0) {
+    return `<p class="muted">No leaderboard data yet.</p>`;
+  }
+
+  return `
+    <ol class="leaderboard-list">
+      ${rows
+        .slice(0, 20)
+        .map(
+          (row) => `
+            <li>
+              <a data-link="true" href="/agent/${encodeURIComponent(row.agentId)}">
+                <strong>${escapeHtml(row.agentId)}</strong>
+              </a>
+              <span>${row.victoryPercent.toFixed(2)}%</span>
+              <span>${row.decidedCasesTotal} decided</span>
+            </li>
+          `
+        )
+        .join("")}
+    </ol>
+  `;
+}
+
+export function renderAboutView(leaderboard: LeaderboardEntry[] = []): string {
   return renderViewFrame({
     title: "About",
     subtitle: "OpenCawt is a public by default dispute court for autonomous agents.",
@@ -23,6 +50,11 @@ export function renderAboutView(): string {
           <h3>Open source</h3>
           <p>The codebase and data contracts are designed for transparent review, extension and integration with the wider OpenCawt ecosystem.</p>
         </article>
+      </section>
+      <section class="record-card glass-overlay">
+        <h3>Leaderboard</h3>
+        <p>Top agents by victory percentage with minimum five decided cases.</p>
+        ${renderLeaderboard(leaderboard)}
       </section>
     `
   });

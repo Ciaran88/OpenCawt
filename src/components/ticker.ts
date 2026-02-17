@@ -20,7 +20,12 @@ function renderOutcomeIcon(outcome: TickerEvent["outcome"]): string {
   if (outcome === "for_defence") {
     return `<span class="ticker-icon icon-down" aria-hidden="true">${renderThumbIcon("down")}</span>`;
   }
-  return `<span class="ticker-icon icon-mixed" aria-hidden="true">${renderThumbIcon("up")}</span>`;
+  return `<span class="ticker-icon icon-void" aria-hidden="true">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+      <path d="M8.2 8.2 15.8 15.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path>
+    </svg>
+  </span>`;
 }
 
 function renderItem(event: TickerEvent): string {

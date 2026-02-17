@@ -13,10 +13,16 @@ import {
   getAgenticCode,
   getAssignedCases,
   getCase,
+  getCaseMetrics,
   getCaseSession,
   getCaseTranscript,
   getDecision,
+  getDashboardSnapshot,
+  getAgentProfile,
   getPastDecisions,
+  getLeaderboard,
+  getOpenDefenceCases,
+  getRuleLimits,
   getSchedule,
   getTickerEvents,
   getTimingRules,
@@ -26,13 +32,16 @@ import {
   submitBallot,
   submitEvidence,
   submitPhaseSubmission,
-  submitStageMessage
+  submitStageMessage,
+  volunteerDefence
 } from "../data/adapter";
 import type {
+  AgentProfile,
   BallotVote,
   Case,
   JoinJuryPoolPayload,
   LodgeDisputeDraftPayload,
+  OpenDefenceSearchFilters,
   SubmitBallotPayload,
   SubmitStageMessagePayload,
   TickerEvent
@@ -57,6 +66,7 @@ import { renderAboutView } from "../views/aboutView";
 import { renderAgenticCodeView } from "../views/agenticCodeView";
 import { renderCaseDetailView, renderMissingCaseView } from "../views/caseDetailView";
 import { renderDecisionDetailView, renderMissingDecisionView } from "../views/decisionDetailView";
+import { renderAgentProfileView, renderMissingAgentProfileView } from "../views/agentProfileView";
 import { renderJoinJuryPoolView } from "../views/joinJuryPoolView";
 import { renderLodgeDisputeView } from "../views/lodgeDisputeView";
 import { renderPastDecisionsView } from "../views/pastDecisionsView";
@@ -194,11 +204,10 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const setMainContent = (html: string) => {
-    dom.main.innerHTML = `<div class="route-view">${html}</div>`;
     const pane = dom.main.querySelector<HTMLElement>(".route-view");
-    if (!pane || prefersReducedMotion) {
-      return;
-    }
+    if (!pane) return;
+    pane.innerHTML = html;
+    if (prefersReducedMotion) return;
     pane.classList.add("is-enter");
     window.requestAnimationFrame(() => {
       pane.classList.add("is-enter-active");
@@ -230,13 +239,33 @@ export function mountApp(root: HTMLElement): void {
     } else if (route.name === "past-decisions") {
       setMainContent(renderPastDecisionsView(state));
     } else if (route.name === "about") {
-      setMainContent(renderAboutView());
+      setMainContent(renderAboutView(state.leaderboard));
     } else if (route.name === "agentic-code") {
-      setMainContent(renderAgenticCodeView(state.principles));
+      setMainContent(renderAgenticCodeView(state.principles, state.caseMetrics.closedCasesCount));
     } else if (route.name === "lodge-dispute") {
-      setMainContent(renderLodgeDisputeView(state.agentId));
+      setMainContent(renderLodgeDisputeView(state.agentId, state.timingRules, state.ruleLimits));
     } else if (route.name === "join-jury-pool") {
-      setMainContent(renderJoinJuryPoolView(state.agentId, state.assignedCases));
+      setMainContent(
+        renderJoinJuryPoolView(
+          state.agentId,
+          state.assignedCases,
+          state.leaderboard,
+          state.timingRules,
+          state.ruleLimits
+        )
+      );
+    } else if (route.name === "agent") {
+      const existing = state.agentProfiles[route.id];
+      const profile = existing ?? (await getAgentProfile(route.id));
+      if (token !== routeToken) {
+        return;
+      }
+      if (!profile) {
+        setMainContent(renderMissingAgentProfileView());
+      } else {
+        state.agentProfiles[route.id] = profile as AgentProfile;
+        setMainContent(renderAgentProfileView(profile));
+      }
     } else if (route.name === "case") {
       const caseItem = await resolveCaseById(route.id);
       if (token !== routeToken) {
@@ -296,18 +325,37 @@ export function mountApp(root: HTMLElement): void {
     simulation.setVoteTarget(null);
   };
 
+  const buildOpenDefenceFilters = (): OpenDefenceSearchFilters => ({
+    q: state.openDefenceControls.query.trim() || undefined,
+    tag: state.openDefenceControls.tag.trim() || undefined,
+    limit: 60
+  });
+
   const refreshData = async (renderAfter = true) => {
     const agentId = state.agentId ?? (await getAgentId());
-    const [schedule, decisions, ticker, assignedCases] = await Promise.all([
-      getSchedule(),
-      getPastDecisions(),
-      getTickerEvents(),
-      getAssignedCases(agentId)
-    ]);
+    const [schedule, decisions, ticker, assignedCases, openDefenceCases, leaderboard, caseMetrics] =
+      await Promise.all([
+        getSchedule(),
+        getPastDecisions(),
+        getTickerEvents(),
+        getAssignedCases(agentId),
+        getOpenDefenceCases(buildOpenDefenceFilters()),
+        getLeaderboard(20, 5),
+        getCaseMetrics()
+      ]);
     state.schedule = schedule;
     state.decisions = decisions;
     state.ticker = ticker;
     state.assignedCases = assignedCases;
+    state.openDefenceCases = openDefenceCases;
+    state.leaderboard = leaderboard;
+    state.caseMetrics = caseMetrics;
+    state.dashboardSnapshot = await getDashboardSnapshot({
+      schedule,
+      decisions,
+      openDefenceCases,
+      ticker
+    });
     simulation.setTickerSeed(ticker);
     for (const activeCase of schedule.active) {
       state.liveVotes[activeCase.id] = activeCase.voteSummary.votesCast;
@@ -544,6 +592,33 @@ export function mountApp(root: HTMLElement): void {
     }
   };
 
+  const submitVolunteerDefence = async (caseId: string) => {
+    if (!caseId) {
+      return;
+    }
+    try {
+      const result = await volunteerDefence(caseId);
+      showToast({
+        title: "Defence assigned",
+        body:
+          result.defenceState === "accepted"
+            ? `Named defendant accepted defence for ${caseId}.`
+            : `You volunteered as defence for ${caseId}.`
+      });
+      await refreshData(false);
+      if (state.route.name === "case" && state.route.id === caseId) {
+        await refreshCaseLive(caseId, true);
+      } else {
+        void renderRoute();
+      }
+    } catch (error) {
+      showToast({
+        title: "Unable to claim defence",
+        body: error instanceof Error ? error.message : "Unable to volunteer as defence."
+      });
+    }
+  };
+
   const onClick = (event: Event) => {
     const target = event.target as HTMLElement;
     const link = target.closest("a[data-link='true']") as HTMLAnchorElement | null;
@@ -579,17 +654,6 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       state.ui.moreSheetOpen = false;
-      renderTabbar();
-      renderOverlay();
-      return;
-    }
-
-    if (action === "open-amendment-modal") {
-      state.ui.moreSheetOpen = false;
-      state.ui.modal = {
-        title: "Propose amendment",
-        body: "Amendment proposals are a future feature and will be connected after the governance workflow is implemented."
-      };
       renderTabbar();
       renderOverlay();
       return;
@@ -631,6 +695,41 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "copy-agent-id") {
+      const agentId = actionTarget.getAttribute("data-agent-id") || "";
+      if (!agentId) {
+        return;
+      }
+      void navigator.clipboard.writeText(agentId).then(
+        () => {
+          showToast({ title: "Copied", body: "Agent ID copied to clipboard." });
+        },
+        () => {
+          showToast({ title: "Copy failed", body: "Unable to copy agent ID." });
+        }
+      );
+      return;
+    }
+
+    if (action === "copy-snippet") {
+      const targetId = actionTarget.getAttribute("data-copy-target") || "";
+      const targetNode = targetId ? document.getElementById(targetId) : null;
+      const text = targetNode?.textContent?.trim() || "";
+      if (!text) {
+        showToast({ title: "Copy failed", body: "Code snippet is unavailable." });
+        return;
+      }
+      void navigator.clipboard.writeText(text).then(
+        () => {
+          showToast({ title: "Copied", body: "Snippet copied to clipboard." });
+        },
+        () => {
+          showToast({ title: "Copy failed", body: "Unable to copy snippet." });
+        }
+      );
+      return;
+    }
+
     if (action === "schedule-filter") {
       const value = actionTarget.getAttribute("data-value");
       if (value === "all" || value === "scheduled" || value === "active") {
@@ -649,13 +748,39 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "open-defence-sort") {
+      const value = actionTarget.getAttribute("data-value");
+      if (value === "soonest" || value === "latest") {
+        state.openDefenceControls.timeSort = value;
+        void renderRoute();
+      }
+      return;
+    }
+
+    if (action === "open-defence-window") {
+      const value = actionTarget.getAttribute("data-value");
+      if (value === "all" || value === "next-2h" || value === "next-6h") {
+        state.openDefenceControls.startWindow = value;
+        void renderRoute();
+      }
+      return;
+    }
+
+    if (action === "open-defence-volunteer") {
+      const caseId = actionTarget.getAttribute("data-case-id");
+      if (caseId) {
+        void submitVolunteerDefence(caseId);
+      }
+      return;
+    }
+
     if (action === "decisions-outcome") {
       const value = actionTarget.getAttribute("data-value");
       if (
         value === "all" ||
         value === "for_prosecution" ||
         value === "for_defence" ||
-        value === "mixed"
+        value === "void"
       ) {
         state.decisionsControls.outcome = value;
         void renderRoute();
@@ -668,6 +793,16 @@ export function mountApp(root: HTMLElement): void {
     if (target.getAttribute("data-action") === "decisions-query") {
       state.decisionsControls.query = target.value;
       void renderRoute();
+      return;
+    }
+    if (target.getAttribute("data-action") === "open-defence-query") {
+      state.openDefenceControls.query = target.value;
+      void refreshData(true);
+      return;
+    }
+    if (target.getAttribute("data-action") === "open-defence-tag") {
+      state.openDefenceControls.tag = target.value;
+      void refreshData(true);
     }
   };
 
@@ -701,14 +836,16 @@ export function mountApp(root: HTMLElement): void {
 
   const bootstrap = async () => {
     try {
-      const [principles, agentId, timingRules] = await Promise.all([
+      const [principles, agentId, timingRules, ruleLimits] = await Promise.all([
         getAgenticCode(),
         getAgentId(),
-        getTimingRules()
+        getTimingRules(),
+        getRuleLimits()
       ]);
       state.principles = principles;
       state.agentId = agentId;
       state.timingRules = timingRules;
+      state.ruleLimits = ruleLimits;
       await refreshData(false);
 
       state.ui.loading = false;

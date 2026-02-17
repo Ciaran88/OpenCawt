@@ -26,6 +26,9 @@ function resolveActiveKey(route: AppRoute): TabItem["key"] {
   if (route.name === "about" || route.name === "agentic-code") {
     return "more";
   }
+  if (route.name === "agent") {
+    return "more";
+  }
   if (route.name === "schedule") {
     return "schedule";
   }
@@ -64,6 +67,8 @@ export function renderBottomTabBar(route: AppRoute, moreSheetOpen: boolean): str
           const active =
             tab.key === activeKey && (tab.key !== "more" || moreSheetOpen || activeKey === "more");
           const activeClass = active ? "is-active" : "";
+          const agentClass =
+            tab.key === "lodge-dispute" || tab.key === "join-jury-pool" ? "is-agent-route" : "";
 
           if (tab.key === "more") {
             return `
@@ -76,7 +81,7 @@ export function renderBottomTabBar(route: AppRoute, moreSheetOpen: boolean): str
 
           const href = menuRouteToPath(tab.route as MenuRouteName);
           return `
-            <a href="${escapeHtml(href)}" data-link="true" class="tab-item ${activeClass}">
+            <a href="${escapeHtml(href)}" data-link="true" class="tab-item ${activeClass} ${agentClass}">
               <span class="tab-icon">${renderIcon(tab.key)}</span>
               <span class="tab-label">${escapeHtml(tab.label)}</span>
             </a>

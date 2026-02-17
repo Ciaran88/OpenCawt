@@ -1,9 +1,14 @@
 import type {
   AgenticPrinciple,
+  AgentProfile,
   AssignedCaseSummary,
   Case,
   CaseSession,
+  DashboardSnapshot,
   Decision,
+  LeaderboardEntry,
+  OpenDefenceCaseSummary,
+  RuleLimits,
   TickerEvent,
   TimingRules,
   TranscriptEvent
@@ -19,7 +24,14 @@ export interface ScheduleControls {
 
 export interface DecisionsControls {
   query: string;
-  outcome: "all" | "for_prosecution" | "for_defence" | "mixed";
+  outcome: "all" | "for_prosecution" | "for_defence" | "void";
+}
+
+export interface OpenDefenceControls {
+  query: string;
+  tag: string;
+  timeSort: "soonest" | "latest";
+  startWindow: "all" | "next-2h" | "next-6h";
 }
 
 export interface AppState {
@@ -27,6 +39,7 @@ export interface AppState {
   agentId?: string;
   nowMs: number;
   timingRules: TimingRules;
+  ruleLimits: RuleLimits;
   schedule: {
     scheduled: Case[];
     active: Case[];
@@ -40,8 +53,16 @@ export interface AppState {
   caseSessions: Record<string, CaseSession | undefined>;
   transcripts: Record<string, TranscriptEvent[]>;
   assignedCases: AssignedCaseSummary[];
+  openDefenceCases: OpenDefenceCaseSummary[];
+  dashboardSnapshot: DashboardSnapshot;
+  caseMetrics: {
+    closedCasesCount: number;
+  };
+  leaderboard: LeaderboardEntry[];
+  agentProfiles: Record<string, AgentProfile | undefined>;
   scheduleControls: ScheduleControls;
   decisionsControls: DecisionsControls;
+  openDefenceControls: OpenDefenceControls;
   ui: {
     loading: boolean;
     toast: ToastMessage | null;
@@ -57,11 +78,20 @@ export function createInitialState(): AppState {
     nowMs: Date.now(),
     timingRules: {
       sessionStartsAfterSeconds: 3600,
+      defenceAssignmentCutoffSeconds: 2700,
+      namedDefendantExclusiveSeconds: 900,
       jurorReadinessSeconds: 60,
       stageSubmissionSeconds: 1800,
       jurorVoteSeconds: 900,
       votingHardTimeoutSeconds: 7200,
       jurorPanelSize: 11
+    },
+    ruleLimits: {
+      softDailyCaseCap: 50,
+      filingPer24h: 1,
+      evidencePerHour: 20,
+      submissionsPerHour: 20,
+      ballotsPerHour: 20
     },
     schedule: {
       scheduled: [],
@@ -76,6 +106,27 @@ export function createInitialState(): AppState {
     caseSessions: {},
     transcripts: {},
     assignedCases: [],
+    openDefenceCases: [],
+    dashboardSnapshot: {
+      kpis: [],
+      trend: {
+        title: "Court throughput",
+        subtitle: "",
+        points: [],
+        hoverLabel: "",
+        hoverValue: ""
+      },
+      activity: {
+        title: "Recent verdicts",
+        subtitle: "",
+        rows: []
+      }
+    },
+    caseMetrics: {
+      closedCasesCount: 0
+    },
+    leaderboard: [],
+    agentProfiles: {},
     scheduleControls: {
       filter: "all",
       sort: "time-asc"
@@ -83,6 +134,12 @@ export function createInitialState(): AppState {
     decisionsControls: {
       query: "",
       outcome: "all"
+    },
+    openDefenceControls: {
+      query: "",
+      tag: "",
+      timeSort: "soonest",
+      startWindow: "all"
     },
     ui: {
       loading: true,

@@ -10,7 +10,9 @@ export function renderAppShell(): string {
         </defs>
       </svg>
       <header id="app-header" class="layout-column app-header" aria-label="Header"></header>
-      <main id="app-main" class="layout-column app-main" tabindex="-1"></main>
+      <main id="app-main" class="layout-column app-main" tabindex="-1">
+        <div class="route-view"></div>
+      </main>
       <div id="app-toast" class="layout-column app-toast-host" aria-live="polite" aria-atomic="true"></div>
       <div id="app-overlay"></div>
       <nav id="app-tabbar" class="layout-column app-tabbar" aria-label="Primary"></nav>

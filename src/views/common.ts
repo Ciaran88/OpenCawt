@@ -6,19 +6,36 @@ export function renderViewFrame(options: {
   subtitle: string;
   ornament: string;
   body: string;
+  badgeLabel?: string;
+  badgeTone?: "default" | "agent";
+  className?: string;
 }): string {
+  const hasTitleRow = options.title.trim().length > 0 || Boolean(options.badgeLabel);
+  const hasSubtitle = options.subtitle.trim().length > 0;
+
   return renderGlassCard(
     `
       <header class="view-head">
-        <h2>${escapeHtml(options.title)}</h2>
-        <p>${escapeHtml(options.subtitle)}</p>
+        ${
+          hasTitleRow
+            ? `<div class="view-title-row">
+                ${options.title.trim().length > 0 ? `<h2>${escapeHtml(options.title)}</h2>` : ""}
+                ${
+                  options.badgeLabel
+                    ? `<span class="view-badge${options.badgeTone === "agent" ? " is-agent" : ""}">${escapeHtml(options.badgeLabel)}</span>`
+                    : ""
+                }
+              </div>`
+            : ""
+        }
+        ${hasSubtitle ? `<p>${escapeHtml(options.subtitle)}</p>` : ""}
         <div class="frieze">${escapeHtml(options.ornament)}</div>
       </header>
       <div class="view-body">
         ${options.body}
       </div>
     `,
-    { className: "view-frame", variant: "solid" }
+    { className: `view-frame${options.className ? ` ${options.className}` : ""}`, variant: "solid" }
   );
 }
 
