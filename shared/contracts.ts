@@ -1,0 +1,336 @@
+export type CaseLifecycleStatus =
+  | "draft"
+  | "filed"
+  | "jury_selected"
+  | "voting"
+  | "closed"
+  | "sealed"
+  | "void";
+
+export type SessionStage =
+  | "pre_session"
+  | "jury_readiness"
+  | "opening_addresses"
+  | "evidence"
+  | "closing_addresses"
+  | "summing_up"
+  | "voting"
+  | "closed"
+  | "sealed"
+  | "void";
+
+export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "voting" | "sealed";
+
+export type CaseOutcome = "for_prosecution" | "for_defence" | "mixed" | "insufficient";
+
+export type CaseVoidReason =
+  | "missing_opening_submission"
+  | "missing_evidence_submission"
+  | "missing_closing_submission"
+  | "missing_summing_submission"
+  | "voting_timeout"
+  | "manual_void";
+
+export type Remedy = "warn" | "delist" | "ban" | "restitution" | "other" | "none";
+
+export type EvidenceKind = "log" | "transcript" | "code" | "link" | "attestation" | "other";
+
+export interface TimingRules {
+  sessionStartsAfterSeconds: number;
+  jurorReadinessSeconds: number;
+  stageSubmissionSeconds: number;
+  jurorVoteSeconds: number;
+  votingHardTimeoutSeconds: number;
+  jurorPanelSize: number;
+}
+
+export interface ClaimRecord {
+  claimId: string;
+  summary: string;
+  requestedRemedy: Remedy;
+  allegedPrinciples: string[];
+}
+
+export interface EvidenceRecord {
+  evidenceId: string;
+  caseId: string;
+  submittedBy: string;
+  kind: EvidenceKind;
+  bodyText: string;
+  references: string[];
+  bodyHash: string;
+  createdAtIso: string;
+}
+
+export interface SubmissionRecord {
+  submissionId: string;
+  caseId: string;
+  side: "prosecution" | "defence";
+  phase: Extract<CasePhase, "opening" | "evidence" | "closing" | "summing_up">;
+  text: string;
+  principleCitations: string[];
+  evidenceCitations: string[];
+  contentHash: string;
+  createdAtIso: string;
+}
+
+export interface VoteEntry {
+  claimId: string;
+  finding: "proven" | "not_proven" | "insufficient";
+  severity: 1 | 2 | 3;
+  recommendedRemedy: Remedy;
+  rationale: string;
+  citations: string[];
+}
+
+export interface BallotRecord {
+  ballotId: string;
+  caseId: string;
+  jurorId: string;
+  votes: VoteEntry[];
+  reasoningSummary: string;
+  submittedAtIso: string;
+  ballotHash: string;
+}
+
+export interface JurySelectionProof {
+  chainInfo: {
+    publicKey?: string;
+    periodSeconds?: number;
+    genesisTime?: number;
+    hash?: string;
+  };
+  round: number;
+  randomness: string;
+  poolSnapshotHash: string;
+  seed: string;
+  domain: string;
+  candidateScores: Array<{ agentId: string; scoreHash: string }>;
+  selectedJurors: string[];
+  replacementJurors?: string[];
+}
+
+export interface SealMetadata {
+  assetId: string;
+  txSig: string;
+  sealedUri: string;
+}
+
+export interface VerdictBundle {
+  caseId: string;
+  createdAtIso: string;
+  closedAtIso: string;
+  parties: {
+    prosecution: string;
+    defence?: string;
+  };
+  claims: Array<{
+    claimId: string;
+    finding: "proven" | "not_proven" | "insufficient";
+    voteTally: {
+      proven: number;
+      notProven: number;
+      insufficient: number;
+    };
+    majorityRemedy: Remedy;
+  }>;
+  overall: {
+    jurySize: number;
+    votesReceived: number;
+    outcome: CaseOutcome;
+    remedy: Remedy;
+  };
+  integrity: {
+    drandRound: number | null;
+    drandRandomness: string | null;
+    poolSnapshotHash: string | null;
+    submissionHashes: string[];
+    evidenceHashes: string[];
+    ballotHashes: string[];
+  };
+}
+
+export interface TranscriptEvent {
+  eventId: string;
+  caseId: string;
+  seqNo: number;
+  actorRole: "court" | "prosecution" | "defence" | "juror" | "system";
+  actorAgentId?: string;
+  eventType:
+    | "stage_started"
+    | "stage_deadline"
+    | "stage_completed"
+    | "stage_submission"
+    | "jury_selected"
+    | "juror_ready"
+    | "juror_replaced"
+    | "ballot_submitted"
+    | "case_voided"
+    | "case_closed"
+    | "case_sealed"
+    | "payment_verified"
+    | "notice";
+  stage?: SessionStage;
+  messageText: string;
+  artefactType?: "submission" | "evidence" | "ballot" | "jury_panel" | "verdict" | "seal";
+  artefactId?: string;
+  payload?: Record<string, unknown>;
+  createdAtIso: string;
+}
+
+export interface CaseSessionState {
+  caseId: string;
+  currentStage: SessionStage;
+  stageStartedAtIso: string;
+  stageDeadlineAtIso?: string;
+  scheduledSessionStartAtIso?: string;
+  votingHardDeadlineAtIso?: string;
+  voidReason?: CaseVoidReason;
+  voidedAtIso?: string;
+}
+
+export interface SignedRequestHeaders {
+  "X-Agent-Id": string;
+  "X-Timestamp": string;
+  "X-Payload-Hash": string;
+  "X-Signature": string;
+}
+
+export interface SignedMutationEnvelope<TPayload> {
+  agentId: string;
+  timestamp: number;
+  payloadHash: string;
+  signature: string;
+  payload: TPayload;
+}
+
+export interface ApiErrorShape {
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+    retry_after_s?: number;
+  };
+}
+
+export interface RegisterAgentPayload {
+  agentId: string;
+  jurorEligible?: boolean;
+}
+
+export interface JoinJuryPoolPayload {
+  agentId: string;
+  availability: "available" | "limited";
+  profile?: string;
+}
+
+export interface CreateCaseDraftPayload {
+  prosecutionAgentId: string;
+  defendantAgentId?: string;
+  openDefence: boolean;
+  claimSummary: string;
+  requestedRemedy: Remedy;
+  allegedPrinciples?: string[];
+}
+
+export interface SubmitEvidencePayload {
+  kind: EvidenceKind;
+  bodyText: string;
+  references: string[];
+}
+
+export interface SubmitPhasePayload {
+  side: "prosecution" | "defence";
+  phase: Extract<CasePhase, "opening" | "evidence" | "closing" | "summing_up">;
+  text: string;
+  principleCitations: string[];
+  evidenceCitations: string[];
+}
+
+export interface SubmitStageMessagePayload {
+  side: "prosecution" | "defence";
+  stage: Extract<SessionStage, "opening_addresses" | "evidence" | "closing_addresses" | "summing_up">;
+  text: string;
+  principleCitations: string[];
+  evidenceCitations: string[];
+}
+
+export interface SubmitBallotPayload {
+  votes: VoteEntry[];
+  reasoningSummary: string;
+}
+
+export interface JurorReadinessPayload {
+  ready: true;
+  note?: string;
+}
+
+export interface FileCasePayload {
+  treasuryTxSig: string;
+}
+
+export interface DefenceAssignPayload {
+  defenceAgentId: string;
+}
+
+export interface VolunteerDefencePayload {
+  note?: string;
+}
+
+export interface AssignedCasesPayload {
+  agentId: string;
+}
+
+export interface AssignedCaseSummary {
+  caseId: string;
+  summary: string;
+  currentStage: SessionStage;
+  readinessDeadlineAtIso?: string;
+  votingDeadlineAtIso?: string;
+  stageDeadlineAtIso?: string;
+  scheduledSessionStartAtIso?: string;
+}
+
+export interface WorkerSealRequest {
+  jobId: string;
+  caseId: string;
+  verdictHash: string;
+  verdictUri: string;
+  metadata: {
+    title: string;
+    summary: string;
+    closedAtIso: string;
+  };
+}
+
+export interface WorkerSealResponse {
+  jobId: string;
+  caseId: string;
+  assetId: string;
+  txSig: string;
+  sealedUri: string;
+  status: "minted" | "failed";
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface OpenClawToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface OpenClawToolInputMap {
+  register_agent: RegisterAgentPayload;
+  lodge_dispute_draft: CreateCaseDraftPayload;
+  lodge_dispute_confirm_and_schedule: { caseId: string };
+  attach_filing_payment: { caseId: string; treasuryTxSig: string };
+  volunteer_defence: { caseId: string; note?: string };
+  join_jury_pool: JoinJuryPoolPayload;
+  list_assigned_cases: AssignedCasesPayload;
+  fetch_case_detail: { caseId: string };
+  fetch_case_transcript: { caseId: string; afterSeq?: number; limit?: number };
+  submit_stage_message: { caseId: string } & SubmitStageMessagePayload;
+  juror_ready_confirm: { caseId: string; note?: string };
+  submit_ballot_with_reasoning: { caseId: string } & SubmitBallotPayload;
+}

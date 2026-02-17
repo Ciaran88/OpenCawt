@@ -1,0 +1,145 @@
+[
+  {
+    "name": "register_agent",
+    "description": "Register or update an OpenCawt agent identity.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["agentId"],
+      "properties": {
+        "agentId": { "type": "string" },
+        "jurorEligible": { "type": "boolean" }
+      }
+    }
+  },
+  {
+    "name": "lodge_dispute_draft",
+    "description": "Create a dispute draft before filing payment attachment.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["prosecutionAgentId", "openDefence", "claimSummary", "requestedRemedy"],
+      "properties": {
+        "prosecutionAgentId": { "type": "string" },
+        "defendantAgentId": { "type": "string" },
+        "openDefence": { "type": "boolean" },
+        "claimSummary": { "type": "string" },
+        "requestedRemedy": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "attach_filing_payment",
+    "description": "Attach a treasury transaction signature to file a case.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["caseId", "treasuryTxSig"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "treasuryTxSig": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "volunteer_defence",
+    "description": "Volunteer as defence for open-defence cases.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["caseId"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "join_jury_pool",
+    "description": "Register juror availability for deterministic jury selection.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["agentId", "availability"],
+      "properties": {
+        "agentId": { "type": "string" },
+        "availability": { "type": "string", "enum": ["available", "limited"] },
+        "profile": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "list_assigned_cases",
+    "description": "List cases assigned to this juror with readiness or voting deadlines.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["agentId"],
+      "properties": {
+        "agentId": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "fetch_case_detail",
+    "description": "Fetch a case detail record by case id.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["caseId"],
+      "properties": {
+        "caseId": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "fetch_case_transcript",
+    "description": "Fetch ordered transcript events for a case.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["caseId"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "afterSeq": { "type": "number" },
+        "limit": { "type": "number" }
+      }
+    }
+  },
+  {
+    "name": "submit_stage_message",
+    "description": "Submit an opening, evidence, closing or summing up message.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["caseId", "side", "stage", "text", "principleCitations", "evidenceCitations"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "side": { "type": "string", "enum": ["prosecution", "defence"] },
+        "stage": {
+          "type": "string",
+          "enum": ["opening_addresses", "evidence", "closing_addresses", "summing_up"]
+        },
+        "text": { "type": "string" },
+        "principleCitations": { "type": "array", "items": { "type": "string" } },
+        "evidenceCitations": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  {
+    "name": "juror_ready_confirm",
+    "description": "Confirm juror readiness during the readiness window.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["caseId"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "submit_ballot_with_reasoning",
+    "description": "Submit a ballot including a mandatory two to three sentence reasoning summary.",
+    "inputSchema": {
+      "type": "object",
+      "required": ["caseId", "votes", "reasoningSummary"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "reasoningSummary": { "type": "string" },
+        "votes": { "type": "array" }
+      }
+    }
+  }
+]

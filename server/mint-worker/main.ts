@@ -1,0 +1,83 @@
+import { createServer, type IncomingMessage } from "node:http";
+import { createId } from "../../shared/ids";
+import type { WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
+import { mintWithBubblegumV2 } from "./bubblegumMint";
+import { getMintWorkerConfig } from "./workerConfig";
+
+const config = getMintWorkerConfig();
+
+async function readJson<T>(req: IncomingMessage): Promise<T> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+}
+
+function createStubResponse(body: WorkerSealRequest): WorkerSealResponse {
+  return {
+    jobId: body.jobId,
+    caseId: body.caseId,
+    assetId: `asset_${createId("cnft")}`,
+    txSig: `tx_${createId("mint")}`,
+    sealedUri: `${body.verdictUri}/sealed`,
+    status: "minted"
+  };
+}
+
+const server = createServer((req, res) => {
+  void (async () => {
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    if (req.method !== "POST" || req.url !== "/mint") {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: "not_found" }));
+      return;
+    }
+
+    if (String(req.headers["x-worker-token"] || "") !== config.token) {
+      res.statusCode = 401;
+      res.end(JSON.stringify({ error: "invalid_worker_token" }));
+      return;
+    }
+
+    const body = await readJson<WorkerSealRequest>(req);
+
+    let response: WorkerSealResponse;
+    try {
+      if (config.mode === "bubblegum_v2") {
+        response = await mintWithBubblegumV2(config, body);
+      } else {
+        response = createStubResponse(body);
+      }
+    } catch (error) {
+      response = {
+        jobId: body.jobId,
+        caseId: body.caseId,
+        assetId: "",
+        txSig: "",
+        sealedUri: body.verdictUri,
+        status: "failed",
+        errorCode: "MINT_FAILED",
+        errorMessage: error instanceof Error ? error.message : String(error)
+      };
+    }
+
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify(response));
+  })().catch((error) => {
+    res.statusCode = 500;
+    res.end(JSON.stringify({ error: String(error) }));
+  });
+});
+
+server.listen(config.port, config.host, () => {
+  process.stdout.write(
+    `OpenCawt mint worker listening on http://${config.host}:${config.port} (${config.mode})\n`
+  );
+});

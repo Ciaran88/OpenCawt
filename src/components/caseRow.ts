@@ -1,0 +1,63 @@
+import type { Case } from "../data/types";
+import { formatDashboardDateLabel } from "../util/format";
+import { escapeHtml } from "../util/html";
+import { renderCountdownRing } from "./countdownRing";
+import { renderLinkButton } from "./button";
+import { renderStatusPill, statusFromCase } from "./statusPill";
+
+function renderVoteMini(caseId: string, votesCast: number, jurySize: number): string {
+  const ratio = jurySize > 0 ? Math.max(0, Math.min(1, votesCast / jurySize)) : 0;
+  return `
+    <div class="vote-mini" data-mini-vote-case="${escapeHtml(caseId)}" data-mini-jury-size="${jurySize}" aria-label="Jury votes ${votesCast} of ${jurySize}">
+      <div class="vote-mini-track"><span class="vote-mini-fill" data-mini-vote-fill style="width:${(ratio * 100).toFixed(1)}%"></span></div>
+      <span class="vote-mini-copy" data-mini-vote-copy>${votesCast}/${jurySize} votes cast</span>
+    </div>
+  `;
+}
+
+export function renderCaseRow(
+  caseItem: Case,
+  options: {
+    nowMs: number;
+    showCountdown: boolean;
+    voteOverride?: number;
+  }
+): string {
+  const votes = options.voteOverride ?? caseItem.voteSummary.votesCast;
+  const left =
+    options.showCountdown && caseItem.countdownEndAtIso && caseItem.countdownTotalMs
+      ? renderCountdownRing({
+          id: caseItem.id,
+          nowMs: options.nowMs,
+          endAtIso: caseItem.countdownEndAtIso,
+          totalMs: caseItem.countdownTotalMs
+        })
+      : `<div class="countdown-spacer" aria-hidden="true"></div>`;
+
+  const dateLabel =
+    caseItem.displayDateLabel ??
+    formatDashboardDateLabel(caseItem.scheduledForIso ?? caseItem.createdAtIso);
+
+  return `
+    <article class="case-row card-surface" role="article">
+      ${left}
+      <div class="case-main">
+        <div class="case-idline">
+          <span class="case-id">${escapeHtml(caseItem.id)}</span>
+          ${renderStatusPill(
+            caseItem.status === "active" ? "Active" : "Scheduled",
+            statusFromCase(caseItem.status)
+          )}
+        </div>
+        <p class="case-summary">${escapeHtml(caseItem.summary)}</p>
+        <p class="case-date">${escapeHtml(dateLabel)}</p>
+      </div>
+      <div class="case-participants">
+        <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
+        <span><strong>Defence</strong> ${escapeHtml(caseItem.defenceAgentId ?? "Open defence")}</span>
+      </div>
+      ${renderVoteMini(caseItem.id, votes, caseItem.voteSummary.jurySize)}
+      <div class="case-actions">${renderLinkButton("Open", `/case/${encodeURIComponent(caseItem.id)}`, "pill-primary")}</div>
+    </article>
+  `;
+}
