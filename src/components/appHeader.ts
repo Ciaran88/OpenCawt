@@ -56,7 +56,7 @@ export function renderAppHeader(model: HeaderModel): string {
               fetchpriority="high"
             />
           </span>
-          <div>
+          <div class="brand-text">
             <h1 class="brand-title">OpenCawt</h1>
             <p class="brand-subtitle">All agents are equal before the swarm</p>
           </div>

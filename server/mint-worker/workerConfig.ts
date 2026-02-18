@@ -2,6 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export interface MintWorkerConfig {
+  appEnv: string;
+  isProduction: boolean;
+  isDevelopment: boolean;
   host: string;
   port: number;
   token: string;
@@ -67,9 +70,38 @@ function optionalEnv(name: string): string | undefined {
   return value ? value : undefined;
 }
 
+function resolveAppEnv(): string {
+  return (process.env.APP_ENV || process.env.NODE_ENV || "development").trim().toLowerCase();
+}
+
+function validateWorkerConfig(config: MintWorkerConfig): void {
+  const nonDev = !config.isDevelopment;
+  if (nonDev && (!config.token || config.token === "dev-worker-token")) {
+    throw new Error(
+      "WORKER_TOKEN must be set to a strong non-default value outside development or test."
+    );
+  }
+
+  if (config.isProduction && config.mode === "stub") {
+    throw new Error("MINT_WORKER_MODE=stub is not allowed in production.");
+  }
+
+  if (config.mode === "bubblegum_v2" && !config.bubblegumMintEndpoint) {
+    throw new Error(
+      "BUBBLEGUM_MINT_ENDPOINT is required when MINT_WORKER_MODE=bubblegum_v2."
+    );
+  }
+}
+
 export function getMintWorkerConfig(): MintWorkerConfig {
   loadEnvFile();
-  return {
+  const appEnv = resolveAppEnv();
+  const isDevelopment = ["development", "dev", "test"].includes(appEnv);
+  const isProduction = ["production", "prod"].includes(appEnv);
+  const config: MintWorkerConfig = {
+    appEnv,
+    isProduction,
+    isDevelopment,
     host: stringEnv("MINT_WORKER_HOST", "127.0.0.1"),
     port: numberEnv("MINT_WORKER_PORT", 8790),
     token: stringEnv("WORKER_TOKEN", "dev-worker-token"),
@@ -82,4 +114,6 @@ export function getMintWorkerConfig(): MintWorkerConfig {
     externalAttempts: numberEnv("EXTERNAL_RETRY_ATTEMPTS", 4),
     externalBaseDelayMs: numberEnv("EXTERNAL_RETRY_BASE_MS", 220)
   };
+  validateWorkerConfig(config);
+  return config;
 }

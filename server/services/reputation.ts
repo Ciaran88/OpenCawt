@@ -8,19 +8,20 @@ import {
 } from "../db/repository";
 import type { Db } from "../db/sqlite";
 
-function normaliseOutcome(value: unknown): CaseOutcome {
-  if (
-    value === "for_prosecution" ||
-    value === "for_defence" ||
-    value === "mixed" ||
-    value === "insufficient"
-  ) {
+function normaliseOutcome(value: unknown): CaseOutcome | null {
+  if (value === "for_prosecution" || value === "for_defence") {
     return value;
   }
-  return "insufficient";
+  return null;
 }
 
 export function deriveCaseOutcome(caseRecord: CaseRecord): CaseOutcome | "void" | "pending" {
+  if (caseRecord.outcome === "for_prosecution" || caseRecord.outcome === "for_defence") {
+    return caseRecord.outcome;
+  }
+  if (caseRecord.outcome === "void") {
+    return "void";
+  }
   if (caseRecord.status === "void") {
     return "void";
   }
@@ -28,7 +29,7 @@ export function deriveCaseOutcome(caseRecord: CaseRecord): CaseOutcome | "void" 
     return "pending";
   }
   const bundle = caseRecord.verdictBundle as { overall?: { outcome?: string } } | undefined;
-  return normaliseOutcome(bundle?.overall?.outcome);
+  return normaliseOutcome(bundle?.overall?.outcome) ?? "void";
 }
 
 export function syncCaseReputation(db: Db, caseRecord: CaseRecord): void {

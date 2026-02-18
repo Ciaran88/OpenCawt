@@ -4,3 +4,7 @@ dist/
 .vite/
 .env
 runtime/*.sqlite
+runtime/credential-status.json
+runtime/credential-needs.md
+runtime/local-secrets.env
+runtime/agents/

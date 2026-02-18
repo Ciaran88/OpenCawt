@@ -10,11 +10,28 @@ export interface RequestContext {
 
 export function setCorsHeaders(res: ServerResponse, origin: string): void {
   res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Idempotency-Key, X-Agent-Id, X-Timestamp, X-Payload-Hash, X-Signature, X-System-Key, X-Worker-Token, X-Helius-Token"
   );
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+}
+
+export function setSecurityHeaders(res: ServerResponse, isProduction: boolean): void {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:;"
+  );
+  if (isProduction) {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+  }
 }
 
 export function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {

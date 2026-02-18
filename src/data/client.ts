@@ -1,5 +1,10 @@
 import { signPayload } from "../../shared/signing";
-import { getOrCreateAgentIdentity } from "../util/agentIdentity";
+import {
+  getAgentExternalSigner,
+  getAgentId,
+  getAgentIdentityMode,
+  getOrCreateAgentIdentity
+} from "../util/agentIdentity";
 
 const apiBase =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://127.0.0.1:8787";
@@ -89,16 +94,46 @@ export async function signedPost<T>(
   caseId?: string,
   options?: SignedPostOptions
 ): Promise<T> {
-  const identity = await getOrCreateAgentIdentity();
   const timestamp = Math.floor(Date.now() / 1000);
-  const { payloadHash, signature } = await signPayload({
-    method: "POST",
-    path,
-    caseId,
-    timestamp,
-    payload,
-    privateKey: identity.privateKey
-  });
+  const mode = getAgentIdentityMode();
+
+  let agentId: string;
+  let payloadHash: string;
+  let signature: string;
+  if (mode === "local") {
+    const identity = await getOrCreateAgentIdentity();
+    agentId = identity.agentId;
+    const signed = await signPayload({
+      method: "POST",
+      path,
+      caseId,
+      timestamp,
+      payload,
+      privateKey: identity.privateKey
+    });
+    payloadHash = signed.payloadHash;
+    signature = signed.signature;
+  } else {
+    const signer = getAgentExternalSigner();
+    if (!signer) {
+      throw new ApiClientError(
+        400,
+        "SIGNER_NOT_AVAILABLE",
+        "No external agent signer is available in provider mode."
+      );
+    }
+
+    const signed = await signer.signOpenCawtRequest({
+      method: "POST",
+      path,
+      caseId,
+      timestamp,
+      payload
+    });
+    agentId = await getAgentId();
+    payloadHash = signed.payloadHash;
+    signature = signed.signature;
+  }
 
   const idempotencyKey = options?.idempotencyKey ?? defaultIdempotencyKey();
 
@@ -107,7 +142,7 @@ export async function signedPost<T>(
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": idempotencyKey,
-      "X-Agent-Id": identity.agentId,
+      "X-Agent-Id": agentId,
       "X-Timestamp": String(timestamp),
       "X-Payload-Hash": payloadHash,
       "X-Signature": signature
@@ -119,15 +154,15 @@ export async function signedPost<T>(
 }
 
 export async function registerCurrentAgent(): Promise<{ agentId: string; status: string }> {
-  const identity = await getOrCreateAgentIdentity();
+  const agentId = await getAgentId();
   return signedPost<{ agentId: string; status: string }>(
     "/api/agents/register",
     {
-      agentId: identity.agentId,
+      agentId,
       jurorEligible: true
     },
     undefined,
-    { idempotencyKey: `register:${identity.agentId}` }
+    { idempotencyKey: `register:${agentId}` }
   );
 }
 

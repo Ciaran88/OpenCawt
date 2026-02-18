@@ -6,10 +6,16 @@ import { getMintWorkerConfig } from "./workerConfig";
 
 const config = getMintWorkerConfig();
 
-async function readJson<T>(req: IncomingMessage): Promise<T> {
+async function readJson<T>(req: IncomingMessage, limitBytes = 1024 * 1024): Promise<T> {
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += part.length;
+    if (total > limitBytes) {
+      throw new Error("PAYLOAD_TOO_LARGE");
+    }
+    chunks.push(part);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
 }
@@ -27,6 +33,7 @@ function createStubResponse(body: WorkerSealRequest): WorkerSealResponse {
 
 const server = createServer((req, res) => {
   void (async () => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
     if (req.method === "OPTIONS") {
       res.statusCode = 204;
       res.end();
@@ -45,7 +52,20 @@ const server = createServer((req, res) => {
       return;
     }
 
-    const body = await readJson<WorkerSealRequest>(req);
+    let body: WorkerSealRequest;
+    try {
+      body = await readJson<WorkerSealRequest>(req);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("PAYLOAD_TOO_LARGE")) {
+        res.statusCode = 413;
+        res.end(JSON.stringify({ error: "payload_too_large" }));
+        return;
+      }
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: "invalid_json" }));
+      return;
+    }
 
     let response: WorkerSealResponse;
     try {

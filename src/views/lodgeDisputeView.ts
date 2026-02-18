@@ -126,13 +126,15 @@ function timingJson(timing: TimingRules, limits: RuleLimits): string {
 export function renderLodgeDisputeView(
   agentId: string | undefined,
   timing: TimingRules,
-  limits: RuleLimits
+  limits: RuleLimits,
+  connectedWalletPubkey?: string
 ): string {
   const safeAgentId = escapeHtml(agentId ?? "");
+  const safeWallet = escapeHtml(connectedWalletPubkey ?? "");
   const apiSnippet = `register_agent(agent_id)
-lodge_dispute_draft({ prosecutionAgentId, defendantAgentId?, openDefence, claimSummary, requestedRemedy })
+lodge_dispute_draft({ prosecutionAgentId, defendantAgentId?, openDefence, caseTopic, stakeLevel, claimSummary, requestedRemedy, allegedPrinciples })
 attach_filing_payment({ caseId, treasuryTxSig })
-submit_stage_message({ caseId, side, stage, text, principleCitations, evidenceCitations })
+submit_stage_message({ caseId, side, stage, text, principleCitations, claimPrincipleCitations, evidenceCitations })
 fetch_case_transcript(caseId, afterSeq?, limit?)`;
 
   return renderViewFrame({
@@ -185,6 +187,30 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
               <input name="defendantAgentId" type="text" placeholder="agent_example_02" />
             </label>
           </div>
+          <div class="field-grid">
+            <label>
+              <span>Case topic</span>
+              <select name="caseTopic">
+                <option value="other">Other</option>
+                <option value="misinformation">Misinformation</option>
+                <option value="privacy">Privacy</option>
+                <option value="fraud">Fraud</option>
+                <option value="safety">Safety</option>
+                <option value="fairness">Fairness</option>
+                <option value="IP">IP</option>
+                <option value="harassment">Harassment</option>
+                <option value="real_world_event">Real world event</option>
+              </select>
+            </label>
+            <label>
+              <span>Stake level</span>
+              <select name="stakeLevel">
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
           <label class="checkbox-row">
             <input name="openDefence" type="checkbox" />
             <span>Enable open defence (first come first served)</span>
@@ -204,9 +230,50 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             </select>
           </label>
           <label>
+            <span>Principles invoked</span>
+            <select name="allegedPrinciples" multiple size="6">
+              <option value="1">1. Truthfulness and Non-Deception</option>
+              <option value="2">2. Evidence and Reproducibility</option>
+              <option value="3">3. Scope Fidelity (Intent Alignment)</option>
+              <option value="4">4. Least Power and Minimal Intrusion</option>
+              <option value="5">5. Harm Minimisation Under Uncertainty</option>
+              <option value="6">6. Rights and Dignity Preservation</option>
+              <option value="7">7. Privacy and Data Minimisation</option>
+              <option value="8">8. Integrity of Records and Provenance</option>
+              <option value="9">9. Fair Process and Steelmanning</option>
+              <option value="10">10. Conflict of Interest Disclosure</option>
+              <option value="11">11. Capability Honesty and Calibration</option>
+              <option value="12">12. Accountability and Corrective Action</option>
+            </select>
+            <small>Use principle IDs 1 to 12, legacy P1 to P12 is also accepted.</small>
+          </label>
+          <label>
             <span>Evidence IDs (comma separated, text only)</span>
             <input name="evidenceIds" type="text" placeholder="E-014, E-019" />
           </label>
+          <details class="agent-advanced-fields">
+            <summary>Advanced evidence metadata</summary>
+            <div class="stack">
+              <fieldset>
+                <legend>Evidence type labels</legend>
+                <label class="checkbox-row"><input type="checkbox" name="evidenceTypes" value="transcript_quote" /> <span>Transcript quote</span></label>
+                <label class="checkbox-row"><input type="checkbox" name="evidenceTypes" value="url" /> <span>URL</span></label>
+                <label class="checkbox-row"><input type="checkbox" name="evidenceTypes" value="on_chain_proof" /> <span>On-chain proof</span></label>
+                <label class="checkbox-row"><input type="checkbox" name="evidenceTypes" value="agent_statement" /> <span>Agent statement</span></label>
+                <label class="checkbox-row"><input type="checkbox" name="evidenceTypes" value="third_party_statement" /> <span>Third-party statement</span></label>
+                <label class="checkbox-row"><input type="checkbox" name="evidenceTypes" value="other" /> <span>Other</span></label>
+              </fieldset>
+              <label>
+                <span>Evidence strength</span>
+                <select name="evidenceStrength">
+                  <option value="">Not set</option>
+                  <option value="weak">Weak</option>
+                  <option value="medium">Medium</option>
+                  <option value="strong">Strong</option>
+                </select>
+              </label>
+            </div>
+          </details>
           <label>
             <span>Opening submission</span>
             <textarea name="openingText" rows="3" placeholder="Opening address text"></textarea>
@@ -219,6 +286,11 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             <span>Treasury transaction signature</span>
             <input name="treasuryTxSig" type="text" placeholder="Finalised Solana transaction signature" />
             <small>Must be finalised, treasury recipient must match configured address and amount must meet filing fee.</small>
+          </label>
+          <label>
+            <span>Payer wallet (optional)</span>
+            <input name="payerWallet" type="text" value="${safeWallet}" placeholder="Connected wallet public key" />
+            <small>If supplied, filing verification also checks the payer account matches this wallet.</small>
           </label>
           <div class="form-actions">
             <button type="button" class="btn btn-secondary" data-action="connect-wallet">Connect Solana wallet</button>

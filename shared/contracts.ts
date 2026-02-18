@@ -21,8 +21,37 @@ export type SessionStage =
 
 export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "voting" | "sealed";
 
-export type CaseOutcome = "for_prosecution" | "for_defence" | "mixed" | "insufficient";
+export type CaseOutcome = "for_prosecution" | "for_defence";
 export type DefenceState = "none" | "invited" | "volunteered" | "accepted";
+export type CaseTopic =
+  | "misinformation"
+  | "privacy"
+  | "fraud"
+  | "safety"
+  | "fairness"
+  | "IP"
+  | "harassment"
+  | "real_world_event"
+  | "other";
+export type StakeLevel = "low" | "medium" | "high";
+export type LearningVoidReasonGroup =
+  | "no_defence"
+  | "prosecution_timeout"
+  | "defence_timeout"
+  | "admin_void"
+  | "other_timeout"
+  | "other";
+export type ClaimOutcome = "for_prosecution" | "for_defence" | "undecided";
+export type BallotVoteLabel = "for_prosecution" | "for_defence" | "mixed";
+export type EvidenceTypeLabel =
+  | "transcript_quote"
+  | "url"
+  | "on_chain_proof"
+  | "agent_statement"
+  | "third_party_statement"
+  | "other";
+export type EvidenceStrength = "weak" | "medium" | "strong";
+export type BallotConfidence = "low" | "medium" | "high";
 
 export type CaseVoidReason =
   | "missing_defence_assignment"
@@ -31,6 +60,7 @@ export type CaseVoidReason =
   | "missing_closing_submission"
   | "missing_summing_submission"
   | "voting_timeout"
+  | "inconclusive_verdict"
   | "manual_void";
 
 export type Remedy = "warn" | "delist" | "ban" | "restitution" | "other" | "none";
@@ -52,7 +82,8 @@ export interface ClaimRecord {
   claimId: string;
   summary: string;
   requestedRemedy: Remedy;
-  allegedPrinciples: string[];
+  allegedPrinciples: number[];
+  claimOutcome: ClaimOutcome;
 }
 
 export interface EvidenceRecord {
@@ -63,6 +94,8 @@ export interface EvidenceRecord {
   bodyText: string;
   references: string[];
   bodyHash: string;
+  evidenceTypes: EvidenceTypeLabel[];
+  evidenceStrength?: EvidenceStrength;
   createdAtIso: string;
 }
 
@@ -72,7 +105,8 @@ export interface SubmissionRecord {
   side: "prosecution" | "defence";
   phase: Extract<CasePhase, "opening" | "evidence" | "closing" | "summing_up">;
   text: string;
-  principleCitations: string[];
+  principleCitations: number[];
+  claimPrincipleCitations?: Record<string, number[]>;
   evidenceCitations: string[];
   contentHash: string;
   createdAtIso: string;
@@ -93,6 +127,9 @@ export interface BallotRecord {
   jurorId: string;
   votes: VoteEntry[];
   reasoningSummary: string;
+  vote?: BallotVoteLabel;
+  principlesReliedOn: number[];
+  confidence?: BallotConfidence;
   submittedAtIso: string;
   ballotHash: string;
 }
@@ -141,7 +178,8 @@ export interface VerdictBundle {
   overall: {
     jurySize: number;
     votesReceived: number;
-    outcome: CaseOutcome;
+    outcome?: CaseOutcome;
+    inconclusive: boolean;
     remedy: Remedy;
   };
   integrity: {
@@ -232,22 +270,32 @@ export interface CreateCaseDraftPayload {
   prosecutionAgentId: string;
   defendantAgentId?: string;
   openDefence: boolean;
-  claimSummary: string;
+  claimSummary?: string;
   requestedRemedy: Remedy;
-  allegedPrinciples?: string[];
+  allegedPrinciples?: Array<string | number>;
+  caseTopic?: CaseTopic;
+  stakeLevel?: StakeLevel;
+  claims?: Array<{
+    claimSummary: string;
+    requestedRemedy: Remedy;
+    principlesInvoked?: Array<string | number>;
+  }>;
 }
 
 export interface SubmitEvidencePayload {
   kind: EvidenceKind;
   bodyText: string;
   references: string[];
+  evidenceTypes?: EvidenceTypeLabel[];
+  evidenceStrength?: EvidenceStrength;
 }
 
 export interface SubmitPhasePayload {
   side: "prosecution" | "defence";
   phase: Extract<CasePhase, "opening" | "evidence" | "closing" | "summing_up">;
   text: string;
-  principleCitations: string[];
+  principleCitations: Array<string | number>;
+  claimPrincipleCitations?: Record<string, Array<string | number>>;
   evidenceCitations: string[];
 }
 
@@ -255,13 +303,17 @@ export interface SubmitStageMessagePayload {
   side: "prosecution" | "defence";
   stage: Extract<SessionStage, "opening_addresses" | "evidence" | "closing_addresses" | "summing_up">;
   text: string;
-  principleCitations: string[];
+  principleCitations: Array<string | number>;
+  claimPrincipleCitations?: Record<string, Array<string | number>>;
   evidenceCitations: string[];
 }
 
 export interface SubmitBallotPayload {
   votes: VoteEntry[];
   reasoningSummary: string;
+  principlesReliedOn: Array<string | number>;
+  confidence?: BallotConfidence;
+  vote?: BallotVoteLabel;
 }
 
 export interface JurorReadinessPayload {
@@ -271,6 +323,7 @@ export interface JurorReadinessPayload {
 
 export interface FileCasePayload {
   treasuryTxSig: string;
+  payerWallet?: string;
 }
 
 export interface DefenceAssignPayload {

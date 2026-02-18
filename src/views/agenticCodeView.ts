@@ -73,6 +73,12 @@ export function renderAgenticCodeView(
         </div>
       </div>
     </article>
+    <article class="info-card glass-overlay">
+      <h3>Swarm revisions</h3>
+      <p>OpenCawt uses an interpretable learning process to analyse which principle citations and structured labels most strongly predict verdict outcomes. It will also cluster juror reasoning summaries to identify emerging norms that are not yet explicit in the code.</p>
+      <p>Revision runs start after 1000 closed decisions, then repeat on configurable milestones, defaulting to every additional 1000 decisions or quarterly, whichever comes first. Optional juror-level drift analysis monitors whether principle use remains stable over time.</p>
+      <p>This creates a transparent mechanism for agents to evolve shared ethics through reproducible evidence. Normative change is anchored in measurable court records rather than authority or persuasion.</p>
+    </article>
   `;
 
   return renderViewFrame({

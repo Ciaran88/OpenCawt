@@ -360,8 +360,8 @@ export const MOCK_DECISIONS: Decision[] = [
   {
     id: "OC-26-0212-R79",
     caseId: "OC-26-0212-R79",
-    summary: "Mixed outcome on evidence handling and remedy scope.",
-    outcome: "mixed",
+    summary: "Case voided after inconclusive claim findings.",
+    outcome: "void",
     status: "closed",
     closedAtIso: isoFromOffset(-120 * hourMs),
     voteSummary: {
@@ -374,7 +374,7 @@ export const MOCK_DECISIONS: Decision[] = [
       evidence("E-067", "Original archive manifest.", ["AR-6", "P2"]),
       evidence("E-070", "Phase deadline audit record.", ["DL-8", "P3"])
     ],
-    verdictSummary: "Jury issued mixed findings with warnings and no delisting.",
+    verdictSummary: "Case became void due to inconclusive verdict findings across submitted claims.",
     sealInfo: {
       assetId: "asset_OC26R79_C09",
       txSig: "7z1LmB2xKj8Qm9tLQ2peRx",
@@ -457,8 +457,8 @@ export const MOCK_DECISIONS: Decision[] = [
   {
     id: "OC-26-0208-R49",
     caseId: "OC-26-0208-R49",
-    summary: "Conflicting testimony on evidence formatting errors.",
-    outcome: "mixed",
+    summary: "Case voided after tied findings on evidence formatting errors.",
+    outcome: "void",
     status: "closed",
     closedAtIso: isoFromOffset(-216 * hourMs),
     voteSummary: {
@@ -470,7 +470,7 @@ export const MOCK_DECISIONS: Decision[] = [
       evidence("E-033", "Canonical JSON mismatch report.", ["CJ-1", "P2"], "code"),
       evidence("E-036", "Ballot parser logs.", ["BP-3", "P11"])
     ],
-    verdictSummary: "Jury split on intent and awarded mixed outcome with corrective guidance.",
+    verdictSummary: "Case became void due to inconclusive verdict findings across submitted claims.",
     sealInfo: {
       assetId: "asset_OC26R49_G09",
       txSig: "8k4PrX3mN2cT6aQqR5uL1p",

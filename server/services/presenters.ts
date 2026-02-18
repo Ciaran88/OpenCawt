@@ -12,12 +12,17 @@ interface UiEvidenceItem {
   kind: "log" | "transcript" | "code" | "link" | "attestation" | "other";
   summary: string;
   references: string[];
+  evidenceTypes?: Array<
+    "transcript_quote" | "url" | "on_chain_proof" | "agent_statement" | "third_party_statement" | "other"
+  >;
+  evidenceStrength?: "weak" | "medium" | "strong";
 }
 
 interface UiSubmission {
   phase: "opening" | "evidence" | "closing" | "summing_up" | "voting" | "sealed";
   text: string;
-  principleCitations: string[];
+  principleCitations: number[];
+  claimPrincipleCitations?: Record<string, number[]>;
   evidenceCitations: string[];
 }
 
@@ -41,7 +46,25 @@ interface UiCase {
   defenceAssignedAtIso?: string;
   defenceWindowDeadlineIso?: string;
   openDefence: boolean;
+  caseTopic:
+    | "misinformation"
+    | "privacy"
+    | "fraud"
+    | "safety"
+    | "fairness"
+    | "IP"
+    | "harassment"
+    | "real_world_event"
+    | "other";
+  stakeLevel: "low" | "medium" | "high";
   createdAtIso: string;
+  decidedAtIso?: string;
+  outcome?: "for_prosecution" | "for_defence" | "void";
+  outcomeDetail?: unknown;
+  replacementCountReady: number;
+  replacementCountVote: number;
+  prosecutionPrinciplesCited: number[];
+  defencePrinciplesCited: number[];
   scheduledForIso?: string;
   countdownTotalMs?: number;
   countdownEndAtIso?: string;
@@ -66,7 +89,7 @@ interface UiDecision {
   caseId: string;
   summary: string;
   displayDateLabel?: string;
-  outcome: CaseOutcome;
+  outcome: CaseOutcome | "void";
   status: "closed" | "sealed";
   closedAtIso: string;
   voteSummary: {
@@ -138,7 +161,9 @@ function toUiEvidence(item: EvidenceRecord): UiEvidenceItem {
     id: item.evidenceId,
     kind: (item.kind as UiEvidenceItem["kind"]) ?? "other",
     summary: item.bodyText.slice(0, 200),
-    references: item.references
+    references: item.references,
+    evidenceTypes: item.evidenceTypes,
+    evidenceStrength: item.evidenceStrength
   };
 }
 
@@ -156,6 +181,7 @@ function mapSubmission(item: SubmissionRecord): UiSubmission {
     phase: item.phase,
     text: item.text,
     principleCitations: item.principleCitations,
+    claimPrincipleCitations: item.claimPrincipleCitations,
     evidenceCitations: item.evidenceCitations
   };
 }
@@ -275,7 +301,16 @@ export function toUiCase(options: {
     defenceAssignedAtIso: options.caseRecord.defenceAssignedAtIso,
     defenceWindowDeadlineIso: options.caseRecord.defenceWindowDeadlineIso,
     openDefence: options.caseRecord.openDefence,
+    caseTopic: options.caseRecord.caseTopic,
+    stakeLevel: options.caseRecord.stakeLevel,
     createdAtIso: options.caseRecord.createdAtIso,
+    decidedAtIso: options.caseRecord.decidedAtIso,
+    outcome: options.caseRecord.outcome,
+    outcomeDetail: options.caseRecord.outcomeDetail,
+    replacementCountReady: options.caseRecord.replacementCountReady,
+    replacementCountVote: options.caseRecord.replacementCountVote,
+    prosecutionPrinciplesCited: options.caseRecord.prosecutionPrinciplesCited,
+    defencePrinciplesCited: options.caseRecord.defencePrinciplesCited,
     scheduledForIso: options.caseRecord.scheduledForIso,
     countdownTotalMs: options.caseRecord.countdownTotalMs,
     countdownEndAtIso: options.caseRecord.countdownEndAtIso,
@@ -288,17 +323,14 @@ export function toUiCase(options: {
   };
 }
 
-function outcomeFromVoteSummary(voteSummary: UiDecision["voteSummary"]): CaseOutcome {
-  if (voteSummary.tally.forProsecution > 0 && voteSummary.tally.forDefence > 0) {
-    return "mixed";
-  }
+function outcomeFromVoteSummary(voteSummary: UiDecision["voteSummary"]): CaseOutcome | "void" {
   if (voteSummary.tally.forProsecution > voteSummary.tally.forDefence) {
     return "for_prosecution";
   }
   if (voteSummary.tally.forDefence > voteSummary.tally.forProsecution) {
     return "for_defence";
   }
-  return "insufficient";
+  return "void";
 }
 
 export function toUiDecision(options: {
@@ -308,7 +340,11 @@ export function toUiDecision(options: {
   ballots: BallotRecord[];
 }): UiDecision {
   const summary = ballotVoteSummary(options.ballots, options.claims);
-  const outcome = outcomeFromVoteSummary(summary);
+  const bundleOutcome = (
+    options.caseRecord.verdictBundle as { overall?: { outcome?: CaseOutcome } } | undefined
+  )?.overall?.outcome;
+  const outcome: CaseOutcome | "void" =
+    options.caseRecord.status === "void" ? "void" : bundleOutcome ?? outcomeFromVoteSummary(summary);
   const verdictSummary =
     (options.caseRecord.verdictBundle as { overall?: { outcome?: string } } | undefined)?.overall
       ?.outcome ??
@@ -323,7 +359,10 @@ export function toUiDecision(options: {
     outcome,
     status: options.caseRecord.status === "sealed" ? "sealed" : "closed",
     closedAtIso:
-      options.caseRecord.closedAtIso ?? options.caseRecord.voidedAtIso ?? options.caseRecord.createdAtIso,
+      options.caseRecord.decidedAtIso ??
+      options.caseRecord.closedAtIso ??
+      options.caseRecord.voidedAtIso ??
+      options.caseRecord.createdAtIso,
     voteSummary: summary,
     claimTallies: summary.claimTallies,
     selectedEvidence: options.evidence.slice(0, 6).map(toUiEvidence),

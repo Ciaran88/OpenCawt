@@ -100,34 +100,28 @@ function majorityRemedy(remedies: Remedy[], fallback: Remedy): Remedy {
 
 function deriveOverallOutcome(
   findings: Array<"proven" | "not_proven" | "insufficient">
-): CaseOutcome {
+): CaseOutcome | null {
   const proven = findings.filter((item) => item === "proven").length;
   const notProven = findings.filter((item) => item === "not_proven").length;
-  const insufficient = findings.filter((item) => item === "insufficient").length;
+  const total = findings.length;
 
-  if (proven === findings.length && findings.length > 0) {
+  if (proven === total && total > 0) {
     return "for_prosecution";
   }
 
-  if (notProven > 0 && proven === 0) {
+  if (notProven === total && total > 0) {
     return "for_defence";
   }
 
-  if (proven > 0 && notProven > 0) {
-    return "mixed";
-  }
-
-  if (insufficient === findings.length) {
-    return "insufficient";
-  }
-
-  return "mixed";
+  return null;
 }
 
 export async function computeDeterministicVerdict(input: VerdictInput): Promise<{
   bundle: VerdictBundle;
   verdictHash: string;
   majoritySummary: string;
+  overallOutcome: CaseOutcome | null;
+  inconclusive: boolean;
 }> {
   const claims = input.claims.map((claim) => {
     const tally = tallyClaimVotes(claim.claimId, input.ballots);
@@ -145,6 +139,7 @@ export async function computeDeterministicVerdict(input: VerdictInput): Promise<
   });
 
   const overallOutcome = deriveOverallOutcome(claims.map((item) => item.finding));
+  const inconclusive = overallOutcome === null;
   const overallRemedy =
     claims.map((item) => item.majorityRemedy).find((item) => item !== "none" && item !== "other") ??
     "none";
@@ -155,13 +150,14 @@ export async function computeDeterministicVerdict(input: VerdictInput): Promise<
     closedAtIso: input.closedAtIso,
     parties: {
       prosecution: input.prosecutionAgentId,
-      defence: input.defenceAgentId
+      ...(input.defenceAgentId ? { defence: input.defenceAgentId } : {})
     },
     claims,
     overall: {
       jurySize: input.jurySize,
       votesReceived: input.ballots.length,
-      outcome: overallOutcome,
+      ...(overallOutcome ? { outcome: overallOutcome } : {}),
+      inconclusive,
       remedy: overallRemedy
     },
     integrity: {
@@ -176,12 +172,16 @@ export async function computeDeterministicVerdict(input: VerdictInput): Promise<
 
   const verdictHash = await canonicalHashHex(bundle);
 
-  const majoritySummary = `Outcome ${overallOutcome} with ${input.ballots.length}/${input.jurySize} ballots recorded.`;
+  const majoritySummary = inconclusive
+    ? `Inconclusive verdict with ${input.ballots.length}/${input.jurySize} ballots recorded.`
+    : `Outcome ${overallOutcome} with ${input.ballots.length}/${input.jurySize} ballots recorded.`;
 
   return {
     bundle,
     verdictHash,
-    majoritySummary
+    majoritySummary,
+    overallOutcome,
+    inconclusive
   };
 }
 

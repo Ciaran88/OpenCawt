@@ -82,6 +82,14 @@ interface AppDom {
 
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+async function tryResolveAgentId(): Promise<string | undefined> {
+  try {
+    return await getAgentId();
+  } catch {
+    return undefined;
+  }
+}
+
 export function mountApp(root: HTMLElement): void {
   root.innerHTML = renderAppShell();
 
@@ -243,7 +251,14 @@ export function mountApp(root: HTMLElement): void {
     } else if (route.name === "agentic-code") {
       setMainContent(renderAgenticCodeView(state.principles, state.caseMetrics.closedCasesCount));
     } else if (route.name === "lodge-dispute") {
-      setMainContent(renderLodgeDisputeView(state.agentId, state.timingRules, state.ruleLimits));
+      setMainContent(
+        renderLodgeDisputeView(
+          state.agentId,
+          state.timingRules,
+          state.ruleLimits,
+          state.connectedWalletPubkey
+        )
+      );
     } else if (route.name === "join-jury-pool") {
       setMainContent(
         renderJoinJuryPoolView(
@@ -332,13 +347,16 @@ export function mountApp(root: HTMLElement): void {
   });
 
   const refreshData = async (renderAfter = true) => {
-    const agentId = state.agentId ?? (await getAgentId());
+    const agentId = state.agentId ?? (await tryResolveAgentId());
+    if (agentId) {
+      state.agentId = agentId;
+    }
     const [schedule, decisions, ticker, assignedCases, openDefenceCases, leaderboard, caseMetrics] =
       await Promise.all([
         getSchedule(),
         getPastDecisions(),
         getTickerEvents(),
-        getAssignedCases(agentId),
+        agentId ? getAssignedCases(agentId) : Promise.resolve([]),
         getOpenDefenceCases(buildOpenDefenceFilters()),
         getLeaderboard(20, 5),
         getCaseMetrics()
@@ -372,9 +390,20 @@ export function mountApp(root: HTMLElement): void {
     const defendantAgentId = String(formData.get("defendantAgentId") || "").trim();
     const openDefence = formData.get("openDefence") === "on";
     const claimSummary = String(formData.get("claimSummary") || "").trim();
+    const caseTopic = String(formData.get("caseTopic") || "other").trim();
+    const stakeLevel = String(formData.get("stakeLevel") || "medium").trim();
+    const allegedPrinciples = formData
+      .getAll("allegedPrinciples")
+      .map((value) => String(value).trim())
+      .filter(Boolean);
     const openingText = String(formData.get("openingText") || "").trim();
     const evidenceBodyText = String(formData.get("evidenceBodyText") || "").trim();
+    const evidenceTypes = Array.from(
+      form.querySelectorAll<HTMLInputElement>("input[name='evidenceTypes']:checked")
+    ).map((node) => node.value);
+    const evidenceStrength = String(formData.get("evidenceStrength") || "").trim();
     const treasuryTxSig = String(formData.get("treasuryTxSig") || "").trim();
+    const payerWallet = String(formData.get("payerWallet") || "").trim();
     const requestedRemedy = String(
       formData.get("requestedRemedy") || "warn"
     ) as LodgeDisputeDraftPayload["requestedRemedy"];
@@ -399,8 +428,11 @@ export function mountApp(root: HTMLElement): void {
       prosecutionAgentId,
       defendantAgentId: defendantAgentId || undefined,
       openDefence,
+      caseTopic: caseTopic as LodgeDisputeDraftPayload["caseTopic"],
+      stakeLevel: stakeLevel as LodgeDisputeDraftPayload["stakeLevel"],
       claimSummary,
       requestedRemedy,
+      allegedPrinciples,
       evidenceIds
     };
 
@@ -411,7 +443,13 @@ export function mountApp(root: HTMLElement): void {
         await submitEvidence(result.draftId, {
           kind: "other",
           bodyText: evidenceBodyText || `Referenced evidence IDs: ${evidenceIds.join(", ")}`,
-          references: evidenceIds
+          references: evidenceIds,
+          evidenceTypes: evidenceTypes as Array<
+            "transcript_quote" | "url" | "on_chain_proof" | "agent_statement" | "third_party_statement" | "other"
+          >,
+          evidenceStrength: evidenceStrength
+            ? (evidenceStrength as "weak" | "medium" | "strong")
+            : undefined
         });
       }
 
@@ -419,13 +457,13 @@ export function mountApp(root: HTMLElement): void {
         side: "prosecution",
         phase: "opening",
         text: openingText || claimSummary,
-        principleCitations: ["P2", "P8"],
+        principleCitations: allegedPrinciples.length > 0 ? allegedPrinciples : [2, 8],
         evidenceCitations: evidenceIds
       });
 
       let filedCopy = "Draft created and opening submission stored.";
       if (treasuryTxSig) {
-        const fileResult = await fileCase(result.draftId, treasuryTxSig);
+        const fileResult = await fileCase(result.draftId, treasuryTxSig, payerWallet || undefined);
         filedCopy = fileResult.warning
           ? `Case filed with warning: ${fileResult.warning}`
           : "Case filed successfully after treasury payment verification.";
@@ -486,6 +524,13 @@ export function mountApp(root: HTMLElement): void {
     const stage = String(formData.get("stage") || "") as SubmitStageMessagePayload["stage"];
     const side = String(formData.get("side") || "prosecution") as SubmitStageMessagePayload["side"];
     const text = String(formData.get("text") || "").trim();
+    const principleCitationsRaw = String(formData.get("principleCitations") || "").trim();
+    const principleCitations = principleCitationsRaw
+      ? principleCitationsRaw
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : [2];
 
     if (!caseId || !stage || !text) {
       showToast({ title: "Validation", body: "Case, stage and text are required." });
@@ -497,7 +542,7 @@ export function mountApp(root: HTMLElement): void {
         side,
         stage,
         text,
-        principleCitations: ["P2"],
+        principleCitations,
         evidenceCitations: []
       });
       showToast({
@@ -546,6 +591,12 @@ export function mountApp(root: HTMLElement): void {
     const claimId = String(formData.get("claimId") || "").trim();
     const finding = String(formData.get("finding") || "insufficient") as BallotVote["finding"];
     const reasoningSummary = String(formData.get("reasoningSummary") || "").trim();
+    const principlesReliedOn = formData
+      .getAll("principlesReliedOn")
+      .map((value) => String(value).trim())
+      .filter(Boolean);
+    const confidence = String(formData.get("confidence") || "").trim();
+    const vote = String(formData.get("vote") || "").trim();
 
     if (!caseId || !claimId) {
       showToast({ title: "Validation", body: "Case and claim IDs are required." });
@@ -560,9 +611,19 @@ export function mountApp(root: HTMLElement): void {
       });
       return;
     }
+    if (principlesReliedOn.length < 1 || principlesReliedOn.length > 3) {
+      showToast({
+        title: "Validation",
+        body: "Provide one to three principles relied on."
+      });
+      return;
+    }
 
     const payload: SubmitBallotPayload = {
       reasoningSummary,
+      principlesReliedOn,
+      confidence: confidence ? (confidence as SubmitBallotPayload["confidence"]) : undefined,
+      vote: vote ? (vote as SubmitBallotPayload["vote"]) : undefined,
       votes: [
         {
           claimId,
@@ -679,6 +740,7 @@ export function mountApp(root: HTMLElement): void {
         }
         try {
           const key = await connectInjectedWallet();
+          state.connectedWalletPubkey = key ?? undefined;
           showToast({
             title: "Wallet connected",
             body: key
@@ -836,12 +898,12 @@ export function mountApp(root: HTMLElement): void {
 
   const bootstrap = async () => {
     try {
-      const [principles, agentId, timingRules, ruleLimits] = await Promise.all([
+      const [principles, timingRules, ruleLimits] = await Promise.all([
         getAgenticCode(),
-        getAgentId(),
         getTimingRules(),
         getRuleLimits()
       ]);
+      const agentId = await tryResolveAgentId();
       state.principles = principles;
       state.agentId = agentId;
       state.timingRules = timingRules;

@@ -23,6 +23,9 @@ export interface RetryConfig {
 }
 
 export interface AppConfig {
+  appEnv: string;
+  isProduction: boolean;
+  isDevelopment: boolean;
   apiHost: string;
   apiPort: number;
   corsOrigin: string;
@@ -43,6 +46,7 @@ export interface AppConfig {
   heliusApiKey?: string;
   heliusRpcUrl: string;
   heliusDasUrl: string;
+  heliusWebhookEnabled: boolean;
   heliusWebhookToken?: string;
   rules: TimingRules;
   limits: NumericLimitConfig;
@@ -107,11 +111,67 @@ function optionalStringEnv(name: string): string | undefined {
   return value ? value : undefined;
 }
 
+function booleanEnv(name: string, fallback: boolean): boolean {
+  const value = process.env[name];
+  if (!value) {
+    return fallback;
+  }
+  const normalised = value.trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalised);
+}
+
+function resolveAppEnv(): string {
+  return (process.env.APP_ENV || process.env.NODE_ENV || "development").trim().toLowerCase();
+}
+
+function validateConfig(config: AppConfig): void {
+  const nonDev = !config.isDevelopment;
+  if (nonDev) {
+    if (!config.systemApiKey || config.systemApiKey === "dev-system-key") {
+      throw new Error(
+        "SYSTEM_API_KEY must be set to a strong non-default value outside development or test."
+      );
+    }
+    if (!config.workerToken || config.workerToken === "dev-worker-token") {
+      throw new Error(
+        "WORKER_TOKEN must be set to a strong non-default value outside development or test."
+      );
+    }
+    if (config.corsOrigin.trim() === "*") {
+      throw new Error("CORS_ORIGIN cannot be wildcard in non-development environments.");
+    }
+  }
+
+  if (config.isProduction) {
+    if (config.solanaMode === "stub") {
+      throw new Error("SOLANA_MODE=stub is not allowed in production.");
+    }
+    if (config.drandMode === "stub") {
+      throw new Error("DRAND_MODE=stub is not allowed in production.");
+    }
+    if (config.sealWorkerMode === "stub") {
+      throw new Error("SEAL_WORKER_MODE=stub is not allowed in production.");
+    }
+  }
+
+  if (config.heliusWebhookEnabled && !config.heliusWebhookToken) {
+    throw new Error(
+      "HELIUS_WEBHOOK_ENABLED is true but HELIUS_WEBHOOK_TOKEN is not configured."
+    );
+  }
+}
+
 export function getConfig(): AppConfig {
   loadEnvFile();
+  const appEnv = resolveAppEnv();
+  const isDevelopment = ["development", "dev", "test"].includes(appEnv);
+  const isProduction = ["production", "prod"].includes(appEnv);
   const port = process.env.PORT ? Number(process.env.PORT) : numberEnv("API_PORT", 8787);
   const host = process.env.PORT ? "0.0.0.0" : stringEnv("API_HOST", "127.0.0.1");
-  return {
+  const config: AppConfig = {
+    appEnv,
+    isProduction,
+    isDevelopment,
     apiHost: host,
     apiPort: port,
     corsOrigin: stringEnv("CORS_ORIGIN", "http://127.0.0.1:5173"),
@@ -132,6 +192,7 @@ export function getConfig(): AppConfig {
     heliusApiKey: optionalStringEnv("HELIUS_API_KEY"),
     heliusRpcUrl: stringEnv("HELIUS_RPC_URL", "https://mainnet.helius-rpc.com"),
     heliusDasUrl: stringEnv("HELIUS_DAS_URL", "https://mainnet.helius-rpc.com"),
+    heliusWebhookEnabled: booleanEnv("HELIUS_WEBHOOK_ENABLED", false),
     heliusWebhookToken: optionalStringEnv("HELIUS_WEBHOOK_TOKEN"),
     rules: {
       sessionStartsAfterSeconds: numberEnv("RULE_SESSION_START_DELAY_SEC", 3600),
@@ -170,4 +231,6 @@ export function getConfig(): AppConfig {
     },
     logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error"
   };
+  validateConfig(config);
+  return config;
 }

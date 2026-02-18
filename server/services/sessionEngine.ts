@@ -6,6 +6,7 @@ import {
   createJurySelectionRun,
   getCaseRuntime,
   getSubmissionBySidePhase,
+  incrementReplacementCount,
   listBallotsByCase,
   listCasesByStatuses,
   listEligibleJurors,
@@ -177,6 +178,11 @@ async function replaceJuror(
     memberStatus: mode === "readiness" ? "pending_ready" : "active_voting",
     readyDeadlineAtIso: mode === "readiness" ? deadlineIso : undefined,
     votingDeadlineAtIso: mode === "voting" ? deadlineIso : undefined
+  });
+
+  incrementReplacementCount(deps.db, {
+    caseId: caseRecord.caseId,
+    mode: mode === "readiness" ? "ready" : "vote"
   });
 
   appendTranscriptEvent(deps.db, {

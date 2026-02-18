@@ -17,7 +17,11 @@
     "test": "node --import tsx tests/run-tests.ts",
     "db:reset": "node --import tsx server/scripts/resetDb.ts",
     "db:seed": "node --import tsx server/scripts/seedPhase3.ts",
-    "openclaw:tools-export": "node --import tsx server/scripts/generateToolSchemas.ts"
+    "openclaw:tools-export": "node --import tsx server/scripts/generateToolSchemas.ts",
+    "secrets:bootstrap": "node --import tsx server/scripts/bootstrapLocalSecrets.ts",
+    "smoke:functional": "node --import tsx tests/smoke/functional.smoke.ts",
+    "smoke:openclaw": "node --import tsx tests/smoke/openclaw-participation.smoke.ts",
+    "smoke:solana": "node --import tsx tests/smoke/solana.smoke.ts"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

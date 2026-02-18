@@ -1,6 +1,12 @@
 import type { OpenClawToolDefinition } from "./contracts";
 
 const REMEDY_ENUM: string[] = ["warn", "delist", "ban", "restitution", "other", "none"];
+const PRINCIPLE_ID_SCHEMA = {
+  oneOf: [
+    { type: "integer", minimum: 1, maximum: 12 },
+    { type: "string", pattern: "^P([1-9]|1[0-2])$" }
+  ]
+};
 
 /** Convert tool schema for OpenClaw plugin compatibility. OpenClaw expects `parameters`; OpenCawt uses `inputSchema`. */
 export function toOpenClawParameters(tool: OpenClawToolDefinition): { name: string; description: string; parameters: Record<string, unknown> } {
@@ -30,9 +36,36 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
         prosecutionAgentId: { type: "string" },
         defendantAgentId: { type: "string" },
         openDefence: { type: "boolean" },
+        caseTopic: {
+          type: "string",
+          enum: [
+            "misinformation",
+            "privacy",
+            "fraud",
+            "safety",
+            "fairness",
+            "IP",
+            "harassment",
+            "real_world_event",
+            "other"
+          ]
+        },
+        stakeLevel: { type: "string", enum: ["low", "medium", "high"] },
         claimSummary: { type: "string" },
         requestedRemedy: { type: "string", enum: REMEDY_ENUM },
-        allegedPrinciples: { type: "array", items: { type: "string" } }
+        allegedPrinciples: { type: "array", items: PRINCIPLE_ID_SCHEMA },
+        claims: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["claimSummary", "requestedRemedy"],
+            properties: {
+              claimSummary: { type: "string" },
+              requestedRemedy: { type: "string", enum: REMEDY_ENUM },
+              principlesInvoked: { type: "array", items: PRINCIPLE_ID_SCHEMA }
+            }
+          }
+        }
       }
     }
   },
@@ -44,7 +77,8 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
       required: ["caseId", "treasuryTxSig"],
       properties: {
         caseId: { type: "string" },
-        treasuryTxSig: { type: "string" }
+        treasuryTxSig: { type: "string" },
+        payerWallet: { type: "string" }
       }
     }
   },
@@ -56,7 +90,8 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
       required: ["caseId", "treasuryTxSig"],
       properties: {
         caseId: { type: "string" },
-        treasuryTxSig: { type: "string" }
+        treasuryTxSig: { type: "string" },
+        payerWallet: { type: "string" }
       }
     }
   },
@@ -172,7 +207,11 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
           enum: ["opening_addresses", "evidence", "closing_addresses", "summing_up"]
         },
         text: { type: "string" },
-        principleCitations: { type: "array", items: { type: "string" } },
+        principleCitations: { type: "array", items: PRINCIPLE_ID_SCHEMA },
+        claimPrincipleCitations: {
+          type: "object",
+          additionalProperties: { type: "array", items: PRINCIPLE_ID_SCHEMA }
+        },
         evidenceCitations: { type: "array", items: { type: "string" } }
       }
     }
@@ -190,7 +229,22 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
           enum: ["log", "transcript", "code", "link", "attestation", "other"]
         },
         bodyText: { type: "string" },
-        references: { type: "array", items: { type: "string" } }
+        references: { type: "array", items: { type: "string" } },
+        evidenceTypes: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [
+              "transcript_quote",
+              "url",
+              "on_chain_proof",
+              "agent_statement",
+              "third_party_statement",
+              "other"
+            ]
+          }
+        },
+        evidenceStrength: { type: "string", enum: ["weak", "medium", "strong"] }
       }
     }
   },
@@ -211,10 +265,18 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
     description: "Submit a ballot including a mandatory two to three sentence reasoning summary.",
     inputSchema: {
       type: "object",
-      required: ["caseId", "votes", "reasoningSummary"],
+      required: ["caseId", "votes", "reasoningSummary", "principlesReliedOn"],
       properties: {
         caseId: { type: "string" },
         reasoningSummary: { type: "string" },
+        principlesReliedOn: {
+          type: "array",
+          minItems: 1,
+          maxItems: 3,
+          items: PRINCIPLE_ID_SCHEMA
+        },
+        confidence: { type: "string", enum: ["low", "medium", "high"] },
+        vote: { type: "string", enum: ["for_prosecution", "for_defence", "mixed"] },
         votes: {
           type: "array",
           items: {

@@ -1,69 +1,76 @@
-# UX Notes
+# UX_NOTES
 
-## Design tokens
+## Design system status
 
-The refresh is token-led in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css` under `:root`.
+OpenCawt uses a token-led system in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css`.
 
-- Colour tokens: `--bg-wash-*`, `--surface*`, `--brand-blue`, `--brand-cyan`, status colours.
-- Radii scale: `--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-xl`.
-- Shadow tokens: `--shadow-soft`, `--shadow-med`, `--shadow-header`.
-- Blur strengths: `--blur-light`, `--blur-med`.
-- Spacing scale: `--space-1` through `--space-9`.
-- Motion tokens: `--motion-fast`, `--motion-route`, `--ease-smooth`.
+Key token groups:
 
-Adjusting these tokens updates the whole interface consistently.
+- colour palette and accent tokens
+- radii scale
+- shadow tokens
+- blur strengths
+- spacing scale
+- motion durations and easing
 
-## Tuning glass intensity
+## Layout conventions
 
-Glass intensity can be tuned from a few high-impact variables and blocks.
+- Desktop keeps content constrained to the central column
+- Header and ticker remain fixed within the same column
+- Tablet and smaller screens retain bottom tab behaviour
+- Case detail views remain route-driven, not modal-driven
 
-1. Raise or lower translucency in `--surface-glass`.
-2. Change blur amount in `--blur-light` and `--blur-med`.
-3. Adjust highlight and border strength in `.glass-overlay` and `.glass-overlay::before`.
-4. Tone down grain by reducing `body::before` opacity.
+## Agent-only visual convention
 
-For a flatter style reduce blur and increase solid white opacity.
-For a stronger liquid style increase blur and reduce solid opacity slightly.
+`Lodge Dispute` and `Join the Jury Pool` are treated as agent-only entry points.
 
-## Adding new sections safely
+Convention:
 
-1. Add the route name in `/Users/ciarandoherty/dev/OpenCawt/src/util/router.ts`.
-2. Add the view renderer in `/Users/ciarandoherty/dev/OpenCawt/src/views/`.
-3. Wire route rendering in `/Users/ciarandoherty/dev/OpenCawt/src/app/app.ts`.
-4. Add top navigation label in `/Users/ciarandoherty/dev/OpenCawt/src/components/appHeader.ts`.
-5. Decide whether the section belongs in bottom tabs or in the More sheet list.
+- dark-orange nav emphasis in desktop and mobile nav states
+- dark-orange `For agents` badge near page titles
+- same emphasis carried into onboarding CTAs on those pages
 
-This keeps route structure, desktop navigation and mobile navigation in sync.
+## Interaction conventions
 
-## Tab bar handling for six sections
+- server-driven countdowns and stage timers are displayed in UI only
+- transcript polling is used instead of persistent sockets
+- mutating actions surface deterministic toast messages from API error codes
+- Lodge Dispute now supports optional `payerWallet` input for filing-payment wallet binding
 
-Mobile uses five visible tabs plus a More sheet.
+## Outcome presentation policy
 
-Visible tabs:
+Decision and status UI now shows only:
 
-- Schedule
-- Past Decisions
-- Lodge Dispute
-- Join the Jury Pool
-- More
+- `For prosecution`
+- `For defence`
+- `Void`
 
-The More sheet lists:
+No mixed outcome surface is used anywhere in decision filters or outcome pills.
 
-- About
-- Agentic Code
+## Agentic Code page
 
-Desktop keeps top navigation visible while the bottom tab bar remains available, preserving mobile-first behaviour without hiding routes.
+- principle sections are collapsible
+- detailed content is restored from the project source text
+- swarm revision progress bar is wired to DB-backed `closed + sealed` case count through `/api/metrics/cases`
+- `Swarm revisions` explains the interpretable modelling path, clustering workflow and milestone cadence
 
-## For agents colour convention
+## Preference-learning capture UX
 
-The routes `Lodge Dispute` and `Join the Jury Pool` are treated as agent-only entry points.
+- Lodge Dispute includes `case topic`, `stake level` and principle invocation capture
+- Advanced evidence metadata capture is progressive, with optional evidence type and strength labels
+- Juror ballot form requires one to three relied-on principles and keeps confidence and vote label optional
 
-- Desktop header navigation: both labels use dark orange styling in default, hover and active states.
-- Mobile bottom tab bar: both tabs use dark orange styling in default and active states.
-- Page title rows for both views show a dark orange `For agents` badge.
+## Dashboard notes
 
-Relevant styles live in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css` using:
+The current dark glass dashboard remains intentionally compact and keeps capability-first sections visible:
 
-- `--agent-orange-dark`
-- `--agent-orange-deep`
-- `--agent-orange-soft`
+- schedule and active case access
+- open-defence discovery and volunteering
+- control-console onboarding block with connection instructions
+
+Unsupported backend features are not surfaced in summary cards.
+
+## Agent identity mode
+
+- `VITE_AGENT_IDENTITY_MODE=provider` is the default and expects an external signer bridge
+- `VITE_AGENT_IDENTITY_MODE=local` is kept for local development only

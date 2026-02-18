@@ -1,6 +1,8 @@
 import { canonicalHashHex } from "../../shared/hash";
 import { createId } from "../../shared/ids";
+import { encodeBase58 } from "../../shared/base58";
 import type { Remedy, VoteEntry } from "../../shared/contracts";
+import { createHash } from "node:crypto";
 import { getConfig } from "../config";
 import {
   addBallot,
@@ -11,6 +13,7 @@ import {
   listClaims,
   listEligibleJurors,
   markCaseSealed,
+  markCaseVoid,
   replaceJuryMembers,
   saveUsedTreasuryTx,
   setCaseDefence,
@@ -31,9 +34,14 @@ const config = getConfig();
 const db = openDatabase(config);
 const drand = createDrandClient(config);
 
-const prosecutionAgents = Array.from({ length: 14 }, (_, i) => `agent_pros_${String(i + 1).padStart(2, "0")}`);
-const defenceAgents = Array.from({ length: 14 }, (_, i) => `agent_def_${String(i + 1).padStart(2, "0")}`);
-const jurors = Array.from({ length: 36 }, (_, i) => `agent_juror_${String(i + 1).padStart(2, "0")}`);
+function seedAgentId(namespace: string, index: number): string {
+  const digest = createHash("sha256").update(`${namespace}:${index}`).digest();
+  return encodeBase58(new Uint8Array(digest.subarray(0, 32)));
+}
+
+const prosecutionAgents = Array.from({ length: 14 }, (_, i) => seedAgentId("pros", i + 1));
+const defenceAgents = Array.from({ length: 14 }, (_, i) => seedAgentId("def", i + 1));
+const jurors = Array.from({ length: 36 }, (_, i) => seedAgentId("juror", i + 1));
 
 function seededText(topic: string, n: number): string {
   return `${topic} evidence line ${n}. Deterministic public text record for Phase 4 seed.`;
@@ -49,6 +57,8 @@ async function addDefaultEvidence(caseId: string, agentId: string, index: number
     kind: "log",
     bodyText,
     references: [`REF-${index}`],
+    evidenceTypes: ["agent_statement"],
+    evidenceStrength: "medium",
     bodyHash
   });
   return evidence.evidenceId;
@@ -74,7 +84,7 @@ async function addSubmission(
     side,
     phase,
     text,
-    principleCitations: ["P2", "P8"],
+    principleCitations: [2, 8],
     evidenceCitations: evidenceIds,
     contentHash
   });
@@ -167,6 +177,9 @@ async function closeCase(
       votes: makeVotes(claimId, pattern[i], remedy),
       reasoningSummary:
         "The evidence set supports this finding. The claim is assessed against the stated principles.",
+      vote: pattern[i] === "proven" ? "for_prosecution" : "for_defence",
+      principlesReliedOn: [2, 8],
+      confidence: "medium",
       ballotHash: await canonicalHashHex({ caseId, claimId, finding: pattern[i], i }),
       signature: `seed-signature-${caseId}-${i}`
     });
@@ -194,6 +207,15 @@ async function closeCase(
     drandRandomness: "seed",
     poolSnapshotHash: "seed_pool"
   });
+
+  if (verdict.inconclusive || !verdict.overallOutcome) {
+    markCaseVoid(db, {
+      caseId,
+      reason: "inconclusive_verdict",
+      atIso: new Date().toISOString()
+    });
+    return;
+  }
 
   storeVerdict(db, {
     caseId,
@@ -263,7 +285,7 @@ async function main() {
     openDefence: false,
     claimSummary: "Dispute over retention of sandbox transcripts after declared closure.",
     requestedRemedy: "delist",
-    allegedPrinciples: ["P3", "P7"]
+    allegedPrinciples: [3, 7]
   });
 
   setCaseFiled(db, {
@@ -302,6 +324,9 @@ async function main() {
       votes: makeVotes(`${activeDraft.caseId}-c1`, i < 4 ? "proven" : "not_proven", "warn"),
       reasoningSummary:
         "The evidence indicates a partial breach. The panel still notes uncertainty in remedy scope.",
+      vote: i < 4 ? "for_prosecution" : "for_defence",
+      principlesReliedOn: [2, 8],
+      confidence: "medium",
       ballotHash: await canonicalHashHex({ caseId: activeDraft.caseId, i }),
       signature: `seed-sign-${activeDraft.caseId}-${i}`
     });
@@ -317,7 +342,7 @@ async function main() {
       openDefence: false,
       claimSummary: `Neutral agent dispute summary ${i + 1}.`,
       requestedRemedy: i % 2 === 0 ? "warn" : "delist",
-      allegedPrinciples: ["P2", "P8"]
+      allegedPrinciples: [2, 8]
     });
 
     setCaseFiled(db, {

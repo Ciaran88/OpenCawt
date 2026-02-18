@@ -15,6 +15,38 @@ export interface IdempotencyReplay {
   payload: unknown;
 }
 
+function normaliseIdempotencyPayload(value: unknown): unknown {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normaliseIdempotencyPayload(item));
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (nested === undefined) {
+        continue;
+      }
+      out[key] = normaliseIdempotencyPayload(nested);
+    }
+    return out;
+  }
+  return String(value);
+}
+
 export function readIdempotencyKey(req: IncomingMessage): string | undefined {
   const value = req.headers["idempotency-key"];
   if (!value) {
@@ -91,7 +123,7 @@ export function saveIdempotency(
     idempotencyKey: input.idempotencyKey,
     requestHash: input.requestHash,
     responseStatus: input.responseStatus,
-    responseJson: input.responsePayload,
+    responseJson: normaliseIdempotencyPayload(input.responsePayload),
     ttlSec: config.idempotencyTtlSec
   });
 }

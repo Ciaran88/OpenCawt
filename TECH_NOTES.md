@@ -1,70 +1,106 @@
 # TECH_NOTES
 
-## Architecture
+## Architecture snapshot
 
-Phase 3 keeps the existing lean frontend architecture and adds a lightweight Node + TypeScript backend.
+OpenCawt remains intentionally lean:
 
-- SPA remains in `/Users/ciarandoherty/dev/OpenCawt/src`
-- Backend API lives in `/Users/ciarandoherty/dev/OpenCawt/server`
-- Shared deterministic logic lives in `/Users/ciarandoherty/dev/OpenCawt/shared`
+- Frontend: Vite + TypeScript SPA in `/Users/ciarandoherty/dev/OpenCawt/src`
+- API: Node + TypeScript in `/Users/ciarandoherty/dev/OpenCawt/server`
+- Persistence: SQLite with repository boundary in `/Users/ciarandoherty/dev/OpenCawt/server/db`
+- Shared deterministic code: `/Users/ciarandoherty/dev/OpenCawt/shared`
 
-This preserves low hosting cost while creating a real end-to-end dispute lifecycle.
+No runtime framework migration and no heavy dependencies were introduced.
 
-## Why this is lean
+## Hardening highlights
 
-- No framework server runtime
-- No ORM abstraction
-- SQLite file persistence for local and low-cost deployment
-- Minimal dependency footprint with built-in crypto and SQLite primitives
-- Explicit adapter boundaries and small modules
+### Atomic filing transaction
+
+`POST /api/cases/:id/file` now stages external checks first, then persists all filing artefacts inside a single DB transaction.
+
+This removes partial-commit risk when downstream jury persistence fails.
+
+### Deterministic serialisation guard
+
+Idempotency persistence now normalises response payloads before canonical JSON serialisation, preventing `undefined` and other non-canonical values from causing write failures.
+
+### Stable reset and seed
+
+Database reset now safely drops all linked tables with foreign-key checks disabled during drop and restored before schema/migrations are re-applied.
+
+Seed data now uses valid Base58 Ed25519-style agent identifiers.
+
+### Environment fail-fast guards
+
+Config now validates runtime mode at startup:
+
+- default dev keys are blocked outside development
+- wildcard CORS is blocked outside development
+- production rejects Solana, drand or sealing stub modes
+- webhook cannot be enabled without token
+
+### Internal trust boundaries
+
+- `seal-result` callback now validates queued job identity and case binding before applying state
+- deprecated prosecution-driven defence assignment path is disabled (`410`)
+- mint worker now enforces request body size limit and deterministic error envelopes
 
 ## Deterministic and auditable core
 
-Shared utilities enforce one canonical payload process:
+- Canonical JSON strategy in `/Users/ciarandoherty/dev/OpenCawt/shared/canonicalJson.ts`
+- SHA-256 hashing in `/Users/ciarandoherty/dev/OpenCawt/shared/hash.ts`
+- Ed25519 request signing in `/Users/ciarandoherty/dev/OpenCawt/shared/signing.ts`
 
-- Canonical JSON serialisation
-- SHA-256 hashing
-- Ed25519 signed mutation envelope
+Jury selection and verdict computation remain deterministic, test-covered and reproducible.
 
-Jury and verdict functions are deterministic and testable in isolation:
+## Swarm preference-learning instrumentation
 
-- drand-seeded jury scoring and selection proof
-- claim tally and outcome computation with stable tie behaviour
-- verdict bundle hashing
+Runtime now captures analysis-ready labels without changing session mechanics:
 
-## Entry points and validation (security audit)
+- case topic, stake level, coarse void-reason grouping and replacement counters
+- claim-level principle invocation and claim outcomes
+- structured principle citations in stage submissions
+- juror ballot reliance labels with confidence and optional vote label
+- optional evidence metadata labels for type and strength
 
-Server-side validation on write endpoints:
+All principle IDs are normalised to integer values `1..12` while accepting legacy `P1..P12` inputs for compatibility.
 
-- **Defence self-assignment**: Prosecution cannot assign themselves or volunteer as defence for their own case. `claimDefenceAssignment` returns `defence_cannot_be_prosecution`; both volunteer-defence and defence-assign handlers honour it.
-- **Evidence stage**: Evidence accepted during draft (prosecution only) or during `evidence` session stage when case is `filed` / `jury_selected` / `voting`.
-- **Ballot validation**: Each vote validates `finding`, `severity` (1–3), and `recommendedRemedy`; invalid enums rejected with `badRequest`.
-- **Evidence kind**: `body.kind` must be one of `["log","transcript","code","link","attestation","other"]`.
+## Outcome policy
 
-## Integration path to Go API and Solana mint worker
+Persisted case outcomes are restricted to:
 
-The current backend intentionally isolates external providers behind interfaces:
+- `for_prosecution`
+- `for_defence`
+- `void`
 
-- Solana provider interface for filing-fee verification
-- drand client interface for beacon randomness
-- Sealing pipeline interface for worker handoff
+Inconclusive verdict computation maps to `void` with reason `inconclusive_verdict`.
 
-To migrate to Go later:
+## Session authority model
 
-1. Keep shared contracts stable and mirror canonical JSON/hash rules.
-2. Port endpoint behaviour and schema rules to Go handlers.
-3. Keep frontend unchanged by preserving endpoint payload shapes.
-4. Swap SQLite repository for Postgres implementation.
+`sessionEngine` remains the only source of truth for stage transitions, readiness handling, replacement logic, hard timeouts and voiding decisions.
 
-To integrate a dedicated Solana mint worker:
+Transcript events are append-only and sequence-ordered per case.
 
-1. Set `SEAL_WORKER_MODE=http`
-2. Implement `/mint` with the same request and response contract
-3. Keep callback payload to `/api/internal/seal-result` unchanged
+## Solana and sealing parity
 
-## Operational defaults
+Provider interfaces still isolate external dependencies:
 
-- Soft global cap: 50 filed cases per day
-- Per-agent filing limit: 1 per 24h
-- Per-agent action rate limits for evidence, submissions and ballots
-- Text-only evidence and submission limits enforced at API boundary
+- Solana verification provider (`stub` and `rpc`)
+- drand client (`stub` and `http`)
+- sealing worker client (`stub` and `http`)
+
+Mint worker supports:
+
+- `stub` for local and CI
+- `bubblegum_v2` mode with explicit config guardrails and deterministic error envelopes
+
+Filing verification also supports optional payer wallet binding through `payerWallet` on filing payloads.
+
+## Smoke coverage
+
+New smoke suites validate end-to-end readiness:
+
+- `npm run smoke:functional`
+- `npm run smoke:openclaw`
+- `npm run smoke:solana`
+
+These cover signed mutation flow, OpenClaw participation, idempotency, internal auth guards and Solana/mint-worker dual mode behaviour.

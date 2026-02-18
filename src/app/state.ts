@@ -37,6 +37,7 @@ export interface OpenDefenceControls {
 export interface AppState {
   route: AppRoute;
   agentId?: string;
+  connectedWalletPubkey?: string;
   nowMs: number;
   timingRules: TimingRules;
   ruleLimits: RuleLimits;
@@ -75,6 +76,7 @@ export function createInitialState(): AppState {
   return {
     route: { name: "schedule" },
     agentId: undefined,
+    connectedWalletPubkey: undefined,
     nowMs: Date.now(),
     timingRules: {
       sessionStartsAfterSeconds: 3600,

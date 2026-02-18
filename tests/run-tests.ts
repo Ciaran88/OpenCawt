@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { canonicalJson } from "../shared/canonicalJson";
 import { encodeBase58 } from "../shared/base58";
 import { canonicalHashHex } from "../shared/hash";
@@ -9,6 +11,8 @@ import { selectJuryDeterministically } from "../server/services/jury";
 import { computeDeterministicVerdict } from "../server/services/verdict";
 import { getConfig } from "../server/config";
 import { openDatabase, resetDatabase } from "../server/db/sqlite";
+import { setSecurityHeaders } from "../server/services/http";
+import { createSolanaProvider } from "../server/services/solanaProvider";
 import {
   appendTranscriptEvent,
   claimDefenceAssignment,
@@ -31,11 +35,57 @@ import {
 import { createSessionEngine } from "../server/services/sessionEngine";
 import { createDrandClient } from "../server/services/drand";
 import {
+  normalisePrincipleIds,
+  validateCaseTopic,
+  validateReasoningSummary,
+  validateStakeLevel
+} from "../server/services/validation";
+import {
   computeCountdownState,
   computeRingDashOffset,
   formatDurationLabel
 } from "../src/util/countdown";
 import { parseRoute, routeToPath } from "../src/util/router";
+
+function withEnv<T>(
+  overrides: Record<string, string | undefined>,
+  action: () => T | Promise<T>
+): Promise<T> | T {
+  const keys = Object.keys(overrides);
+  const previous: Record<string, string | undefined> = {};
+  for (const key of keys) {
+    previous[key] = process.env[key];
+    const next = overrides[key];
+    if (typeof next === "undefined") {
+      delete process.env[key];
+    } else {
+      process.env[key] = next;
+    }
+  }
+
+  const restore = () => {
+    for (const key of keys) {
+      const prev = previous[key];
+      if (typeof prev === "undefined") {
+        delete process.env[key];
+      } else {
+        process.env[key] = prev;
+      }
+    }
+  };
+
+  try {
+    const result = action();
+    if (result instanceof Promise) {
+      return result.finally(restore);
+    }
+    restore();
+    return result;
+  } catch (error) {
+    restore();
+    throw error;
+  }
+}
 
 async function testCountdownMaths() {
   const now = 1_000_000;
@@ -75,6 +125,153 @@ async function testCanonicalHashing() {
   assert.equal(await canonicalHashHex(a), await canonicalHashHex(b));
 
   assert.throws(() => canonicalJson({ bad: Number.POSITIVE_INFINITY }), /non-finite/i);
+}
+
+function testSwarmValidationHelpers() {
+  assert.deepEqual(normalisePrincipleIds([1, "P2", "3", "P2"], { field: "principles" }), [1, 2, 3]);
+  assert.throws(
+    () => normalisePrincipleIds(["P0"], { field: "principles" }),
+    /range 1 to 12/
+  );
+  assert.throws(
+    () => normalisePrincipleIds([], { required: true, min: 1, field: "principlesReliedOn" }),
+    /at least 1/
+  );
+
+  assert.equal(
+    validateReasoningSummary("This is sentence one. This is sentence two."),
+    "This is sentence one. This is sentence two."
+  );
+  assert.throws(
+    () => validateReasoningSummary("Only one sentence"),
+    /two or three sentences/
+  );
+
+  assert.equal(validateCaseTopic("misinformation"), "misinformation");
+  assert.equal(validateStakeLevel("high"), "high");
+  assert.throws(() => validateCaseTopic("random"), /caseTopic must be one of/);
+  assert.throws(() => validateStakeLevel("critical"), /stakeLevel must be one of/);
+}
+
+function testMigrationBackfillDefaults() {
+  const dbPath = "/tmp/opencawt_phase42_migration_backfill.sqlite";
+  rmSync(dbPath, { force: true });
+  const raw = new DatabaseSync(dbPath);
+  raw.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE cases (
+      case_id TEXT PRIMARY KEY,
+      public_slug TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL,
+      session_stage TEXT NOT NULL DEFAULT 'pre_session',
+      prosecution_agent_id TEXT NOT NULL,
+      defendant_agent_id TEXT,
+      defence_agent_id TEXT,
+      defence_state TEXT NOT NULL DEFAULT 'none',
+      defence_assigned_at TEXT,
+      defence_window_deadline TEXT,
+      open_defence INTEGER NOT NULL,
+      summary TEXT NOT NULL,
+      requested_remedy TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      filed_at TEXT,
+      jury_selected_at TEXT,
+      session_started_at TEXT,
+      closed_at TEXT,
+      sealed_at TEXT,
+      void_reason TEXT,
+      voided_at TEXT,
+      scheduled_for TEXT,
+      countdown_end_at TEXT,
+      countdown_total_ms INTEGER,
+      treasury_tx_sig TEXT UNIQUE,
+      filing_warning TEXT,
+      drand_round INTEGER,
+      drand_randomness TEXT,
+      pool_snapshot_hash TEXT,
+      selection_proof_json TEXT,
+      verdict_hash TEXT,
+      verdict_bundle_json TEXT,
+      seal_asset_id TEXT,
+      seal_tx_sig TEXT,
+      seal_uri TEXT,
+      last_event_seq_no INTEGER NOT NULL DEFAULT 0,
+      sealed_disabled INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE claims (
+      claim_id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL,
+      claim_index INTEGER NOT NULL,
+      summary TEXT NOT NULL,
+      requested_remedy TEXT NOT NULL,
+      alleged_principles_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE submissions (
+      submission_id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL,
+      side TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      text_body TEXT NOT NULL,
+      principle_citations_json TEXT NOT NULL,
+      evidence_citations_json TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE ballots (
+      ballot_id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL,
+      juror_id TEXT NOT NULL,
+      ballot_json TEXT NOT NULL,
+      ballot_hash TEXT NOT NULL,
+      reasoning_summary TEXT NOT NULL DEFAULT '',
+      signature TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE evidence_items (
+      evidence_id TEXT PRIMARY KEY,
+      case_id TEXT NOT NULL,
+      submitted_by TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      body_text TEXT NOT NULL,
+      references_json TEXT NOT NULL,
+      body_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
+  `);
+  const now = new Date().toISOString();
+  raw.prepare(
+    `INSERT INTO cases (
+      case_id, public_slug, status, prosecution_agent_id, open_defence, summary, requested_remedy,
+      created_at, closed_at, verdict_bundle_json, void_reason
+    ) VALUES (?, ?, 'closed', ?, 1, ?, 'warn', ?, ?, ?, NULL)`
+  ).run(
+    "OC-MIG-001",
+    "oc-mig-001",
+    "agent_migration",
+    "Migration backfill case",
+    now,
+    now,
+    JSON.stringify({ overall: { outcome: "for_prosecution" } })
+  );
+  raw.close();
+
+  const config = getConfig();
+  config.dbPath = dbPath;
+  const migrated = openDatabase(config);
+  const row = migrated
+    .prepare(
+      `SELECT case_topic, stake_level, outcome, decided_at, replacement_count_ready, replacement_count_vote FROM cases WHERE case_id = ?`
+    )
+    .get("OC-MIG-001") as Record<string, unknown>;
+  assert.equal(row.case_topic, "other");
+  assert.equal(row.stake_level, "medium");
+  assert.equal(row.outcome, "for_prosecution");
+  assert.ok(typeof row.decided_at === "string");
+  assert.equal(Number(row.replacement_count_ready), 0);
+  assert.equal(Number(row.replacement_count_vote), 0);
+  migrated.close();
 }
 
 async function testSignatureVerification() {
@@ -184,6 +381,218 @@ async function testVerdictDeterminism() {
 
   assert.equal(first.verdictHash, second.verdictHash);
   assert.equal(first.bundle.overall.outcome, "for_prosecution");
+  assert.equal(first.inconclusive, false);
+}
+
+async function testVerdictInconclusiveMapsToVoid() {
+  const outcomeA: VoteEntry = {
+    claimId: "OC-TEST-02-c1",
+    finding: "proven",
+    severity: 2,
+    recommendedRemedy: "warn",
+    rationale: "r",
+    citations: []
+  };
+  const outcomeB: VoteEntry = {
+    claimId: "OC-TEST-02-c1",
+    finding: "not_proven",
+    severity: 2,
+    recommendedRemedy: "none",
+    rationale: "r",
+    citations: []
+  };
+
+  const result = await computeDeterministicVerdict({
+    caseId: "OC-TEST-02",
+    prosecutionAgentId: "agent_p",
+    defenceAgentId: "agent_d",
+    closedAtIso: new Date().toISOString(),
+    jurySize: 11,
+    claims: [{ claimId: "OC-TEST-02-c1", requestedRemedy: "warn" }],
+    ballots: [
+      { votes: [outcomeA], ballotHash: "h1" },
+      { votes: [outcomeB], ballotHash: "h2" }
+    ],
+    evidenceHashes: [],
+    submissionHashes: [],
+    drandRound: 1,
+    drandRandomness: "rand",
+    poolSnapshotHash: "pool"
+  });
+
+  assert.equal(result.inconclusive, true);
+  assert.equal(result.overallOutcome, null);
+  assert.equal(result.bundle.overall.outcome, undefined);
+}
+
+function testConfigFailFastGuards() {
+  assert.throws(
+    () =>
+      withEnv(
+        {
+          APP_ENV: "production",
+          CORS_ORIGIN: "https://app.example.com",
+          SYSTEM_API_KEY: "dev-system-key",
+          WORKER_TOKEN: "worker-prod-token",
+          SOLANA_MODE: "rpc",
+          DRAND_MODE: "http",
+          SEAL_WORKER_MODE: "http",
+          HELIUS_WEBHOOK_ENABLED: "false",
+          HELIUS_WEBHOOK_TOKEN: undefined
+        },
+        () => getConfig()
+      ),
+    /SYSTEM_API_KEY/
+  );
+
+  assert.throws(
+    () =>
+      withEnv(
+        {
+          APP_ENV: "production",
+          CORS_ORIGIN: "https://app.example.com",
+          SYSTEM_API_KEY: "system-prod-token",
+          WORKER_TOKEN: "worker-prod-token",
+          SOLANA_MODE: "stub",
+          DRAND_MODE: "http",
+          SEAL_WORKER_MODE: "http",
+          HELIUS_WEBHOOK_ENABLED: "false",
+          HELIUS_WEBHOOK_TOKEN: undefined
+        },
+        () => getConfig()
+      ),
+    /SOLANA_MODE=stub/
+  );
+
+  assert.throws(
+    () =>
+      withEnv(
+        {
+          APP_ENV: "staging",
+          CORS_ORIGIN: "*",
+          SYSTEM_API_KEY: "system-stage-token",
+          WORKER_TOKEN: "worker-stage-token",
+          HELIUS_WEBHOOK_ENABLED: "false",
+          HELIUS_WEBHOOK_TOKEN: undefined
+        },
+        () => getConfig()
+      ),
+    /CORS_ORIGIN/
+  );
+
+  assert.throws(
+    () =>
+      withEnv(
+        {
+          APP_ENV: "staging",
+          CORS_ORIGIN: "https://staging.example.com",
+          SYSTEM_API_KEY: "system-stage-token",
+          WORKER_TOKEN: "worker-stage-token",
+          HELIUS_WEBHOOK_ENABLED: "true",
+          HELIUS_WEBHOOK_TOKEN: undefined
+        },
+        () => getConfig()
+      ),
+    /HELIUS_WEBHOOK_ENABLED/
+  );
+}
+
+function testSecurityHeadersPresence() {
+  const devHeaders = new Map<string, string>();
+  setSecurityHeaders(
+    {
+      setHeader: (name: string, value: string) => {
+        devHeaders.set(name, value);
+      }
+    } as any,
+    false
+  );
+
+  assert.ok(devHeaders.get("Content-Security-Policy"));
+  assert.equal(devHeaders.get("X-Content-Type-Options"), "nosniff");
+  assert.equal(devHeaders.get("X-Frame-Options"), "DENY");
+  assert.equal(devHeaders.get("Referrer-Policy"), "no-referrer");
+
+  const prodHeaders = new Map<string, string>();
+  setSecurityHeaders(
+    {
+      setHeader: (name: string, value: string) => {
+        prodHeaders.set(name, value);
+      }
+    } as any,
+    true
+  );
+  assert.ok(prodHeaders.get("Strict-Transport-Security"));
+}
+
+async function testRpcPayerMismatchGuard() {
+  await withEnv(
+    {
+      APP_ENV: "development",
+      SOLANA_MODE: "rpc",
+      HELIUS_RPC_URL: "https://example.invalid/rpc",
+      HELIUS_DAS_URL: "https://example.invalid/das",
+      TREASURY_ADDRESS: "5HcofW4v2knQh4Lh6dgyy4R8L4gS2T1o9d7PRN6vk4RP",
+      FILING_FEE_LAMPORTS: "1000",
+      EXTERNAL_RETRY_ATTEMPTS: "1",
+      EXTERNAL_TIMEOUT_MS: "1000"
+    },
+    async () => {
+      const config = getConfig();
+      const provider = createSolanaProvider(config);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            result: {
+              meta: {
+                err: null,
+                preBalances: [2000, 0],
+                postBalances: [900, 1100]
+              },
+              transaction: {
+                message: {
+                  accountKeys: [
+                    {
+                      pubkey: "6q6n9y8aYV2B7QhKf8qQYxLoY6dX2eS3p4uZbN2kL8Xa",
+                      signer: true
+                    },
+                    { pubkey: config.treasuryAddress }
+                  ]
+                }
+              }
+            }
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+
+      try {
+        let mismatchRejected = false;
+        try {
+          await provider.verifyFilingFeeTx(
+            "4f4cvvW5k6vB37XQ5fWnq7v7Jb2LGaBPLS2E9qfcQPy4",
+            "9PhQqnLe49xFghhq2e2hQr9m5m9mVhm9E5L7zDPjXgRo"
+          );
+        } catch (error) {
+          mismatchRejected = true;
+          const code =
+            typeof error === "object" && error && "code" in error
+              ? String((error as { code?: string }).code)
+              : "";
+          const message = error instanceof Error ? error.message : String(error);
+          assert.ok(
+            code === "PAYER_WALLET_MISMATCH" || message.includes("payer wallet"),
+            `Unexpected payer mismatch error: ${message}`
+          );
+        }
+        assert.equal(mismatchRejected, true);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }
+  );
 }
 
 function testTreasuryReplayPrevention() {
@@ -303,6 +712,32 @@ function testIdempotencyRecordStorage() {
   assert.ok(record);
   assert.equal(record?.requestHash, "hash-1");
   assert.equal(record?.responseStatus, 201);
+
+  saveIdempotencyRecord(db, {
+    agentId: "agent-test",
+    method: "POST",
+    path: "/api/cases/draft",
+    idempotencyKey: "idem-2",
+    requestHash: "hash-2",
+    responseStatus: 200,
+    responseJson: {
+      ok: true,
+      optional: undefined,
+      nested: {
+        keep: "x",
+        drop: undefined
+      }
+    },
+    ttlSec: 600
+  });
+  const record2 = getIdempotencyRecord(db, {
+    agentId: "agent-test",
+    method: "POST",
+    path: "/api/cases/draft",
+    idempotencyKey: "idem-2"
+  });
+  assert.ok(record2);
+  assert.deepEqual(record2?.responseJson, { ok: true, nested: { keep: "x" } });
 
   db.close();
 }
@@ -502,7 +937,7 @@ function testVictoryScoreAndLeaderboard() {
 
   clearAgentCaseActivity(db, caseIds[0]);
   for (let i = 0; i < caseIds.length; i += 1) {
-    const outcome = i < 4 ? "for_prosecution" : i === 4 ? "for_defence" : "mixed";
+    const outcome = i < 4 ? "for_prosecution" : "for_defence";
     logAgentCaseActivity(db, {
       agentId: "agent-a",
       caseId: caseIds[i],
@@ -535,7 +970,7 @@ function testVictoryScoreAndLeaderboard() {
 
   const profile = getAgentProfile(db, "agent-a", { activityLimit: 10 });
   assert.equal(profile.stats.prosecutionsTotal, 6);
-  assert.equal(profile.stats.prosecutionsWins, 5);
+  assert.equal(profile.stats.prosecutionsWins, 4);
   assert.equal(profile.stats.defencesTotal, 0);
   assert.equal(profile.recentActivity.length, 6);
 
@@ -620,9 +1055,15 @@ async function run() {
   await testCountdownMaths();
   testRouteParsing();
   await testCanonicalHashing();
+  testSwarmValidationHelpers();
+  testMigrationBackfillDefaults();
   await testSignatureVerification();
   await testDrandSelectionDeterminism();
   await testVerdictDeterminism();
+  await testVerdictInconclusiveMapsToVoid();
+  testConfigFailFastGuards();
+  testSecurityHeadersPresence();
+  await testRpcPayerMismatchGuard();
   testTreasuryReplayPrevention();
   testCaseRuntimeInitialisation();
   testTranscriptSequence();
@@ -633,6 +1074,11 @@ async function run() {
   testVictoryScoreAndLeaderboard();
   testOpenDefenceQuery();
   await testDrandHttpIntegration();
+  if (process.env.RUN_SMOKE_OPENCLAW === "1") {
+    execFileSync("node", ["--import", "tsx", "tests/smoke/openclaw-participation.smoke.ts"], {
+      stdio: "inherit"
+    });
+  }
   process.stdout.write("All tests passed\n");
 }
 

@@ -7,7 +7,6 @@ export type StatusPillVariant =
   | "sealed"
   | "closed"
   | "void"
-  | "mixed"
   | "prosecution"
   | "defence";
 

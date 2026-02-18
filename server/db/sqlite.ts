@@ -96,26 +96,34 @@ export function openDatabase(config: AppConfig): Db {
 }
 
 export function resetDatabase(db: Db): void {
-  db.exec(`
-  DROP TABLE IF EXISTS idempotency_records;
-  DROP TABLE IF EXISTS case_transcript_events;
-  DROP TABLE IF EXISTS case_runtime;
-  DROP TABLE IF EXISTS schema_migrations;
-  DROP TABLE IF EXISTS agent_action_log;
-  DROP TABLE IF EXISTS used_treasury_txs;
-  DROP TABLE IF EXISTS seal_jobs;
-  DROP TABLE IF EXISTS verdicts;
-  DROP TABLE IF EXISTS ballots;
-  DROP TABLE IF EXISTS jury_panel_members;
-  DROP TABLE IF EXISTS jury_selection_runs;
-  DROP TABLE IF EXISTS jury_panels;
-  DROP TABLE IF EXISTS submissions;
-  DROP TABLE IF EXISTS evidence_items;
-  DROP TABLE IF EXISTS claims;
-  DROP TABLE IF EXISTS cases;
-  DROP TABLE IF EXISTS juror_availability;
-  DROP TABLE IF EXISTS agents;
-  `);
+  db.exec("PRAGMA foreign_keys = OFF;");
+  try {
+    db.exec(`
+      DROP TABLE IF EXISTS idempotency_records;
+      DROP TABLE IF EXISTS case_transcript_events;
+      DROP TABLE IF EXISTS case_runtime;
+      DROP TABLE IF EXISTS agent_action_log;
+      DROP TABLE IF EXISTS used_treasury_txs;
+      DROP TABLE IF EXISTS seal_jobs;
+      DROP TABLE IF EXISTS verdicts;
+      DROP TABLE IF EXISTS ballots;
+      DROP TABLE IF EXISTS jury_panel_members;
+      DROP TABLE IF EXISTS jury_selection_runs;
+      DROP TABLE IF EXISTS jury_panels;
+      DROP TABLE IF EXISTS submissions;
+      DROP TABLE IF EXISTS evidence_items;
+      DROP TABLE IF EXISTS claims;
+      DROP TABLE IF EXISTS agent_case_activity;
+      DROP TABLE IF EXISTS agent_stats_cache;
+      DROP TABLE IF EXISTS juror_availability;
+      DROP TABLE IF EXISTS cases;
+      DROP TABLE IF EXISTS agents;
+      DROP TABLE IF EXISTS schema_migrations;
+    `);
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON;");
+  }
+
   runMigrationScript(db, schemaSql);
   applyMigrations(db);
   runMigrationScript(db, schemaSql);

@@ -110,9 +110,6 @@ function toneFromOutcome(outcome: Decision["outcome"]): DashboardActivityItem["t
   if (outcome === "for_defence") {
     return "orange";
   }
-  if (outcome === "mixed") {
-    return "blue";
-  }
   return "neutral";
 }
 
@@ -370,9 +367,12 @@ export async function lodgeDisputeDraft(
     prosecutionAgentId: payload.prosecutionAgentId,
     defendantAgentId: payload.defendantAgentId,
     openDefence: payload.openDefence,
+    caseTopic: payload.caseTopic,
+    stakeLevel: payload.stakeLevel,
     claimSummary: payload.claimSummary,
     requestedRemedy: payload.requestedRemedy,
-    allegedPrinciples: ["P2", "P8"]
+    allegedPrinciples: payload.allegedPrinciples ?? [2, 8],
+    claims: payload.claims
   });
 
   return {
@@ -453,11 +453,18 @@ export async function volunteerDefence(caseId: string, note?: string): Promise<{
   }
 }
 
-export async function fileCase(caseId: string, treasuryTxSig: string): Promise<FileCaseResult> {
+export async function fileCase(
+  caseId: string,
+  treasuryTxSig: string,
+  payerWallet?: string
+): Promise<FileCaseResult> {
   await registerCurrentAgent();
   return signedPost<FileCaseResult>(
     `/api/cases/${encodeURIComponent(caseId)}/file`,
-    { treasuryTxSig },
+    {
+      treasuryTxSig,
+      payerWallet
+    },
     caseId,
     { idempotencyKey: `file:${caseId}:${treasuryTxSig}` }
   );

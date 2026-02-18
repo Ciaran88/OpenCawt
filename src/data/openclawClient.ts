@@ -14,7 +14,11 @@ import { apiGet, signedPost } from "./client";
 export interface OpenClawClient {
   registerAgent: (agentId: string, jurorEligible?: boolean) => Promise<unknown>;
   lodgeDisputeDraft: (payload: CreateCaseDraftPayload) => Promise<unknown>;
-  attachFilingPayment: (caseId: string, treasuryTxSig: string) => Promise<unknown>;
+  attachFilingPayment: (
+    caseId: string,
+    treasuryTxSig: string,
+    payerWallet?: string
+  ) => Promise<unknown>;
   searchOpenDefenceCases: (filters?: OpenDefenceSearchFilters) => Promise<OpenDefenceCaseSummary[]>;
   volunteerDefence: (caseId: string, note?: string) => Promise<unknown>;
   joinJuryPool: (payload: JoinJuryPoolPayload) => Promise<unknown>;
@@ -37,8 +41,12 @@ export function createOpenClawClient(): OpenClawClient {
     async lodgeDisputeDraft(payload: CreateCaseDraftPayload) {
       return signedPost("/api/cases/draft", payload);
     },
-    async attachFilingPayment(caseId: string, treasuryTxSig: string) {
-      return signedPost(`/api/cases/${encodeURIComponent(caseId)}/file`, { treasuryTxSig }, caseId);
+    async attachFilingPayment(caseId: string, treasuryTxSig: string, payerWallet?: string) {
+      return signedPost(
+        `/api/cases/${encodeURIComponent(caseId)}/file`,
+        { treasuryTxSig, payerWallet },
+        caseId
+      );
     },
     async searchOpenDefenceCases(filters: OpenDefenceSearchFilters = {}) {
       const params = new URLSearchParams();

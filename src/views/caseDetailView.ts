@@ -8,9 +8,17 @@ import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from ".
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
-function renderPrinciples(principles: string[]): string {
+function renderPrinciples(principles: Array<number | string>): string {
   return `<div class="principle-tags">${principles
-    .map((principle) => `<span class="principle-tag">${escapeHtml(principle)}</span>`)
+    .map((principle) => {
+      const label =
+        typeof principle === "number"
+          ? `P${principle}`
+          : /^P/i.test(principle.trim())
+            ? principle.trim().toUpperCase()
+            : `P${principle.trim()}`;
+      return `<span class="principle-tag">${escapeHtml(label)}</span>`;
+    })
     .join("")}</div>`;
 }
 
@@ -113,6 +121,10 @@ function renderStageMessageForm(caseId: string, stage?: SessionStage): string {
           <span>Message</span>
           <textarea name="text" rows="3" placeholder="Stage message"></textarea>
         </label>
+        <label>
+          <span>Principle citations (comma separated)</span>
+          <input name="principleCitations" type="text" placeholder="2, 8" />
+        </label>
         ${renderPrimaryPillButton("Submit stage message", { type: "submit" })}
       </form>
     </section>
@@ -200,7 +212,7 @@ export function renderCaseDetailView(state: AppState, caseItem: Case): string {
         ? `
       <section class="form-card glass-overlay">
         <h3>Juror ballot</h3>
-        <p>Ballots require a two to three sentence reasoning summary.</p>
+        <p>Ballots require a two to three sentence reasoning summary and one to three relied-on principles.</p>
         <form id="submit-ballot-form" class="stack">
           <input type="hidden" name="caseId" value="${escapeHtml(caseItem.id)}" />
           <input type="hidden" name="claimId" value="${escapeHtml(claimId)}" />
@@ -215,6 +227,41 @@ export function renderCaseDetailView(state: AppState, caseItem: Case): string {
           <label>
             <span>Reasoning summary</span>
             <textarea name="reasoningSummary" rows="4" placeholder="Provide two to three sentences for your reasoning"></textarea>
+          </label>
+          <label>
+            <span>Principles relied on</span>
+            <select name="principlesReliedOn" multiple size="6">
+              <option value="1">1. Truthfulness and Non-Deception</option>
+              <option value="2">2. Evidence and Reproducibility</option>
+              <option value="3">3. Scope Fidelity (Intent Alignment)</option>
+              <option value="4">4. Least Power and Minimal Intrusion</option>
+              <option value="5">5. Harm Minimisation Under Uncertainty</option>
+              <option value="6">6. Rights and Dignity Preservation</option>
+              <option value="7">7. Privacy and Data Minimisation</option>
+              <option value="8">8. Integrity of Records and Provenance</option>
+              <option value="9">9. Fair Process and Steelmanning</option>
+              <option value="10">10. Conflict of Interest Disclosure</option>
+              <option value="11">11. Capability Honesty and Calibration</option>
+              <option value="12">12. Accountability and Corrective Action</option>
+            </select>
+          </label>
+          <label>
+            <span>Confidence (optional)</span>
+            <select name="confidence">
+              <option value="">Not set</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label>
+            <span>Overall vote label (optional)</span>
+            <select name="vote">
+              <option value="">Not set</option>
+              <option value="for_prosecution">For prosecution</option>
+              <option value="for_defence">For defence</option>
+              <option value="mixed">Mixed</option>
+            </select>
           </label>
           ${renderPrimaryPillButton("Submit ballot", { type: "submit" })}
         </form>

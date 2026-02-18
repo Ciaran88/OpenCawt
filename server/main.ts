@@ -7,7 +7,6 @@ import type {
   AgentProfile,
   AssignedCasesPayload,
   CreateCaseDraftPayload,
-  DefenceAssignPayload,
   FileCasePayload,
   JoinJuryPoolPayload,
   JurorReadinessPayload,
@@ -25,8 +24,10 @@ import {
   addBallot,
   addEvidence,
   appendTranscriptEvent,
+  appendTranscriptEventInTransaction,
   claimDefenceAssignment,
   getAgentProfile,
+  getCaseIntegrityDiagnostics,
   confirmJurorReady,
   countClosedAndSealedCases,
   countEvidenceForCase,
@@ -36,6 +37,7 @@ import {
   getCaseById,
   getCaseRuntime,
   getDecisionCase,
+  getSealJobByJobId,
   isTreasuryTxUsed,
   listLeaderboard,
   listOpenDefenceCases,
@@ -49,6 +51,7 @@ import {
   listJuryPanelMembers,
   listSubmissionsByCase,
   listTranscriptEvents,
+  markCaseVoid,
   markJurorVoted,
   replaceJuryMembers,
   rebuildAllAgentStats,
@@ -82,11 +85,22 @@ import { applySealResult, enqueueSealJob } from "./services/sealing";
 import { createSessionEngine } from "./services/sessionEngine";
 import { createSolanaProvider } from "./services/solanaProvider";
 import {
+  normalisePrincipleIds,
+  validateBallotConfidence,
+  validateBallotVoteLabel,
+  validateCaseTopic,
+  validateEvidenceStrength,
+  validateEvidenceTypes,
+  validateReasoningSummary,
+  validateStakeLevel
+} from "./services/validation";
+import {
   pathSegments,
   readJsonBody,
   sendApiError,
   sendJson,
-  setCorsHeaders
+  setCorsHeaders,
+  setSecurityHeaders
 } from "./services/http";
 import { toUiCase, toUiDecision } from "./services/presenters";
 import { computeDeterministicVerdict } from "./services/verdict";
@@ -156,15 +170,6 @@ function toSubmissionStage(
   return phase;
 }
 
-function countSentences(text: string): number {
-  const cleaned = text.trim();
-  if (!cleaned) {
-    return 0;
-  }
-  const matches = cleaned.match(/[.!?](?:\s|$)/g);
-  return matches ? matches.length : 1;
-}
-
 async function hydrateCase(caseRecord: CaseRecord) {
   const [claims, evidence, submissions, ballots] = [
     listClaims(db, caseRecord.caseId),
@@ -200,7 +205,17 @@ async function hydrateDecision(caseRecord: CaseRecord) {
   });
 }
 
-async function selectInitialJury(caseId: string): Promise<{ selectedJurors: string[]; drandRound: number }> {
+interface JurySelectionComputation {
+  selectedJurors: string[];
+  drandRound: number;
+  drandRandomness: string;
+  poolSnapshotHash: string;
+  proof: Awaited<ReturnType<typeof selectJuryDeterministically>>["proof"];
+  scoredCandidates: Awaited<ReturnType<typeof selectJuryDeterministically>>["scoredCandidates"];
+  runId: string;
+}
+
+async function computeInitialJurySelection(caseId: string): Promise<JurySelectionComputation> {
   const caseRecord = ensureCaseExists(caseId);
   const eligible = listEligibleJurors(db, {
     excludeAgentIds: [caseRecord.prosecutionAgentId, caseRecord.defenceAgentId ?? ""].filter(Boolean),
@@ -215,49 +230,47 @@ async function selectInitialJury(caseId: string): Promise<{ selectedJurors: stri
     jurySize: config.rules.jurorPanelSize
   });
 
-  const runId = createId("jruns");
+  return {
+    selectedJurors: selection.selectedJurors,
+    drandRound: drandData.round,
+    drandRandomness: drandData.randomness,
+    poolSnapshotHash: selection.poolSnapshotHash,
+    proof: selection.proof,
+    scoredCandidates: selection.scoredCandidates,
+    runId: createId("jruns")
+  };
+}
+
+function persistInitialJurySelection(caseId: string, computed: JurySelectionComputation): void {
   createJurySelectionRun(db, {
     caseId,
-    runId,
+    runId: computed.runId,
     runType: "initial",
-    round: drandData.round,
-    randomness: drandData.randomness,
-    poolSnapshotHash: selection.poolSnapshotHash,
-    proof: selection.proof
+    round: computed.drandRound,
+    randomness: computed.drandRandomness,
+    poolSnapshotHash: computed.poolSnapshotHash,
+    proof: computed.proof
   });
 
   setCaseJurySelected(db, {
     caseId,
-    round: drandData.round,
-    randomness: drandData.randomness,
-    poolSnapshotHash: selection.poolSnapshotHash,
-    proof: selection.proof
+    round: computed.drandRound,
+    randomness: computed.drandRandomness,
+    poolSnapshotHash: computed.poolSnapshotHash,
+    proof: computed.proof
   });
 
   replaceJuryMembers(
     db,
     caseId,
-    selection.scoredCandidates
-      .filter((item) => selection.selectedJurors.includes(item.agentId))
-      .map((item) => ({ jurorId: item.agentId, scoreHash: item.scoreHash, selectionRunId: runId }))
+    computed.scoredCandidates
+      .filter((item) => computed.selectedJurors.includes(item.agentId))
+      .map((item) => ({
+        jurorId: item.agentId,
+        scoreHash: item.scoreHash,
+        selectionRunId: computed.runId
+      }))
   );
-
-  appendTranscriptEvent(db, {
-    caseId,
-    actorRole: "court",
-    eventType: "jury_selected",
-    stage: "pre_session",
-    messageText: "Jury panel selected deterministically from the eligible pool.",
-    payload: {
-      round: drandData.round,
-      jurors: selection.selectedJurors
-    }
-  });
-
-  return {
-    selectedJurors: selection.selectedJurors,
-    drandRound: drandData.round
-  };
 }
 
 async function closeCasePipeline(caseId: string): Promise<{
@@ -307,6 +320,34 @@ async function closeCasePipeline(caseId: string): Promise<{
       drandRandomness: caseRecord.drandRandomness ?? null,
       poolSnapshotHash: caseRecord.poolSnapshotHash ?? null
     });
+
+    if (verdict.inconclusive || !verdict.overallOutcome) {
+      markCaseVoid(db, {
+        caseId,
+        reason: "inconclusive_verdict",
+        atIso: closeTime
+      });
+
+      appendTranscriptEvent(db, {
+        caseId,
+        actorRole: "court",
+        eventType: "case_voided",
+        stage: "void",
+        messageText:
+          "Case became void because the deterministic verdict was inconclusive across submitted claims.",
+        payload: {
+          reason: "inconclusive_verdict"
+        }
+      });
+
+      const voidedCase = ensureCaseExists(caseId);
+      syncCaseReputation(db, voidedCase);
+      return {
+        caseId,
+        status: "closed",
+        verdictHash: verdict.verdictHash
+      };
+    }
 
     storeVerdict(db, {
       caseId,
@@ -410,6 +451,13 @@ async function handleSignedMutationWithIdempotency<TPayload, TResult>(input: {
 
   const result = await input.handler(verified);
 
+  recordSignedMutation({
+    db,
+    verified,
+    actionType: input.actionType,
+    caseId: input.caseId
+  });
+
   saveIdempotency(db, config, {
     agentId: verified.agentId,
     method: input.method,
@@ -419,13 +467,6 @@ async function handleSignedMutationWithIdempotency<TPayload, TResult>(input: {
     idempotencyKey,
     responseStatus: result.statusCode,
     responsePayload: result.payload
-  });
-
-  recordSignedMutation({
-    db,
-    verified,
-    actionType: input.actionType,
-    caseId: input.caseId
   });
 
   return result;
@@ -458,20 +499,27 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         throw new ApiError(403, "NOT_PROSECUTION", "Only prosecution can file this case.");
       }
 
-      if (!body.treasuryTxSig?.trim()) {
+      const treasuryTxSig = body.treasuryTxSig?.trim();
+      if (!treasuryTxSig) {
         throw badRequest("TREASURY_TX_REQUIRED", "Treasury transaction signature is required.");
+      }
+      const payerWallet = body.payerWallet?.trim();
+      if (payerWallet && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(payerWallet)) {
+        throw badRequest("PAYER_WALLET_INVALID", "Payer wallet must be a valid Base58 public key.");
       }
 
       enforceFilingLimit(db, config, verified.agentId);
 
-      if (isTreasuryTxUsed(db, body.treasuryTxSig)) {
+      if (isTreasuryTxUsed(db, treasuryTxSig)) {
         throw conflict("TREASURY_TX_REPLAY", "This treasury transaction has already been used.");
       }
 
-      const verification = await solana.verifyFilingFeeTx(body.treasuryTxSig);
+      const verification = await solana.verifyFilingFeeTx(treasuryTxSig, payerWallet);
       if (!verification.finalised) {
         throw badRequest("TREASURY_TX_NOT_FINALISED", "Treasury transaction is not finalised.");
       }
+
+      const computedJury = await computeInitialJurySelection(caseId);
 
       const todayCount = countFiledCasesToday(db, new Date().toISOString().slice(0, 10));
       let warning: string | undefined;
@@ -484,58 +532,87 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         warning = `Soft cap exceeded: ${todayCount + 1} filings today.`;
       }
 
-      setCaseFiled(db, {
-        caseId,
-        txSig: body.treasuryTxSig,
-        warning,
-        scheduleDelaySec: config.rules.sessionStartsAfterSeconds,
-        defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
-      });
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const current = ensureCaseExists(caseId);
+        if (current.status !== "draft") {
+          throw conflict("CASE_NOT_DRAFT", "Only draft cases can be filed.");
+        }
+        if (isTreasuryTxUsed(db, treasuryTxSig)) {
+          throw conflict("TREASURY_TX_REPLAY", "This treasury transaction has already been used.");
+        }
 
-      saveUsedTreasuryTx(db, {
-        txSig: body.treasuryTxSig,
-        caseId,
-        agentId: verified.agentId,
-        amountLamports: verification.amountLamports
-      });
+        setCaseFiled(db, {
+          caseId,
+          txSig: treasuryTxSig,
+          warning,
+          scheduleDelaySec: config.rules.sessionStartsAfterSeconds,
+          defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
+        });
 
-      appendTranscriptEvent(db, {
-        caseId,
-        actorRole: "court",
-        eventType: "payment_verified",
-        stage: "pre_session",
-        messageText: "Filing payment was verified and session scheduling has started.",
-        payload: {
-          treasuryTxSig: body.treasuryTxSig,
+        saveUsedTreasuryTx(db, {
+          txSig: treasuryTxSig,
+          caseId,
+          agentId: verified.agentId,
           amountLamports: verification.amountLamports
-        }
-      });
+        });
 
-      const jury = await selectInitialJury(caseId);
+        persistInitialJurySelection(caseId, computedJury);
 
-      appendTranscriptEvent(db, {
-        caseId,
-        actorRole: "court",
-        eventType: "notice",
-        stage: "pre_session",
-        messageText: "Live session is scheduled to begin in one hour.",
-        payload: {
-          sessionStartsAfterSeconds: config.rules.sessionStartsAfterSeconds
-        }
-      });
+        appendTranscriptEventInTransaction(db, {
+          caseId,
+          actorRole: "court",
+          eventType: "payment_verified",
+          stage: "pre_session",
+          messageText: "Filing payment was verified and session scheduling has started.",
+          payload: {
+            treasuryTxSig,
+            amountLamports: verification.amountLamports,
+            payerWallet: verification.payerWallet ?? null
+          }
+        });
 
-      appendTranscriptEvent(db, {
-        caseId,
-        actorRole: "court",
-        eventType: "notice",
-        stage: "pre_session",
-        messageText:
-          "Defence must be assigned within forty five minutes of filing or the case becomes void.",
-        payload: {
-          defenceAssignmentCutoffSeconds: config.rules.defenceAssignmentCutoffSeconds,
-          namedDefendantExclusiveSeconds: config.rules.namedDefendantExclusiveSeconds
-        }
-      });
+        appendTranscriptEventInTransaction(db, {
+          caseId,
+          actorRole: "court",
+          eventType: "jury_selected",
+          stage: "pre_session",
+          messageText: "Jury panel selected deterministically from the eligible pool.",
+          payload: {
+            round: computedJury.drandRound,
+            jurors: computedJury.selectedJurors
+          }
+        });
+
+        appendTranscriptEventInTransaction(db, {
+          caseId,
+          actorRole: "court",
+          eventType: "notice",
+          stage: "pre_session",
+          messageText: "Live session is scheduled to begin in one hour.",
+          payload: {
+            sessionStartsAfterSeconds: config.rules.sessionStartsAfterSeconds
+          }
+        });
+
+        appendTranscriptEventInTransaction(db, {
+          caseId,
+          actorRole: "court",
+          eventType: "notice",
+          stage: "pre_session",
+          messageText:
+            "Defence must be assigned within forty five minutes of filing or the case becomes void.",
+          payload: {
+            defenceAssignmentCutoffSeconds: config.rules.defenceAssignmentCutoffSeconds,
+            namedDefendantExclusiveSeconds: config.rules.namedDefendantExclusiveSeconds
+          }
+        });
+
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
 
       return {
         statusCode: 200,
@@ -543,7 +620,7 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           caseId,
           status: "filed",
           warning,
-          selectedJurors: jury.selectedJurors
+          selectedJurors: computedJury.selectedJurors
         }
       };
     }
@@ -584,6 +661,30 @@ async function processStageMessageAction(
     throw badRequest("SUBMISSION_TOO_LONG", "Submission text exceeds maximum characters.");
   }
 
+  const principleCitations = normalisePrincipleIds(body.principleCitations ?? [], {
+    field: "principleCitations"
+  });
+  const claimPrincipleCitations = body.claimPrincipleCitations
+    ? Object.fromEntries(
+        Object.entries(body.claimPrincipleCitations).map(([claimId, values]) => [
+          claimId,
+          normalisePrincipleIds(values, { field: `claimPrincipleCitations.${claimId}` })
+        ])
+      )
+    : undefined;
+  const evidenceCitations = Array.isArray(body.evidenceCitations)
+    ? body.evidenceCitations.map((value) => String(value))
+    : [];
+
+  if (claimPrincipleCitations) {
+    const validClaimIds = new Set(listClaims(db, caseId).map((item) => item.claimId));
+    for (const claimId of Object.keys(claimPrincipleCitations)) {
+      if (!validClaimIds.has(claimId)) {
+        throw badRequest("UNKNOWN_CLAIM", "Submission references unknown claim ID.", { claimId });
+      }
+    }
+  }
+
   if (body.side === "prosecution" && agentId !== caseRecord.prosecutionAgentId) {
     throw new ApiError(
       403,
@@ -605,8 +706,9 @@ async function processStageMessageAction(
     side: body.side,
     phase,
     text: body.text,
-    principleCitations: body.principleCitations,
-    evidenceCitations: body.evidenceCitations
+    principleCitations,
+    claimPrincipleCitations: claimPrincipleCitations ?? {},
+    evidenceCitations
   });
 
   const submission = upsertSubmission(db, {
@@ -615,8 +717,9 @@ async function processStageMessageAction(
     side: body.side,
     phase,
     text: body.text,
-    principleCitations: body.principleCitations,
-    evidenceCitations: body.evidenceCitations,
+    principleCitations,
+    claimPrincipleCitations,
+    evidenceCitations,
     contentHash
   });
 
@@ -631,8 +734,9 @@ async function processStageMessageAction(
     artefactId: submission.submissionId,
     payload: {
       phase,
-      principleCitations: body.principleCitations,
-      evidenceCitations: body.evidenceCitations
+      principleCitations,
+      claimPrincipleCitations: claimPrincipleCitations ?? {},
+      evidenceCitations
     }
   });
 
@@ -665,6 +769,7 @@ async function handleStageMessage(
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   setCorsHeaders(res, config.corsOrigin);
+  setSecurityHeaders(res, config.isProduction);
 
   const requestId = createRequestId();
   res.setHeader("X-Request-Id", requestId);
@@ -693,6 +798,36 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         name: "opencawt-phase4-api",
         now: new Date().toISOString()
       });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/internal/credential-status") {
+      assertSystemKey(req, config);
+      sendJson(res, 200, {
+        solanaMode: config.solanaMode,
+        sealWorkerMode: config.sealWorkerMode,
+        drandMode: config.drandMode,
+        hasHeliusApiKey: Boolean(config.heliusApiKey),
+        hasTreasuryAddress: Boolean(config.treasuryAddress),
+        hasWorkerToken: Boolean(config.workerToken),
+        hasSystemApiKey: Boolean(config.systemApiKey),
+        hasHeliusWebhookToken: Boolean(config.heliusWebhookToken),
+        hasSealWorkerUrl: Boolean(config.sealWorkerUrl)
+      });
+      return;
+    }
+
+    if (
+      method === "GET" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "cases" &&
+      segments[4] === "diagnostics"
+    ) {
+      assertSystemKey(req, config);
+      const caseId = decodeURIComponent(segments[3]);
+      sendJson(res, 200, getCaseIntegrityDiagnostics(db, caseId));
       return;
     }
 
@@ -990,16 +1125,48 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw badRequest("AGENT_ID_MISMATCH", "Prosecution agent must match signing identity.");
           }
 
-          if (!body.claimSummary?.trim()) {
+          if (!body.claimSummary?.trim() && (!body.claims || body.claims.length === 0)) {
             throw badRequest("CLAIM_SUMMARY_REQUIRED", "Claim summary is required.");
           }
+
+          const caseTopic = validateCaseTopic(body.caseTopic ?? "other");
+          const stakeLevel = validateStakeLevel(body.stakeLevel ?? "medium");
+          const allegedPrinciples = normalisePrincipleIds(body.allegedPrinciples ?? [], {
+            field: "allegedPrinciples"
+          });
+          const claims =
+            body.claims && body.claims.length > 0
+              ? body.claims.map((claim, index) => {
+                  if (!claim.claimSummary?.trim()) {
+                    throw badRequest(
+                      "CLAIM_SUMMARY_REQUIRED",
+                      `claims[${index}].claimSummary is required.`
+                    );
+                  }
+                  return {
+                    claimSummary: claim.claimSummary.trim(),
+                    requestedRemedy: claim.requestedRemedy,
+                    principlesInvoked: normalisePrincipleIds(claim.principlesInvoked ?? [], {
+                      field: `claims[${index}].principlesInvoked`
+                    })
+                  };
+                })
+              : undefined;
+          const claimSummary = body.claimSummary?.trim() || claims?.[0]?.claimSummary || "";
 
           upsertAgent(db, body.prosecutionAgentId, true);
           if (body.defendantAgentId) {
             upsertAgent(db, body.defendantAgentId, true);
           }
 
-          const created = createCaseDraft(db, body);
+          const created = createCaseDraft(db, {
+            ...body,
+            claimSummary,
+            caseTopic,
+            stakeLevel,
+            allegedPrinciples,
+            claims
+          });
           appendTranscriptEvent(db, {
             caseId: created.caseId,
             actorRole: "prosecution",
@@ -1131,93 +1298,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[1] === "cases" &&
       segments[3] === "defence-assign"
     ) {
-      const caseId = decodeURIComponent(segments[2]);
-      const body = await readJsonBody<DefenceAssignPayload>(req);
-      const result = await handleSignedMutationWithIdempotency<DefenceAssignPayload, {
-        caseId: string;
-        defenceAgentId: string;
-        status: string;
-        defenceState: "accepted" | "volunteered";
-        defenceAssignedAtIso?: string;
-        defenceWindowDeadlineIso?: string;
-      }>({
-        req,
-        pathname,
-        method: "POST",
-        body,
-        caseId,
-        actionType: "defence_assign",
-        async handler(verified) {
-          const caseRecord = ensureCaseExists(caseId);
-          if (
-            verified.agentId !== caseRecord.prosecutionAgentId &&
-            verified.agentId !== body.defenceAgentId
-          ) {
-            throw new ApiError(
-              403,
-              "NOT_ALLOWED",
-              "Only prosecution or selected defence can assign defence."
-            );
-          }
-          upsertAgent(db, body.defenceAgentId, true);
-          const claim = claimDefenceAssignment(db, {
-            caseId,
-            agentId: body.defenceAgentId,
-            nowIso: new Date().toISOString(),
-            namedExclusiveSec: config.rules.namedDefendantExclusiveSeconds
-          });
-
-          if (claim.status === "already_taken") {
-            throw conflict("DEFENCE_ALREADY_TAKEN", "Defence assignment has already been claimed.");
-          }
-          if (claim.status === "defence_cannot_be_prosecution") {
-            throw badRequest("DEFENCE_CANNOT_BE_PROSECUTION", "Defence cannot be the same as prosecution.");
-          }
-          if (claim.status === "not_open") {
-            throw conflict("CASE_NOT_OPEN_FOR_DEFENCE", "Case is not open for defence assignment.");
-          }
-          if (claim.status === "reserved_for_named_defendant") {
-            throw conflict(
-              "DEFENCE_RESERVED_FOR_NAMED_DEFENDANT",
-              "Only the named defendant can accept during the exclusive window."
-            );
-          }
-          if (claim.status === "window_closed") {
-            throw conflict("DEFENCE_WINDOW_CLOSED", "The defence assignment window is closed.");
-          }
-
-          const accepted = claim.status === "assigned_accepted";
-          appendTranscriptEvent(db, {
-            caseId,
-            actorRole: "court",
-            eventType: "notice",
-            stage: "pre_session",
-            messageText: accepted
-              ? `Defence accepted by named defendant ${body.defenceAgentId}.`
-              : `Defence volunteered by ${body.defenceAgentId}.`,
-            payload: {
-              assignedBy: verified.agentId,
-              defenceAgentId: body.defenceAgentId,
-              defenceState: accepted ? "accepted" : "volunteered"
-            }
-          });
-
-          return {
-            statusCode: 200,
-            payload: {
-              caseId,
-              defenceAgentId: body.defenceAgentId,
-              status: "assigned",
-              defenceState: accepted ? "accepted" : "volunteered",
-              defenceAssignedAtIso: claim.caseRecord.defenceAssignedAtIso,
-              defenceWindowDeadlineIso: claim.caseRecord.defenceWindowDeadlineIso
-            }
-          };
-        }
-      });
-
-      sendJson(res, result.statusCode, result.payload);
-      return;
+      throw new ApiError(
+        410,
+        "DEFENCE_ASSIGN_DEPRECATED",
+        "Use /api/cases/:id/volunteer-defence with the defence agent signing directly."
+      );
     }
 
     if (
@@ -1268,6 +1353,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           if (!kind || !EVIDENCE_KINDS.includes(kind as (typeof EVIDENCE_KINDS)[number])) {
             throw badRequest("INVALID_EVIDENCE_KIND", "Evidence kind must be one of: log, transcript, code, link, attestation, other.");
           }
+          const evidenceTypes = validateEvidenceTypes(body.evidenceTypes);
+          const evidenceStrength = validateEvidenceStrength(body.evidenceStrength);
+          const references = Array.isArray(body.references)
+            ? body.references.map((item) => String(item))
+            : [];
 
           const bodyText = body.bodyText?.trim() ?? "";
           if (!bodyText) {
@@ -1292,7 +1382,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           const bodyHash = await canonicalHashHex({
             kind,
             bodyText,
-            references: body.references
+            references,
+            evidenceTypes,
+            evidenceStrength: evidenceStrength ?? null
           });
 
           const evidence = addEvidence(db, {
@@ -1301,7 +1393,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             submittedBy: verified.agentId,
             kind: kind as "log" | "transcript" | "code" | "link" | "attestation" | "other",
             bodyText,
-            references: body.references,
+            references,
+            evidenceTypes,
+            evidenceStrength,
             bodyHash
           });
 
@@ -1490,16 +1584,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
           enforceActionRateLimit(db, config, { agentId: verified.agentId, actionType: "ballot" });
 
-          const sentences = countSentences(body.reasoningSummary || "");
-          if (sentences < 2 || sentences > 3 || body.reasoningSummary.trim().length < 30) {
-            throw badRequest(
-              "BALLOT_REASONING_INVALID",
-              "Ballot reasoning summary must contain two or three sentences."
-            );
-          }
+          const reasoningSummary = validateReasoningSummary(body.reasoningSummary || "");
+          const principlesReliedOn = normalisePrincipleIds(body.principlesReliedOn, {
+            required: true,
+            min: 1,
+            max: 3,
+            field: "principlesReliedOn"
+          });
+          const confidence = validateBallotConfidence(body.confidence);
+          const vote = validateBallotVoteLabel(body.vote);
 
           const claims = listClaims(db, caseId);
           const validClaimIds = new Set(claims.map((item) => item.claimId));
+          if (!Array.isArray(body.votes) || body.votes.length === 0) {
+            throw badRequest("BALLOT_VOTES_REQUIRED", "Ballot votes are required.");
+          }
           const FINDING_ENUM = ["proven", "not_proven", "insufficient"] as const;
           const REMEDY_ENUM = ["warn", "delist", "ban", "restitution", "other", "none"] as const;
 
@@ -1527,14 +1626,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             }
           }
 
-          const ballotHash = await canonicalHashHex(body);
+          const ballotHash = await canonicalHashHex({
+            ...body,
+            reasoningSummary,
+            principlesReliedOn,
+            confidence: confidence ?? null,
+            vote: vote ?? null
+          });
           let ballot;
           try {
             ballot = addBallot(db, {
               caseId,
               jurorId: verified.agentId,
               votes: body.votes,
-              reasoningSummary: body.reasoningSummary.trim(),
+              reasoningSummary,
+              principlesReliedOn,
+              confidence,
+              vote,
               ballotHash,
               signature: verified.signature
             });
@@ -1560,7 +1668,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             artefactType: "ballot",
             artefactId: ballot.ballotId,
             payload: {
-              reasoningSummary: ballot.reasoningSummary
+              reasoningSummary: ballot.reasoningSummary,
+              principlesReliedOn: ballot.principlesReliedOn,
+              confidence: ballot.confidence ?? null
             }
           });
 
@@ -1595,7 +1705,26 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         throw conflict("CASE_NOT_ELIGIBLE", "Case is not eligible for jury selection.");
       }
 
-      const selected = await selectInitialJury(caseId);
+      const selected = await computeInitialJurySelection(caseId);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        persistInitialJurySelection(caseId, selected);
+        appendTranscriptEventInTransaction(db, {
+          caseId,
+          actorRole: "court",
+          eventType: "jury_selected",
+          stage: "pre_session",
+          messageText: "Jury panel selected deterministically from the eligible pool.",
+          payload: {
+            round: selected.drandRound,
+            jurors: selected.selectedJurors
+          }
+        });
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
       sendJson(res, 200, {
         caseId,
         status: "jury_selected",
@@ -1621,6 +1750,46 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "POST" && pathname === "/api/internal/seal-result") {
       assertWorkerToken(req, config);
       const body = await readJsonBody<WorkerSealResponse>(req);
+      if (!body.jobId || !body.caseId) {
+        throw badRequest("SEAL_RESULT_INVALID", "Seal result requires jobId and caseId.");
+      }
+
+      const sealJob = getSealJobByJobId(db, body.jobId);
+      if (!sealJob) {
+        throw notFound("SEAL_JOB_NOT_FOUND", "Seal job was not found.");
+      }
+      if (sealJob.caseId !== body.caseId) {
+        throw conflict("SEAL_JOB_CASE_MISMATCH", "Seal job does not match case.");
+      }
+
+      if (sealJob.status !== "queued") {
+        const existingHash = await canonicalHashHex(sealJob.responseJson ?? {});
+        const incomingHash = await canonicalHashHex(body);
+        if (existingHash === incomingHash) {
+          sendJson(res, 200, {
+            ok: true,
+            caseId: body.caseId,
+            status: body.status,
+            replayed: true
+          });
+          return;
+        }
+        throw conflict("SEAL_JOB_ALREADY_FINALISED", "Seal job has already been finalised.");
+      }
+
+      const caseRecord = ensureCaseExists(body.caseId);
+      if (!["closed", "sealed"].includes(caseRecord.status)) {
+        throw conflict("CASE_NOT_CLOSABLE_FOR_SEAL", "Case is not in a closable state for sealing.");
+      }
+      if (body.status === "minted") {
+        if (!body.assetId?.trim() || !body.txSig?.trim() || !body.sealedUri?.trim()) {
+          throw badRequest(
+            "SEAL_RESULT_INVALID",
+            "Minted seal result requires assetId, txSig and sealedUri."
+          );
+        }
+      }
+
       applySealResult(db, body);
 
       if (body.status === "minted") {
@@ -1648,16 +1817,22 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (method === "POST" && pathname === "/api/internal/helius/webhook") {
-      if (config.heliusWebhookToken) {
-        const token = String(req.headers["x-helius-token"] || "");
-        if (token !== config.heliusWebhookToken) {
-          throw unauthorised("HELIUS_WEBHOOK_TOKEN_INVALID", "Webhook token is invalid.");
-        }
+      if (!config.heliusWebhookEnabled) {
+        throw notFound("WEBHOOK_DISABLED", "Helius webhook endpoint is disabled.");
+      }
+      const token = String(req.headers["x-helius-token"] || "");
+      if (!config.heliusWebhookToken || token !== config.heliusWebhookToken) {
+        throw unauthorised("HELIUS_WEBHOOK_TOKEN_INVALID", "Webhook token is invalid.");
       }
       const body = await readJsonBody<unknown>(req);
+      const events = Array.isArray(body) ? body : [body];
       logger.info("helius_webhook_received", {
         requestId,
-        body
+        eventCount: events.length,
+        firstEventType:
+          events.length > 0 && events[0] && typeof events[0] === "object"
+            ? String((events[0] as Record<string, unknown>).type ?? "unknown")
+            : "unknown"
       });
       sendJson(res, 200, { ok: true });
       return;

@@ -14,6 +14,35 @@ export interface AgentIdentity {
   privateKey: CryptoKey;
 }
 
+export type AgentIdentityMode = "local" | "provider";
+
+export interface ExternalAgentSigner {
+  getAgentId: () => Promise<string> | string;
+  signOpenCawtRequest: (input: {
+    method: "POST";
+    path: string;
+    caseId?: string;
+    timestamp: number;
+    payload: unknown;
+  }) => Promise<{
+    payloadHash: string;
+    signature: string;
+  }>;
+}
+
+function getMode(): AgentIdentityMode {
+  const raw = (import.meta.env.VITE_AGENT_IDENTITY_MODE as string | undefined)?.toLowerCase();
+  return raw === "local" ? "local" : "provider";
+}
+
+function getExternalSigner(): ExternalAgentSigner | null {
+  const globalObject = window as Window & {
+    openCawtAgent?: ExternalAgentSigner;
+    openclawAgent?: ExternalAgentSigner;
+  };
+  return globalObject.openCawtAgent ?? globalObject.openclawAgent ?? null;
+}
+
 async function createIdentity(): Promise<AgentIdentity> {
   const keyPair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
 
@@ -71,6 +100,11 @@ async function loadIdentity(raw: string): Promise<AgentIdentity | null> {
 }
 
 export async function getOrCreateAgentIdentity(): Promise<AgentIdentity> {
+  if (getMode() !== "local") {
+    throw new Error(
+      "Local agent identity is disabled. Set VITE_AGENT_IDENTITY_MODE=local for development-only local signing."
+    );
+  }
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (raw) {
     const loaded = await loadIdentity(raw);
@@ -82,6 +116,29 @@ export async function getOrCreateAgentIdentity(): Promise<AgentIdentity> {
 }
 
 export async function getAgentId(): Promise<string> {
-  const identity = await getOrCreateAgentIdentity();
-  return identity.agentId;
+  if (getMode() === "local") {
+    const identity = await getOrCreateAgentIdentity();
+    return identity.agentId;
+  }
+
+  const signer = getExternalSigner();
+  if (!signer) {
+    throw new Error(
+      "No external agent signer available. Provide window.openCawtAgent or set VITE_AGENT_IDENTITY_MODE=local for development."
+    );
+  }
+
+  const agentId = await signer.getAgentId();
+  if (!agentId || !String(agentId).trim()) {
+    throw new Error("External signer did not return a valid agent ID.");
+  }
+  return String(agentId);
+}
+
+export function getAgentIdentityMode(): AgentIdentityMode {
+  return getMode();
+}
+
+export function getAgentExternalSigner(): ExternalAgentSigner | null {
+  return getExternalSigner();
 }

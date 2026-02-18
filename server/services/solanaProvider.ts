@@ -7,22 +7,30 @@ export interface SolanaVerificationResult {
   recipient: string;
   amountLamports: number;
   finalised: boolean;
+  payerWallet?: string;
 }
 
 export interface SolanaProvider {
-  verifyFilingFeeTx(txSig: string): Promise<SolanaVerificationResult>;
+  verifyFilingFeeTx(
+    txSig: string,
+    expectedPayerWallet?: string
+  ): Promise<SolanaVerificationResult>;
 }
 
 class StubSolanaProvider implements SolanaProvider {
   constructor(private readonly config: AppConfig) {}
 
-  async verifyFilingFeeTx(txSig: string): Promise<SolanaVerificationResult> {
+  async verifyFilingFeeTx(
+    txSig: string,
+    expectedPayerWallet?: string
+  ): Promise<SolanaVerificationResult> {
     const amountLamports = this.config.filingFeeLamports + 1000;
     return {
       txSig,
       recipient: this.config.treasuryAddress,
       amountLamports,
-      finalised: true
+      finalised: true,
+      payerWallet: expectedPayerWallet ?? "stub_payer_wallet"
     };
   }
 }
@@ -41,6 +49,32 @@ function readKeyPubkey(value: unknown): string | null {
   return null;
 }
 
+function readSignerInfo(
+  value: unknown
+): {
+  pubkey: string | null;
+  signer: boolean;
+} {
+  if (typeof value === "string") {
+    return {
+      pubkey: value,
+      signer: false
+    };
+  }
+  if (!value || typeof value !== "object") {
+    return {
+      pubkey: null,
+      signer: false
+    };
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return {
+    pubkey: readKeyPubkey(value),
+    signer: candidate.signer === true
+  };
+}
+
 class RpcSolanaProvider implements SolanaProvider {
   private readonly helius;
 
@@ -48,7 +82,10 @@ class RpcSolanaProvider implements SolanaProvider {
     this.helius = createHeliusClient(config);
   }
 
-  async verifyFilingFeeTx(txSig: string): Promise<SolanaVerificationResult> {
+  async verifyFilingFeeTx(
+    txSig: string,
+    expectedPayerWallet?: string
+  ): Promise<SolanaVerificationResult> {
     const result = await this.helius.getTransaction(txSig);
     if (!result) {
       throw badRequest(
@@ -70,10 +107,11 @@ class RpcSolanaProvider implements SolanaProvider {
     const accountKeysRaw = (message.accountKeys as unknown[] | undefined) ?? [];
     const preBalances = (meta.preBalances as number[] | undefined) ?? [];
     const postBalances = (meta.postBalances as number[] | undefined) ?? [];
+    const accountKeys = accountKeysRaw.map((value) => readSignerInfo(value));
 
     let amountLamports = 0;
-    for (let index = 0; index < accountKeysRaw.length; index += 1) {
-      const key = readKeyPubkey(accountKeysRaw[index]);
+    for (let index = 0; index < accountKeys.length; index += 1) {
+      const key = accountKeys[index].pubkey;
       if (key !== this.config.treasuryAddress) {
         continue;
       }
@@ -99,11 +137,27 @@ class RpcSolanaProvider implements SolanaProvider {
       });
     }
 
+    const payerWallet =
+      accountKeys.find((item) => item.signer && item.pubkey)?.pubkey ??
+      accountKeys.find((item) => item.pubkey)?.pubkey ??
+      undefined;
+    if (expectedPayerWallet && payerWallet && expectedPayerWallet !== payerWallet) {
+      throw badRequest(
+        "PAYER_WALLET_MISMATCH",
+        "Treasury transaction payer wallet does not match the supplied payer wallet.",
+        {
+          expectedPayerWallet,
+          observedPayerWallet: payerWallet
+        }
+      );
+    }
+
     return {
       txSig,
       recipient: this.config.treasuryAddress,
       amountLamports,
-      finalised: true
+      finalised: true,
+      payerWallet
     };
   }
 }

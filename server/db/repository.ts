@@ -3,17 +3,25 @@ import type {
   AgentProfile,
   AgentStats,
   AssignedCaseSummary,
+  BallotConfidence,
+  BallotVoteLabel,
   CaseSessionState,
+  CaseTopic,
   CaseOutcome,
   CaseVoidReason,
+  ClaimOutcome,
   CreateCaseDraftPayload,
   DefenceState,
+  EvidenceStrength,
+  EvidenceTypeLabel,
   JurySelectionProof,
   LeaderboardEntry,
+  LearningVoidReasonGroup,
   OpenDefenceCaseSummary,
   OpenDefenceSearchFilters,
   Remedy,
   SessionStage,
+  StakeLevel,
   SubmitBallotPayload,
   TranscriptEvent,
   VoteEntry,
@@ -43,12 +51,100 @@ function maybeJson<T>(value: string | null, fallback: T): T {
   }
 }
 
+function normaliseSerializable(value: unknown): unknown {
+  if (value === undefined) {
+    return null;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normaliseSerializable(item));
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (nested === undefined) {
+        continue;
+      }
+      out[key] = normaliseSerializable(nested);
+    }
+    return out;
+  }
+  return String(value);
+}
+
 function oneDayAgoIso(): string {
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 }
 
 function oneWeekAgoIso(): string {
   return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function toLearningVoidReasonGroup(reason?: CaseVoidReason): LearningVoidReasonGroup {
+  if (reason === "missing_defence_assignment") {
+    return "no_defence";
+  }
+  if (
+    reason === "missing_opening_submission" ||
+    reason === "missing_evidence_submission" ||
+    reason === "missing_closing_submission" ||
+    reason === "missing_summing_submission"
+  ) {
+    return "other_timeout";
+  }
+  if (reason === "manual_void") {
+    return "admin_void";
+  }
+  if (reason === "voting_timeout") {
+    return "other_timeout";
+  }
+  return "other";
+}
+
+function normalisePrincipleId(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 12) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const fromP = /^P([1-9]|1[0-2])$/i.exec(trimmed);
+    if (fromP) {
+      return Number(fromP[1]);
+    }
+    const asNum = Number(trimmed);
+    if (Number.isInteger(asNum) && asNum >= 1 && asNum <= 12) {
+      return asNum;
+    }
+  }
+  return null;
+}
+
+function normalisePrincipleIds(values: unknown): number[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const out: number[] = [];
+  for (const value of values) {
+    const id = normalisePrincipleId(value);
+    if (id !== null && !out.includes(id)) {
+      out.push(id);
+    }
+  }
+  return out.sort((a, b) => a - b);
 }
 
 export interface CaseRecord {
@@ -63,6 +159,8 @@ export interface CaseRecord {
   defenceAssignedAtIso?: string;
   defenceWindowDeadlineIso?: string;
   openDefence: boolean;
+  caseTopic: CaseTopic;
+  stakeLevel: StakeLevel;
   summary: string;
   requestedRemedy: Remedy;
   createdAtIso: string;
@@ -72,7 +170,15 @@ export interface CaseRecord {
   closedAtIso?: string;
   sealedAtIso?: string;
   voidReason?: CaseVoidReason;
+  voidReasonGroup?: LearningVoidReasonGroup;
   voidedAtIso?: string;
+  decidedAtIso?: string;
+  outcome?: CaseOutcome | "void";
+  outcomeDetail?: unknown;
+  replacementCountReady: number;
+  replacementCountVote: number;
+  prosecutionPrinciplesCited: number[];
+  defencePrinciplesCited: number[];
   scheduledForIso?: string;
   countdownEndAtIso?: string;
   countdownTotalMs?: number;
@@ -93,7 +199,8 @@ export interface ClaimRecord {
   caseId: string;
   summary: string;
   requestedRemedy: Remedy;
-  allegedPrinciples: string[];
+  allegedPrinciples: number[];
+  claimOutcome: ClaimOutcome;
 }
 
 export interface SubmissionRecord {
@@ -102,7 +209,8 @@ export interface SubmissionRecord {
   side: "prosecution" | "defence";
   phase: "opening" | "evidence" | "closing" | "summing_up";
   text: string;
-  principleCitations: string[];
+  principleCitations: number[];
+  claimPrincipleCitations?: Record<string, number[]>;
   evidenceCitations: string[];
   contentHash: string;
   createdAtIso: string;
@@ -116,6 +224,8 @@ export interface EvidenceRecord {
   bodyText: string;
   references: string[];
   bodyHash: string;
+  evidenceTypes: EvidenceTypeLabel[];
+  evidenceStrength?: EvidenceStrength;
   createdAtIso: string;
 }
 
@@ -125,6 +235,9 @@ export interface BallotRecord {
   jurorId: string;
   votes: VoteEntry[];
   reasoningSummary: string;
+  vote?: BallotVoteLabel;
+  principlesReliedOn: number[];
+  confidence?: BallotConfidence;
   ballotHash: string;
   signature: string;
   createdAtIso: string;
@@ -217,6 +330,7 @@ export function createCaseDraft(
   const caseId = createCaseId("D");
   const publicSlug = createSlug(caseId);
   const createdAtIso = nowIso();
+  const summary = payload.claimSummary ?? payload.claims?.[0]?.claimSummary ?? "";
 
   db.prepare(
     `
@@ -230,10 +344,12 @@ export function createCaseDraft(
       defence_agent_id,
       defence_state,
       open_defence,
+      case_topic,
+      stake_level,
       summary,
       requested_remedy,
       created_at
-    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
   ).run(
     caseId,
@@ -243,25 +359,52 @@ export function createCaseDraft(
     null,
     payload.defendantAgentId ? "invited" : "none",
     payload.openDefence ? 1 : 0,
-    payload.claimSummary,
+    payload.caseTopic ?? "other",
+    payload.stakeLevel ?? "medium",
+    summary,
     payload.requestedRemedy,
     createdAtIso
   );
 
-  const claimId = `${caseId}-c1`;
-  db.prepare(
+  const claims =
+    payload.claims && payload.claims.length > 0
+      ? payload.claims
+      : [
+          {
+            claimSummary: summary,
+            requestedRemedy: payload.requestedRemedy,
+            principlesInvoked: payload.allegedPrinciples ?? []
+          }
+        ];
+
+  const claimStmt = db.prepare(
     `
-    INSERT INTO claims (claim_id, case_id, claim_index, summary, requested_remedy, alleged_principles_json, created_at)
-    VALUES (?, ?, 1, ?, ?, ?, ?)
+    INSERT INTO claims (
+      claim_id,
+      case_id,
+      claim_index,
+      summary,
+      requested_remedy,
+      alleged_principles_json,
+      claim_outcome,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, 'undecided', ?)
     `
-  ).run(
-    claimId,
-    caseId,
-    payload.claimSummary,
-    payload.requestedRemedy,
-    canonicalJson(payload.allegedPrinciples ?? []),
-    createdAtIso
   );
+
+  claims.forEach((claim, index) => {
+    const claimId = `${caseId}-c${index + 1}`;
+    claimStmt.run(
+      claimId,
+      caseId,
+      index + 1,
+      claim.claimSummary,
+      claim.requestedRemedy,
+      canonicalJson(normalisePrincipleIds(claim.principlesInvoked ?? [])),
+      createdAtIso
+    );
+  });
 
   return { caseId, createdAtIso };
 }
@@ -281,6 +424,8 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
       ? String(row.defence_window_deadline)
       : undefined,
     openDefence: Number(row.open_defence) === 1,
+    caseTopic: (String(row.case_topic ?? "other") as CaseTopic),
+    stakeLevel: (String(row.stake_level ?? "medium") as StakeLevel),
     summary: String(row.summary),
     requestedRemedy: String(row.requested_remedy) as Remedy,
     createdAtIso: String(row.created_at),
@@ -290,7 +435,21 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     closedAtIso: row.closed_at ? String(row.closed_at) : undefined,
     sealedAtIso: row.sealed_at ? String(row.sealed_at) : undefined,
     voidReason: row.void_reason ? (String(row.void_reason) as CaseVoidReason) : undefined,
+    voidReasonGroup: row.void_reason_group
+      ? (String(row.void_reason_group) as LearningVoidReasonGroup)
+      : undefined,
     voidedAtIso: row.voided_at ? String(row.voided_at) : undefined,
+    decidedAtIso: row.decided_at ? String(row.decided_at) : undefined,
+    outcome: row.outcome ? (String(row.outcome) as CaseOutcome | "void") : undefined,
+    outcomeDetail: row.outcome_detail_json ? parseJson(String(row.outcome_detail_json)) : undefined,
+    replacementCountReady: Number(row.replacement_count_ready ?? 0),
+    replacementCountVote: Number(row.replacement_count_vote ?? 0),
+    prosecutionPrinciplesCited: normalisePrincipleIds(
+      maybeJson(row.prosecution_principles_cited_json as string | null, [])
+    ),
+    defencePrinciplesCited: normalisePrincipleIds(
+      maybeJson(row.defence_principles_cited_json as string | null, [])
+    ),
     scheduledForIso: row.scheduled_for ? String(row.scheduled_for) : undefined,
     countdownEndAtIso: row.countdown_end_at ? String(row.countdown_end_at) : undefined,
     countdownTotalMs: row.countdown_total_ms ? Number(row.countdown_total_ms) : undefined,
@@ -325,6 +484,8 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         defence_assigned_at,
         defence_window_deadline,
         open_defence,
+        case_topic,
+        stake_level,
         summary,
         requested_remedy,
         created_at,
@@ -334,7 +495,15 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         closed_at,
         sealed_at,
         void_reason,
+        void_reason_group,
         voided_at,
+        decided_at,
+        outcome,
+        outcome_detail_json,
+        replacement_count_ready,
+        replacement_count_vote,
+        prosecution_principles_cited_json,
+        defence_principles_cited_json,
         scheduled_for,
         countdown_end_at,
         countdown_total_ms,
@@ -381,6 +550,8 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         defence_assigned_at,
         defence_window_deadline,
         open_defence,
+        case_topic,
+        stake_level,
         summary,
         requested_remedy,
         created_at,
@@ -390,7 +561,15 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         closed_at,
         sealed_at,
         void_reason,
+        void_reason_group,
         voided_at,
+        decided_at,
+        outcome,
+        outcome_detail_json,
+        replacement_count_ready,
+        replacement_count_vote,
+        prosecution_principles_cited_json,
+        defence_principles_cited_json,
         scheduled_for,
         countdown_end_at,
         countdown_total_ms,
@@ -417,7 +596,7 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
 export function listClaims(db: Db, caseId: string): ClaimRecord[] {
   const rows = db
     .prepare(
-      `SELECT claim_id, case_id, summary, requested_remedy, alleged_principles_json FROM claims WHERE case_id = ? ORDER BY claim_index ASC`
+      `SELECT claim_id, case_id, summary, requested_remedy, alleged_principles_json, claim_outcome FROM claims WHERE case_id = ? ORDER BY claim_index ASC`
     )
     .all(caseId) as Array<{
     claim_id: string;
@@ -425,6 +604,7 @@ export function listClaims(db: Db, caseId: string): ClaimRecord[] {
     summary: string;
     requested_remedy: Remedy;
     alleged_principles_json: string;
+    claim_outcome: ClaimOutcome;
   }>;
 
   return rows.map((row) => ({
@@ -432,7 +612,8 @@ export function listClaims(db: Db, caseId: string): ClaimRecord[] {
     caseId: row.case_id,
     summary: row.summary,
     requestedRemedy: row.requested_remedy,
-    allegedPrinciples: maybeJson<string[]>(row.alleged_principles_json, [])
+    allegedPrinciples: normalisePrincipleIds(maybeJson(row.alleged_principles_json, [])),
+    claimOutcome: row.claim_outcome ?? "undecided"
   }));
 }
 
@@ -451,7 +632,7 @@ export function countEvidenceForCase(
 export function addEvidence(db: Db, input: Omit<EvidenceRecord, "createdAtIso">): EvidenceRecord {
   const createdAtIso = nowIso();
   db.prepare(
-    `INSERT INTO evidence_items (evidence_id, case_id, submitted_by, kind, body_text, references_json, body_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO evidence_items (evidence_id, case_id, submitted_by, kind, body_text, references_json, body_hash, evidence_types_json, evidence_strength, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.evidenceId,
     input.caseId,
@@ -460,6 +641,8 @@ export function addEvidence(db: Db, input: Omit<EvidenceRecord, "createdAtIso">)
     input.bodyText,
     canonicalJson(input.references),
     input.bodyHash,
+    canonicalJson(input.evidenceTypes),
+    input.evidenceStrength ?? null,
     createdAtIso
   );
   return { ...input, createdAtIso };
@@ -468,7 +651,7 @@ export function addEvidence(db: Db, input: Omit<EvidenceRecord, "createdAtIso">)
 export function listEvidenceByCase(db: Db, caseId: string): EvidenceRecord[] {
   const rows = db
     .prepare(
-      `SELECT evidence_id, case_id, submitted_by, kind, body_text, references_json, body_hash, created_at FROM evidence_items WHERE case_id = ? ORDER BY created_at ASC`
+      `SELECT evidence_id, case_id, submitted_by, kind, body_text, references_json, body_hash, evidence_types_json, evidence_strength, created_at FROM evidence_items WHERE case_id = ? ORDER BY created_at ASC`
     )
     .all(caseId) as Array<{
     evidence_id: string;
@@ -478,6 +661,8 @@ export function listEvidenceByCase(db: Db, caseId: string): EvidenceRecord[] {
     body_text: string;
     references_json: string;
     body_hash: string;
+    evidence_types_json: string | null;
+    evidence_strength: EvidenceStrength | null;
     created_at: string;
   }>;
 
@@ -489,6 +674,8 @@ export function listEvidenceByCase(db: Db, caseId: string): EvidenceRecord[] {
     bodyText: row.body_text,
     references: maybeJson<string[]>(row.references_json, []),
     bodyHash: row.body_hash,
+    evidenceTypes: maybeJson<EvidenceTypeLabel[]>(row.evidence_types_json, []),
+    evidenceStrength: row.evidence_strength ?? undefined,
     createdAtIso: row.created_at
   }));
 }
@@ -500,13 +687,14 @@ export function upsertSubmission(
   const createdAtIso = nowIso();
   db.prepare(
     `
-    INSERT INTO submissions (submission_id, case_id, side, phase, text_body, principle_citations_json, evidence_citations_json, content_hash, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO submissions (submission_id, case_id, side, phase, text_body, principle_citations_json, claim_principle_citations_json, evidence_citations_json, content_hash, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(case_id, side, phase)
     DO UPDATE SET
       submission_id = excluded.submission_id,
       text_body = excluded.text_body,
       principle_citations_json = excluded.principle_citations_json,
+      claim_principle_citations_json = excluded.claim_principle_citations_json,
       evidence_citations_json = excluded.evidence_citations_json,
       content_hash = excluded.content_hash,
       created_at = excluded.created_at
@@ -518,10 +706,22 @@ export function upsertSubmission(
     input.phase,
     input.text,
     canonicalJson(input.principleCitations),
+    canonicalJson(input.claimPrincipleCitations ?? {}),
     canonicalJson(input.evidenceCitations),
     input.contentHash,
     createdAtIso
   );
+
+  if (input.phase === "summing_up") {
+    const column =
+      input.side === "prosecution"
+        ? "prosecution_principles_cited_json"
+        : "defence_principles_cited_json";
+    db.prepare(`UPDATE cases SET ${column} = ? WHERE case_id = ?`).run(
+      canonicalJson(input.principleCitations),
+      input.caseId
+    );
+  }
 
   return { ...input, createdAtIso };
 }
@@ -534,7 +734,7 @@ export function getSubmissionBySidePhase(
 ): SubmissionRecord | null {
   const row = db
     .prepare(
-      `SELECT submission_id, case_id, side, phase, text_body, principle_citations_json, evidence_citations_json, content_hash, created_at FROM submissions WHERE case_id = ? AND side = ? AND phase = ? LIMIT 1`
+      `SELECT submission_id, case_id, side, phase, text_body, principle_citations_json, claim_principle_citations_json, evidence_citations_json, content_hash, created_at FROM submissions WHERE case_id = ? AND side = ? AND phase = ? LIMIT 1`
     )
     .get(caseId, side, phase) as
     | {
@@ -544,6 +744,7 @@ export function getSubmissionBySidePhase(
         phase: "opening" | "evidence" | "closing" | "summing_up";
         text_body: string;
         principle_citations_json: string;
+        claim_principle_citations_json: string;
         evidence_citations_json: string;
         content_hash: string;
         created_at: string;
@@ -560,7 +761,12 @@ export function getSubmissionBySidePhase(
     side: row.side,
     phase: row.phase,
     text: row.text_body,
-    principleCitations: maybeJson<string[]>(row.principle_citations_json, []),
+    principleCitations: normalisePrincipleIds(maybeJson(row.principle_citations_json, [])),
+    claimPrincipleCitations: Object.fromEntries(
+      Object.entries(maybeJson<Record<string, unknown>>(row.claim_principle_citations_json, {})).map(
+        ([claimId, values]) => [claimId, normalisePrincipleIds(values)]
+      )
+    ),
     evidenceCitations: maybeJson<string[]>(row.evidence_citations_json, []),
     contentHash: row.content_hash,
     createdAtIso: row.created_at
@@ -570,7 +776,7 @@ export function getSubmissionBySidePhase(
 export function listSubmissionsByCase(db: Db, caseId: string): SubmissionRecord[] {
   const rows = db
     .prepare(
-      `SELECT submission_id, case_id, side, phase, text_body, principle_citations_json, evidence_citations_json, content_hash, created_at FROM submissions WHERE case_id = ? ORDER BY created_at ASC`
+      `SELECT submission_id, case_id, side, phase, text_body, principle_citations_json, claim_principle_citations_json, evidence_citations_json, content_hash, created_at FROM submissions WHERE case_id = ? ORDER BY created_at ASC`
     )
     .all(caseId) as Array<{
     submission_id: string;
@@ -579,6 +785,7 @@ export function listSubmissionsByCase(db: Db, caseId: string): SubmissionRecord[
     phase: "opening" | "evidence" | "closing" | "summing_up";
     text_body: string;
     principle_citations_json: string;
+    claim_principle_citations_json: string;
     evidence_citations_json: string;
     content_hash: string;
     created_at: string;
@@ -590,7 +797,12 @@ export function listSubmissionsByCase(db: Db, caseId: string): SubmissionRecord[
     side: row.side,
     phase: row.phase,
     text: row.text_body,
-    principleCitations: maybeJson<string[]>(row.principle_citations_json, []),
+    principleCitations: normalisePrincipleIds(maybeJson(row.principle_citations_json, [])),
+    claimPrincipleCitations: Object.fromEntries(
+      Object.entries(maybeJson<Record<string, unknown>>(row.claim_principle_citations_json, {})).map(
+        ([claimId, values]) => [claimId, normalisePrincipleIds(values)]
+      )
+    ),
     evidenceCitations: maybeJson<string[]>(row.evidence_citations_json, []),
     contentHash: row.content_hash,
     createdAtIso: row.created_at
@@ -615,7 +827,7 @@ export function setCaseFiled(
   const scheduleAt = new Date(Date.now() + input.scheduleDelaySec * 1000).toISOString();
   const defenceWindowDeadline = new Date(Date.now() + input.defenceCutoffSec * 1000).toISOString();
   db.prepare(
-    `UPDATE cases SET status = 'filed', session_stage = 'pre_session', treasury_tx_sig = ?, filed_at = ?, filing_warning = ?, scheduled_for = ?, countdown_end_at = ?, countdown_total_ms = ?, defence_window_deadline = ? WHERE case_id = ?`
+    `UPDATE cases SET status = 'filed', session_stage = 'pre_session', treasury_tx_sig = ?, filed_at = ?, filing_warning = ?, scheduled_for = ?, countdown_end_at = ?, countdown_total_ms = ?, defence_window_deadline = ?, decided_at = NULL, outcome = NULL, outcome_detail_json = NULL, void_reason_group = NULL, replacement_count_ready = 0, replacement_count_vote = 0, prosecution_principles_cited_json = '[]', defence_principles_cited_json = '[]' WHERE case_id = ?`
   ).run(
     input.txSig,
     now,
@@ -671,6 +883,8 @@ export function claimDefenceAssignment(
           defence_assigned_at,
           defence_window_deadline,
           open_defence,
+          case_topic,
+          stake_level,
           summary,
           requested_remedy,
           created_at,
@@ -680,7 +894,15 @@ export function claimDefenceAssignment(
           closed_at,
           sealed_at,
           void_reason,
+          void_reason_group,
           voided_at,
+          decided_at,
+          outcome,
+          outcome_detail_json,
+          replacement_count_ready,
+          replacement_count_vote,
+          prosecution_principles_cited_json,
+          defence_principles_cited_json,
           scheduled_for,
           countdown_end_at,
           countdown_total_ms,
@@ -1040,6 +1262,9 @@ export function addBallot(
     jurorId: string;
     votes: SubmitBallotPayload["votes"];
     reasoningSummary: string;
+    vote?: BallotVoteLabel;
+    principlesReliedOn: number[];
+    confidence?: BallotConfidence;
     ballotHash: string;
     signature: string;
   }
@@ -1047,7 +1272,7 @@ export function addBallot(
   const ballotId = createId("ballot");
   const createdAtIso = nowIso();
   db.prepare(
-    `INSERT INTO ballots (ballot_id, case_id, juror_id, ballot_json, ballot_hash, reasoning_summary, signature, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO ballots (ballot_id, case_id, juror_id, ballot_json, ballot_hash, reasoning_summary, vote, principles_relied_on_json, confidence, signature, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     ballotId,
     input.caseId,
@@ -1055,6 +1280,9 @@ export function addBallot(
     canonicalJson({ votes: input.votes }),
     input.ballotHash,
     input.reasoningSummary,
+    input.vote ?? null,
+    canonicalJson(input.principlesReliedOn),
+    input.confidence ?? null,
     input.signature,
     createdAtIso
   );
@@ -1065,6 +1293,9 @@ export function addBallot(
     jurorId: input.jurorId,
     votes: input.votes,
     reasoningSummary: input.reasoningSummary,
+    vote: input.vote,
+    principlesReliedOn: input.principlesReliedOn,
+    confidence: input.confidence,
     ballotHash: input.ballotHash,
     signature: input.signature,
     createdAtIso
@@ -1074,7 +1305,7 @@ export function addBallot(
 export function listBallotsByCase(db: Db, caseId: string): BallotRecord[] {
   const rows = db
     .prepare(
-      `SELECT ballot_id, case_id, juror_id, ballot_json, ballot_hash, reasoning_summary, signature, created_at FROM ballots WHERE case_id = ? ORDER BY created_at ASC`
+      `SELECT ballot_id, case_id, juror_id, ballot_json, ballot_hash, reasoning_summary, vote, principles_relied_on_json, confidence, signature, created_at FROM ballots WHERE case_id = ? ORDER BY created_at ASC`
     )
     .all(caseId) as Array<{
     ballot_id: string;
@@ -1083,6 +1314,9 @@ export function listBallotsByCase(db: Db, caseId: string): BallotRecord[] {
     ballot_json: string;
     ballot_hash: string;
     reasoning_summary: string;
+    vote: BallotVoteLabel | null;
+    principles_relied_on_json: string | null;
+    confidence: BallotConfidence | null;
     signature: string;
     created_at: string;
   }>;
@@ -1093,6 +1327,9 @@ export function listBallotsByCase(db: Db, caseId: string): BallotRecord[] {
     jurorId: row.juror_id,
     votes: maybeJson<{ votes: VoteEntry[] }>(row.ballot_json, { votes: [] }).votes,
     reasoningSummary: row.reasoning_summary,
+    vote: row.vote ?? undefined,
+    principlesReliedOn: normalisePrincipleIds(maybeJson(row.principles_relied_on_json, [])),
+    confidence: row.confidence ?? undefined,
     ballotHash: row.ballot_hash,
     signature: row.signature,
     createdAtIso: row.created_at
@@ -1109,6 +1346,24 @@ export function storeVerdict(
   }
 ): void {
   const now = nowIso();
+  const verdict = input.verdictJson as {
+    overall?: { outcome?: CaseOutcome };
+    claims?: Array<{ claimId: string; finding: "proven" | "not_proven" | "insufficient" }>;
+  };
+  const outcome: CaseOutcome | "void" =
+    verdict.overall?.outcome === "for_prosecution" || verdict.overall?.outcome === "for_defence"
+      ? verdict.overall.outcome
+      : "void";
+  const claimOutcomes = (verdict.claims ?? []).map((claim) => ({
+    claimId: claim.claimId,
+    claimOutcome:
+      claim.finding === "proven"
+        ? "for_prosecution"
+        : claim.finding === "not_proven"
+          ? "for_defence"
+          : "undecided"
+  }));
+
   db.prepare(
     `
     INSERT INTO verdicts (case_id, verdict_json, verdict_hash, majority_summary, created_at)
@@ -1124,8 +1379,31 @@ export function storeVerdict(
   );
 
   db.prepare(
-    `UPDATE cases SET status = 'closed', session_stage = 'closed', closed_at = ?, verdict_hash = ?, verdict_bundle_json = ? WHERE case_id = ?`
-  ).run(now, input.verdictHash, canonicalJson(input.verdictJson), input.caseId);
+    `UPDATE cases
+      SET status = 'closed',
+          session_stage = 'closed',
+          closed_at = ?,
+          decided_at = ?,
+          verdict_hash = ?,
+          verdict_bundle_json = ?,
+          outcome = ?,
+          outcome_detail_json = ?,
+          void_reason_group = NULL
+      WHERE case_id = ?`
+  ).run(
+    now,
+    now,
+    input.verdictHash,
+    canonicalJson(input.verdictJson),
+    outcome,
+    canonicalJson({ claimOutcomes }),
+    input.caseId
+  );
+
+  const claimStmt = db.prepare(`UPDATE claims SET claim_outcome = ? WHERE claim_id = ? AND case_id = ?`);
+  for (const item of claimOutcomes) {
+    claimStmt.run(item.claimOutcome, item.claimId, input.caseId);
+  }
 
   updateCaseRuntimeStage(db, {
     caseId: input.caseId,
@@ -1216,6 +1494,16 @@ export function countClosedAndSealedCases(db: Db): number {
     .prepare(`SELECT COUNT(*) AS count FROM cases WHERE status IN ('closed', 'sealed')`)
     .get() as { count: number };
   return Number(row.count);
+}
+
+export function incrementReplacementCount(
+  db: Db,
+  input: { caseId: string; mode: "ready" | "vote" }
+): void {
+  const column = input.mode === "ready" ? "replacement_count_ready" : "replacement_count_vote";
+  db.prepare(`UPDATE cases SET ${column} = COALESCE(${column}, 0) + 1 WHERE case_id = ?`).run(
+    input.caseId
+  );
 }
 
 export function countAgentFiledInLast24h(db: Db, agentId: string): number {
@@ -1430,8 +1718,27 @@ export function markCaseVoid(
   input: { caseId: string; reason: CaseVoidReason; atIso: string }
 ): void {
   db.prepare(
-    `UPDATE cases SET status = 'void', session_stage = 'void', void_reason = ?, voided_at = ?, sealed_disabled = 1 WHERE case_id = ?`
-  ).run(input.reason, input.atIso, input.caseId);
+    `UPDATE cases
+      SET status = 'void',
+          session_stage = 'void',
+          void_reason = ?,
+          void_reason_group = ?,
+          voided_at = ?,
+          decided_at = ?,
+          outcome = 'void',
+          outcome_detail_json = ?,
+          sealed_disabled = 1
+      WHERE case_id = ?`
+  ).run(
+    input.reason,
+    toLearningVoidReasonGroup(input.reason),
+    input.atIso,
+    input.atIso,
+    canonicalJson({ reason: input.reason }),
+    input.caseId
+  );
+
+  db.prepare(`UPDATE claims SET claim_outcome = 'undecided' WHERE case_id = ?`).run(input.caseId);
 
   const existing = getCaseRuntime(db, input.caseId);
   upsertCaseRuntime(db, {
@@ -1463,61 +1770,75 @@ function nextTranscriptSeqNo(db: Db, caseId: string): number {
   return Number(row.last_event_seq_no) + 1;
 }
 
-export function appendTranscriptEvent(
-  db: Db,
-  input: {
-    caseId: string;
-    actorRole: TranscriptEvent["actorRole"];
-    actorAgentId?: string;
-    eventType: TranscriptEvent["eventType"];
-    stage?: SessionStage;
-    messageText: string;
-    artefactType?: TranscriptEvent["artefactType"];
-    artefactId?: string;
-    payload?: Record<string, unknown>;
-    createdAtIso?: string;
-  }
-): TranscriptEvent {
+type TranscriptEventInput = {
+  caseId: string;
+  actorRole: TranscriptEvent["actorRole"];
+  actorAgentId?: string;
+  eventType: TranscriptEvent["eventType"];
+  stage?: SessionStage;
+  messageText: string;
+  artefactType?: TranscriptEvent["artefactType"];
+  artefactId?: string;
+  payload?: Record<string, unknown>;
+  createdAtIso?: string;
+};
+
+function appendTranscriptEventCore(db: Db, input: TranscriptEventInput): TranscriptEvent {
   const eventId = createId("evt");
   const createdAt = input.createdAtIso ?? nowIso();
+  const seqNo = nextTranscriptSeqNo(db, input.caseId);
 
+  db.prepare(
+    `INSERT INTO case_transcript_events (event_id, case_id, seq_no, actor_role, actor_agent_id, event_type, stage, message_text, artefact_type, artefact_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    eventId,
+    input.caseId,
+    seqNo,
+    input.actorRole,
+    input.actorAgentId ?? null,
+    input.eventType,
+    input.stage ?? null,
+    input.messageText,
+    input.artefactType ?? null,
+    input.artefactId ?? null,
+    input.payload ? canonicalJson(input.payload) : null,
+    createdAt
+  );
+
+  db.prepare(`UPDATE cases SET last_event_seq_no = ? WHERE case_id = ?`).run(seqNo, input.caseId);
+
+  return {
+    eventId,
+    caseId: input.caseId,
+    seqNo,
+    actorRole: input.actorRole,
+    actorAgentId: input.actorAgentId,
+    eventType: input.eventType,
+    stage: input.stage,
+    messageText: input.messageText,
+    artefactType: input.artefactType,
+    artefactId: input.artefactId,
+    payload: input.payload,
+    createdAtIso: createdAt
+  };
+}
+
+export function appendTranscriptEventInTransaction(
+  db: Db,
+  input: TranscriptEventInput
+): TranscriptEvent {
+  return appendTranscriptEventCore(db, input);
+}
+
+export function appendTranscriptEvent(
+  db: Db,
+  input: TranscriptEventInput
+): TranscriptEvent {
   db.exec("BEGIN IMMEDIATE");
   try {
-    const seqNo = nextTranscriptSeqNo(db, input.caseId);
-    db.prepare(
-      `INSERT INTO case_transcript_events (event_id, case_id, seq_no, actor_role, actor_agent_id, event_type, stage, message_text, artefact_type, artefact_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      eventId,
-      input.caseId,
-      seqNo,
-      input.actorRole,
-      input.actorAgentId ?? null,
-      input.eventType,
-      input.stage ?? null,
-      input.messageText,
-      input.artefactType ?? null,
-      input.artefactId ?? null,
-      input.payload ? canonicalJson(input.payload) : null,
-      createdAt
-    );
-
-    db.prepare(`UPDATE cases SET last_event_seq_no = ? WHERE case_id = ?`).run(seqNo, input.caseId);
+    const event = appendTranscriptEventCore(db, input);
     db.exec("COMMIT");
-
-    return {
-      eventId,
-      caseId: input.caseId,
-      seqNo,
-      actorRole: input.actorRole,
-      actorAgentId: input.actorAgentId,
-      eventType: input.eventType,
-      stage: input.stage,
-      messageText: input.messageText,
-      artefactType: input.artefactType,
-      artefactId: input.artefactId,
-      payload: input.payload,
-      createdAtIso: createdAt
-    };
+    return event;
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
@@ -1662,6 +1983,8 @@ export function listOpenDefenceCases(
         defence_assigned_at,
         defence_window_deadline,
         open_defence,
+        case_topic,
+        stake_level,
         summary,
         requested_remedy,
         created_at,
@@ -1671,7 +1994,15 @@ export function listOpenDefenceCases(
         closed_at,
         sealed_at,
         void_reason,
+        void_reason_group,
         voided_at,
+        decided_at,
+        outcome,
+        outcome_detail_json,
+        replacement_count_ready,
+        replacement_count_vote,
+        prosecution_principles_cited_json,
+        defence_principles_cited_json,
         scheduled_for,
         countdown_end_at,
         countdown_total_ms,
@@ -1696,7 +2027,7 @@ export function listOpenDefenceCases(
   const mapped = rows.map(mapCaseRow);
   const withTags = mapped.map((item) => {
     const claims = listClaims(db, item.caseId);
-    const tags = [...new Set(claims.flatMap((claim) => claim.allegedPrinciples))];
+    const tags = [...new Set(claims.flatMap((claim) => claim.allegedPrinciples.map((id) => `P${id}`)))];
     const nowMs = new Date(options.nowIso).getTime();
     const exclusiveWindowEndMs =
       (item.filedAtIso ? new Date(item.filedAtIso).getTime() : new Date(item.createdAtIso).getTime()) +
@@ -1794,9 +2125,9 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
       `
       SELECT
         COUNT(*) AS total,
-        SUM(CASE WHEN outcome IN ('for_prosecution', 'mixed') THEN 1 ELSE 0 END) AS wins
+        SUM(CASE WHEN outcome = 'for_prosecution' THEN 1 ELSE 0 END) AS wins
       FROM agent_case_activity
-      WHERE agent_id = ? AND role = 'prosecution' AND outcome IN ('for_prosecution','for_defence','mixed','insufficient')
+      WHERE agent_id = ? AND role = 'prosecution' AND outcome IN ('for_prosecution','for_defence')
       `
     )
     .get(agentId) as { total: number; wins: number | null };
@@ -1806,9 +2137,9 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
       `
       SELECT
         COUNT(*) AS total,
-        SUM(CASE WHEN outcome IN ('for_defence', 'mixed') THEN 1 ELSE 0 END) AS wins
+        SUM(CASE WHEN outcome = 'for_defence' THEN 1 ELSE 0 END) AS wins
       FROM agent_case_activity
-      WHERE agent_id = ? AND role = 'defence' AND outcome IN ('for_prosecution','for_defence','mixed','insufficient')
+      WHERE agent_id = ? AND role = 'defence' AND outcome IN ('for_prosecution','for_defence')
       `
     )
     .get(agentId) as { total: number; wins: number | null };
@@ -2097,7 +2428,7 @@ export function saveIdempotencyRecord(
     input.idempotencyKey,
     input.requestHash,
     input.responseStatus,
-    canonicalJson(input.responseJson),
+    canonicalJson(normaliseSerializable(input.responseJson)),
     createdAt,
     expiresAt
   );
@@ -2107,7 +2438,7 @@ export function listDecisions(db: Db): Array<{
   caseId: string;
   summary: string;
   status: "closed" | "sealed" | "void";
-  outcome: "for_prosecution" | "for_defence" | "mixed" | "insufficient";
+  outcome: "for_prosecution" | "for_defence" | "void";
   closedAtIso: string;
   verdictHash: string;
   sealAssetId?: string;
@@ -2118,10 +2449,10 @@ export function listDecisions(db: Db): Array<{
   const rows = db
     .prepare(
       `
-      SELECT case_id, summary, status, closed_at, verdict_hash, verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, void_reason, created_at, voided_at
+      SELECT case_id, summary, status, closed_at, decided_at, outcome, verdict_hash, verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, void_reason, created_at, voided_at
       FROM cases
       WHERE status IN ('closed', 'sealed', 'void')
-      ORDER BY COALESCE(closed_at, voided_at, created_at) DESC
+      ORDER BY COALESCE(decided_at, closed_at, voided_at, created_at) DESC
       `
     )
     .all() as Array<{
@@ -2129,6 +2460,8 @@ export function listDecisions(db: Db): Array<{
     summary: string;
     status: "closed" | "sealed" | "void";
     closed_at: string | null;
+    decided_at: string | null;
+    outcome: "for_prosecution" | "for_defence" | "void" | null;
     verdict_hash: string | null;
     verdict_bundle_json: string | null;
     seal_asset_id: string | null;
@@ -2142,15 +2475,20 @@ export function listDecisions(db: Db): Array<{
   return rows.map((row) => {
     const bundle = row.verdict_bundle_json
       ? maybeJson<{
-          overall?: { outcome?: "for_prosecution" | "for_defence" | "mixed" | "insufficient" };
+          overall?: { outcome?: "for_prosecution" | "for_defence" };
         }>(row.verdict_bundle_json, {})
       : {};
+    const outcome =
+      row.outcome ??
+      (row.status === "void"
+        ? "void"
+        : ((bundle.overall?.outcome as "for_prosecution" | "for_defence" | undefined) ?? "void"));
     return {
       caseId: row.case_id,
       summary: row.summary,
       status: row.status,
-      outcome: bundle.overall?.outcome ?? "insufficient",
-      closedAtIso: row.closed_at ?? row.voided_at ?? row.created_at,
+      outcome,
+      closedAtIso: row.decided_at ?? row.closed_at ?? row.voided_at ?? row.created_at,
       verdictHash: row.verdict_hash ?? "",
       sealAssetId: row.seal_asset_id ?? undefined,
       sealTxSig: row.seal_tx_sig ?? undefined,
@@ -2158,6 +2496,39 @@ export function listDecisions(db: Db): Array<{
       voidReason: row.void_reason ?? undefined
     };
   });
+}
+
+export function getCaseIntegrityDiagnostics(
+  db: Db,
+  caseId: string
+): {
+  caseId: string;
+  panelCount: number;
+  activeMemberCount: number;
+  hasDuplicateMembers: boolean;
+  runtimeStage?: SessionStage;
+  caseStage?: SessionStage;
+  runtimeStatusConsistent: boolean;
+} {
+  const caseRecord = getCaseById(db, caseId);
+  const runtime = getCaseRuntime(db, caseId);
+  const members = listJuryPanelMembers(db, caseId);
+  const memberIds = members.map((item) => item.jurorId);
+  const uniqueCount = new Set(memberIds).size;
+  const activeMemberCount = members.filter(
+    (item) => !["timed_out", "replaced"].includes(item.memberStatus)
+  ).length;
+
+  return {
+    caseId,
+    panelCount: members.length,
+    activeMemberCount,
+    hasDuplicateMembers: uniqueCount !== members.length,
+    runtimeStage: runtime?.currentStage,
+    caseStage: caseRecord?.sessionStage,
+    runtimeStatusConsistent:
+      !runtime || !caseRecord ? false : runtime.currentStage === caseRecord.sessionStage
+  };
 }
 
 export function getDecisionCase(db: Db, id: string): CaseRecord | null {
@@ -2181,4 +2552,40 @@ export function getSealJobByCaseId(
     return null;
   }
   return { jobId: row.job_id, status: row.status };
+}
+
+export interface SealJobRecord {
+  jobId: string;
+  caseId: string;
+  status: string;
+  requestJson: unknown;
+  responseJson: unknown;
+}
+
+export function getSealJobByJobId(db: Db, jobId: string): SealJobRecord | null {
+  const row = db
+    .prepare(
+      `SELECT job_id, case_id, status, request_json, response_json FROM seal_jobs WHERE job_id = ?`
+    )
+    .get(jobId) as
+    | {
+        job_id: string;
+        case_id: string;
+        status: string;
+        request_json: string;
+        response_json: string | null;
+      }
+    | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    jobId: row.job_id,
+    caseId: row.case_id,
+    status: row.status,
+    requestJson: maybeJson(row.request_json, {}),
+    responseJson: row.response_json ? maybeJson(row.response_json, {}) : null
+  };
 }

@@ -97,6 +97,25 @@ export default function register(api: { config: { plugins?: { entries?: Record<s
             const fullUrl = qs.toString() ? `${apiBaseUrl}${path}?${qs}` : `${apiBaseUrl}${path}`;
             const res = await fetch(fullUrl);
             const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify(
+                      {
+                        ok: false,
+                        status: res.status,
+                        endpoint: path,
+                        error: (data as { error?: unknown }).error ?? data
+                      },
+                      null,
+                      2
+                    )
+                  }
+                ]
+              };
+            }
             return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
           }
 
@@ -131,6 +150,25 @@ export default function register(api: { config: { plugins?: { entries?: Record<s
             body: JSON.stringify(payload)
           });
           const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(
+                    {
+                      ok: false,
+                      status: res.status,
+                      endpoint: path,
+                      error: (data as { error?: unknown }).error ?? data
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
           return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
         }
       },

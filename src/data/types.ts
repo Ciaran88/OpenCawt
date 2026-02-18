@@ -1,6 +1,27 @@
 export type CaseStatus = "scheduled" | "active" | "closed" | "sealed";
-export type CaseOutcome = "for_prosecution" | "for_defence" | "void" | "mixed" | "insufficient";
+export type CaseOutcome = "for_prosecution" | "for_defence" | "void";
 export type DefenceState = "none" | "invited" | "volunteered" | "accepted";
+export type CaseTopic =
+  | "misinformation"
+  | "privacy"
+  | "fraud"
+  | "safety"
+  | "fairness"
+  | "IP"
+  | "harassment"
+  | "real_world_event"
+  | "other";
+export type StakeLevel = "low" | "medium" | "high";
+export type BallotConfidence = "low" | "medium" | "high";
+export type BallotVoteLabel = "for_prosecution" | "for_defence" | "mixed";
+export type EvidenceTypeLabel =
+  | "transcript_quote"
+  | "url"
+  | "on_chain_proof"
+  | "agent_statement"
+  | "third_party_statement"
+  | "other";
+export type EvidenceStrength = "weak" | "medium" | "strong";
 
 export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "voting" | "sealed";
 
@@ -66,12 +87,15 @@ export interface EvidenceItem {
   kind: "log" | "transcript" | "code" | "link" | "attestation" | "other";
   summary: string;
   references: string[];
+  evidenceTypes?: EvidenceTypeLabel[];
+  evidenceStrength?: EvidenceStrength;
 }
 
 export interface Submission {
   phase: CasePhase;
   text: string;
-  principleCitations: string[];
+  principleCitations: Array<number | string>;
+  claimPrincipleCitations?: Record<string, Array<number | string>>;
   evidenceCitations: string[];
 }
 
@@ -112,7 +136,16 @@ export interface Case {
   defenceAssignedAtIso?: string;
   defenceWindowDeadlineIso?: string;
   openDefence: boolean;
+  caseTopic?: CaseTopic;
+  stakeLevel?: StakeLevel;
   createdAtIso: string;
+  decidedAtIso?: string;
+  outcome?: CaseOutcome;
+  outcomeDetail?: unknown;
+  replacementCountReady?: number;
+  replacementCountVote?: number;
+  prosecutionPrinciplesCited?: number[];
+  defencePrinciplesCited?: number[];
   scheduledForIso?: string;
   countdownTotalMs?: number;
   countdownEndAtIso?: string;
@@ -156,8 +189,16 @@ export interface LodgeDisputeDraftPayload {
   prosecutionAgentId: string;
   defendantAgentId?: string;
   openDefence: boolean;
+  caseTopic?: CaseTopic;
+  stakeLevel?: StakeLevel;
   claimSummary: string;
   requestedRemedy: "warn" | "delist" | "ban" | "restitution" | "other";
+  allegedPrinciples?: Array<number | string>;
+  claims?: Array<{
+    claimSummary: string;
+    requestedRemedy: "warn" | "delist" | "ban" | "restitution" | "other" | "none";
+    principlesInvoked?: Array<number | string>;
+  }>;
   evidenceIds: string[];
 }
 
@@ -171,6 +212,8 @@ export interface SubmitEvidencePayload {
   kind: EvidenceItem["kind"];
   bodyText: string;
   references: string[];
+  evidenceTypes?: EvidenceTypeLabel[];
+  evidenceStrength?: EvidenceStrength;
 }
 
 export interface SubmitEvidenceResult {
@@ -188,7 +231,8 @@ export interface SubmitPhasePayload {
   side: "prosecution" | "defence";
   phase: "opening" | "evidence" | "closing" | "summing_up";
   text: string;
-  principleCitations: string[];
+  principleCitations: Array<number | string>;
+  claimPrincipleCitations?: Record<string, Array<number | string>>;
   evidenceCitations: string[];
 }
 
@@ -196,7 +240,8 @@ export interface SubmitStageMessagePayload {
   side: "prosecution" | "defence";
   stage: "opening_addresses" | "evidence" | "closing_addresses" | "summing_up";
   text: string;
-  principleCitations: string[];
+  principleCitations: Array<number | string>;
+  claimPrincipleCitations?: Record<string, Array<number | string>>;
   evidenceCitations: string[];
 }
 
@@ -231,6 +276,9 @@ export interface BallotVote {
 export interface SubmitBallotPayload {
   votes: BallotVote[];
   reasoningSummary: string;
+  principlesReliedOn: Array<number | string>;
+  confidence?: BallotConfidence;
+  vote?: BallotVoteLabel;
 }
 
 export interface SubmitBallotResult {
