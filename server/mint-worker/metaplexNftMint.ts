@@ -3,14 +3,14 @@ import { Keypair } from "@solana/web3.js";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import {
   createSignerFromKeypair,
-  lamports,
   percentAmount,
   signerIdentity,
-  some
+  some,
+  transactionBuilder
 } from "@metaplex-foundation/umi";
 import { fromWeb3JsKeypair } from "@metaplex-foundation/umi-web3js-adapters";
-import { createNft, mplTokenMetadata } from "@metaplex-foundation/mpl-token-metadata";
-import { transferSol } from "@metaplex-foundation/mpl-toolbox";
+import { createV1, mintV1, mplTokenMetadata, TokenStandard } from "@metaplex-foundation/mpl-token-metadata";
+import { createAssociatedToken, findAssociatedTokenPda } from "@metaplex-foundation/mpl-toolbox";
 import type { WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
 import type { MintWorkerConfig } from "./workerConfig";
 import { resolveAssetById } from "./dasResolver";
@@ -59,7 +59,12 @@ export async function mintWithMetaplexNft(
     umi.use(signerIdentity(signer));
 
     const mint = createSignerFromKeypair(umi, fromWeb3JsKeypair(Keypair.generate()));
-    const createNftBuilder = createNft(umi, {
+    const token = findAssociatedTokenPda(umi, {
+      mint: mint.publicKey,
+      owner: signer.publicKey
+    });
+
+    const createBuilder = createV1(umi, {
       mint,
       authority: signer,
       payer: signer,
@@ -75,16 +80,30 @@ export async function mintWithMetaplexNft(
           share: 100
         }
       ]),
-      tokenOwner: signer.publicKey
+      tokenStandard: TokenStandard.NonFungible,
+      collectionDetails: null,
+      decimals: null,
+      printSupply: null
     });
-    // Metaplex mint path may charge ATA account creation from the mint signer account.
-    // Prefund the fresh mint account in the same transaction to avoid intermittent
-    // "insufficient lamports" failures on the mint instruction.
-    const builder = transferSol(umi, {
-      source: signer,
-      destination: mint.publicKey,
-      amount: lamports(1_500_000n)
-    }).add(createNftBuilder);
+
+    const ataBuilder = createAssociatedToken(umi, {
+      payer: signer,
+      ata: token,
+      owner: signer.publicKey,
+      mint: mint.publicKey
+    });
+
+    const mintBuilder = mintV1(umi, {
+      mint: mint.publicKey,
+      authority: signer,
+      payer: signer,
+      token,
+      tokenOwner: signer.publicKey,
+      tokenStandard: TokenStandard.NonFungible,
+      amount: 1
+    });
+
+    const builder = transactionBuilder().add(createBuilder).add(ataBuilder).add(mintBuilder);
 
     const sent = await builder.sendAndConfirm(umi, {
       confirm: {
