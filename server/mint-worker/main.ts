@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { createId } from "../../shared/ids";
 import type { WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
 import { mintWithBubblegumV2 } from "./bubblegumMint";
+import { asWorkerMintError } from "./errors";
 import { mintWithMetaplexNft } from "./metaplexNftMint";
 import { getMintWorkerConfig } from "./workerConfig";
 
@@ -81,12 +82,14 @@ const server = createServer((req, res) => {
         response = createStubResponse(body);
       }
     } catch (error) {
+      const mintError = asWorkerMintError(error);
       response = {
         jobId: body.jobId,
         caseId: body.caseId,
         status: "failed",
-        errorCode: "MINT_FAILED",
-        errorMessage: error instanceof Error ? error.message : String(error)
+        errorCode: mintError?.code ?? "MINT_FAILED",
+        errorMessage: mintError?.message ?? (error instanceof Error ? error.message : String(error)),
+        metadataUri: mintError?.metadataUri
       };
     }
 

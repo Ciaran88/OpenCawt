@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { WorkerSealRequest } from "../../shared/contracts";
 import type { MintWorkerConfig } from "./workerConfig";
+import { WorkerMintError } from "./errors";
 
 interface PinataJsonResponse {
   IpfsHash: string;
@@ -97,6 +98,13 @@ async function pinataRequest<T>(
 
       if (!response.ok) {
         const text = await response.text();
+        if (response.status === 403 && text.includes("FORBIDDEN")) {
+          throw new WorkerMintError({
+            code: "PINATA_QUOTA_EXCEEDED",
+            message: `PINATA_HTTP_403:${text.slice(0, 220)}`,
+            retryable: false
+          });
+        }
         throw new Error(`PINATA_HTTP_${response.status}:${text.slice(0, 220)}`);
       }
 
@@ -140,6 +148,9 @@ export async function uploadReceiptMetadata(
   request: WorkerSealRequest,
   sealedAtIso: string
 ): Promise<string> {
+  if (request.metadataUri) {
+    return request.metadataUri;
+  }
   const imageUri = await ensureSealImageUri(config);
   const metadata = buildMetadataJson(request, imageUri, sealedAtIso);
 

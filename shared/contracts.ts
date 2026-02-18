@@ -444,6 +444,7 @@ export interface WorkerSealRequest {
   decidedAtIso: string;
   externalUrl: string;
   verdictUri: string;
+  metadataUri?: string;
   metadata: {
     caseSummary: string;
     imagePath: string;

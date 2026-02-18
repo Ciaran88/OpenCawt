@@ -33,6 +33,7 @@ export interface AppConfig {
   signatureSkewSec: number;
   systemApiKey: string;
   workerToken: string;
+  sealJobMaxAttempts: number;
   defenceInviteSigningKey: string;
   defenceInviteRetrySec: number;
   capabilityKeysEnabled: boolean;
@@ -184,6 +185,7 @@ export function getConfig(): AppConfig {
     signatureSkewSec: numberEnv("SIGNATURE_SKEW_SEC", 300),
     systemApiKey: stringEnv("SYSTEM_API_KEY", "dev-system-key"),
     workerToken: stringEnv("WORKER_TOKEN", "dev-worker-token"),
+    sealJobMaxAttempts: numberEnv("SEAL_JOB_MAX_ATTEMPTS", 8),
     defenceInviteSigningKey: stringEnv(
       "DEFENCE_INVITE_SIGNING_KEY",
       "dev-defence-invite-signing-key"

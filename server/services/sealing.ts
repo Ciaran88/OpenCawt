@@ -185,7 +185,7 @@ export function applySealResult(
   result: WorkerSealResponse,
   options?: { metadataUri?: string }
 ): void {
-  markSealJobResult(db, result, { metadataUri: options?.metadataUri });
+  markSealJobResult(db, result, { metadataUri: options?.metadataUri ?? result.metadataUri });
   if (result.status === "minted") {
     markCaseSealed(db, {
       caseId: result.caseId,
@@ -239,6 +239,9 @@ async function runSealJob(
   }
 
   const request = job.requestJson as WorkerSealRequest;
+  const requestWithMetadataUri: WorkerSealRequest = job.metadataUri
+    ? { ...request, metadataUri: job.metadataUri }
+    : request;
   setCaseSealState(options.db, {
     caseId: request.caseId,
     sealStatus: "minting"
@@ -247,8 +250,8 @@ async function runSealJob(
   try {
     const result =
       options.config.sealWorkerMode === "stub"
-        ? createStubSealResponse(request)
-        : await postWorkerMint(options.config, request, mode);
+        ? createStubSealResponse(requestWithMetadataUri)
+        : await postWorkerMint(options.config, requestWithMetadataUri, mode);
 
     applySealResult(options.db, result);
   } catch (error) {
@@ -258,7 +261,7 @@ async function runSealJob(
       error: errorMessage,
       responseJson: {
         jobId,
-        caseId: request.caseId,
+        caseId: requestWithMetadataUri.caseId,
         status: "failed",
         errorCode: "SEAL_WORKER_ERROR",
         errorMessage

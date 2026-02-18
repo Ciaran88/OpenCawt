@@ -474,7 +474,10 @@ export function createSessionEngine(deps: SessionEngineDeps): SessionEngine {
       for (const caseRecord of candidates) {
         await processCase(deps, caseRecord);
       }
-      const queuedJobs = listQueuedSealJobs(deps.db, { olderThanMinutes: 5 });
+      const queuedJobs = listQueuedSealJobs(deps.db, {
+        olderThanMinutes: 5,
+        maxAttempts: deps.config.sealJobMaxAttempts
+      });
       const limit = Math.min(2, queuedJobs.length);
       for (let i = 0; i < limit; i++) {
         try {

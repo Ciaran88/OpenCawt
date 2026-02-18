@@ -1,5 +1,6 @@
 import type { WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
 import { resolveAssetById } from "./dasResolver";
+import { WorkerMintError } from "./errors";
 import { uploadReceiptMetadata } from "./metadataUpload";
 import { mintWithBubblegumLocalSigning } from "./bubblegumLocalMint";
 import type { MintWorkerConfig } from "./workerConfig";
@@ -84,29 +85,53 @@ export async function mintWithBubblegumV2(
   request: WorkerSealRequest
 ): Promise<WorkerSealResponse> {
   const sealedAtIso = new Date().toISOString();
-  const metadataUri = await uploadReceiptMetadata(config, request, sealedAtIso);
+  let metadataUri = request.metadataUri;
+  try {
+    metadataUri = metadataUri ?? (await uploadReceiptMetadata(config, request, sealedAtIso));
+    if (!metadataUri) {
+      throw new WorkerMintError({
+        code: "METADATA_URI_MISSING",
+        message: "Metadata URI missing for seal mint."
+      });
+    }
 
-  if (config.mintSigningStrategy === "local_signing") {
-    return mintWithBubblegumLocalSigning(config, request, metadataUri, sealedAtIso);
+    if (config.mintSigningStrategy === "local_signing") {
+      return mintWithBubblegumLocalSigning(config, request, metadataUri, sealedAtIso);
+    }
+
+    const minted = await postMintRequest(config, request, metadataUri);
+
+    const resolved = await resolveAssetById(config, minted.assetId);
+    const sealedUri =
+      minted.sealedUri ||
+      minted.metadataUri ||
+      (resolved.asset.content as { json_uri?: string } | undefined)?.json_uri ||
+      metadataUri;
+
+    return {
+      jobId: request.jobId,
+      caseId: request.caseId,
+      assetId: resolved.assetId,
+      txSig: minted.txSig,
+      sealedUri,
+      metadataUri,
+      sealedAtIso: minted.sealedAtIso ?? sealedAtIso,
+      status: "minted"
+    };
+  } catch (error) {
+    if (error instanceof WorkerMintError) {
+      throw new WorkerMintError({
+        code: error.code,
+        message: error.message,
+        metadataUri: metadataUri ?? error.metadataUri,
+        retryable: error.retryable
+      });
+    }
+    throw new WorkerMintError({
+      code: "MINT_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+      metadataUri,
+      retryable: true
+    });
   }
-
-  const minted = await postMintRequest(config, request, metadataUri);
-
-  const resolved = await resolveAssetById(config, minted.assetId);
-  const sealedUri =
-    minted.sealedUri ||
-    minted.metadataUri ||
-    (resolved.asset.content as { json_uri?: string } | undefined)?.json_uri ||
-    metadataUri;
-
-  return {
-    jobId: request.jobId,
-    caseId: request.caseId,
-    assetId: resolved.assetId,
-    txSig: minted.txSig,
-    sealedUri,
-    metadataUri,
-    sealedAtIso: minted.sealedAtIso ?? sealedAtIso,
-    status: "minted"
-  };
 }

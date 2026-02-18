@@ -1751,13 +1751,17 @@ export function markSealJobResult(
     `UPDATE seal_jobs
      SET status = 'failed',
          response_json = ?,
+         metadata_uri = COALESCE(?, metadata_uri),
          last_error = ?,
          completed_at = ?,
          updated_at = ?
      WHERE job_id = ?`
   ).run(
     canonicalJson(result),
-    result.errorMessage ?? "Mint worker returned failure.",
+    options?.metadataUri ?? result.metadataUri ?? null,
+    result.errorCode === "PINATA_QUOTA_EXCEEDED"
+      ? `NON_RETRYABLE:${result.errorMessage ?? "Pinata quota exceeded."}`
+      : (result.errorMessage ?? "Mint worker returned failure."),
     now,
     now,
     result.jobId
@@ -3274,14 +3278,18 @@ export interface SealJobRecord {
 
 export function listQueuedSealJobs(
   db: Db,
-  options?: { olderThanMinutes?: number }
+  options?: { olderThanMinutes?: number; maxAttempts?: number }
 ): Array<{ jobId: string; caseId: string; createdAtIso: string }> {
-  let sql = `SELECT job_id, case_id, created_at FROM seal_jobs WHERE status IN ('queued','failed')`;
-  const params: string[] = [];
+  let sql = `SELECT job_id, case_id, created_at FROM seal_jobs WHERE status IN ('queued','failed') AND (last_error IS NULL OR last_error NOT LIKE 'NON_RETRYABLE:%')`;
+  const params: Array<string | number> = [];
   if (options?.olderThanMinutes != null && options.olderThanMinutes > 0) {
     const cutoff = new Date(Date.now() - options.olderThanMinutes * 60 * 1000).toISOString();
     sql += ` AND created_at <= ?`;
     params.push(cutoff);
+  }
+  if (options?.maxAttempts != null && options.maxAttempts > 0) {
+    sql += ` AND attempts < ?`;
+    params.push(options.maxAttempts);
   }
   sql += ` ORDER BY created_at ASC`;
   const rows = db.prepare(sql).all(...params) as Array<{
