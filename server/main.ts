@@ -2217,8 +2217,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       if (!config.heliusWebhookEnabled) {
         throw notFound("WEBHOOK_DISABLED", "Helius webhook endpoint is disabled.");
       }
-      const token = String(req.headers["x-helius-token"] || "");
-      if (!config.heliusWebhookToken || token !== config.heliusWebhookToken) {
+      const xHeliusToken = Array.isArray(req.headers["x-helius-token"])
+        ? req.headers["x-helius-token"][0]
+        : req.headers["x-helius-token"];
+      const authHeader = Array.isArray(req.headers.authorization)
+        ? req.headers.authorization[0]
+        : req.headers.authorization;
+      const bearerToken =
+        typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")
+          ? authHeader.slice(7).trim()
+          : "";
+      const providedToken =
+        (typeof xHeliusToken === "string" ? xHeliusToken.trim() : "") || bearerToken;
+      if (!config.heliusWebhookToken || providedToken !== config.heliusWebhookToken) {
         throw unauthorised("HELIUS_WEBHOOK_TOKEN_INVALID", "Webhook token is invalid.");
       }
       const body = await readJsonBody<unknown>(req);
