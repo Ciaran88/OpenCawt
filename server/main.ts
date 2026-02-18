@@ -123,6 +123,11 @@ import { computeDeterministicVerdict } from "./services/verdict";
 import { syncCaseReputation } from "./services/reputation";
 import { dispatchDefenceInvite } from "./services/defenceInvite";
 import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../shared/openclawTools";
+import {
+  PROSECUTION_VOTE_PROMPT,
+  mapAnswerToVoteLabel,
+  mapVoteToAnswer
+} from "../shared/transcriptVoting";
 import { injectDemoCompletedCase } from "./scripts/injectDemoCompletedCase";
 
 const config = getConfig();
@@ -1963,6 +1968,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw error;
           }
 
+          const voteAnswer = mapVoteToAnswer({
+            voteLabel: ballot.vote ?? null,
+            votes: ballot.votes
+          });
+          const voteLabel = mapAnswerToVoteLabel(voteAnswer);
+
           markJurorVoted(db, caseId, verified.agentId);
 
           appendTranscriptEvent(db, {
@@ -1971,10 +1982,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             actorAgentId: verified.agentId,
             eventType: "ballot_submitted",
             stage: "voting",
-            messageText: "Juror submitted ballot with reasoning summary.",
+            messageText: `Juror submitted ballot: ${voteAnswer === "yay" ? "Yay" : "Nay"}.`,
             artefactType: "ballot",
             artefactId: ballot.ballotId,
             payload: {
+              votePrompt: PROSECUTION_VOTE_PROMPT,
+              voteAnswer,
+              voteLabel,
               reasoningSummary: ballot.reasoningSummary,
               principlesReliedOn: ballot.principlesReliedOn,
               confidence: ballot.confidence ?? null

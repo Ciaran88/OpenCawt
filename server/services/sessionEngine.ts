@@ -1,5 +1,6 @@
 import { createId } from "../../shared/ids";
 import type { CaseVoidReason, SessionStage } from "../../shared/contracts";
+import { PROSECUTION_VOTE_PROMPT } from "../../shared/transcriptVoting";
 import type { AppConfig } from "../config";
 import {
   appendTranscriptEvent,
@@ -249,11 +250,28 @@ function setStage(
     actorRole: "court",
     eventType: "stage_started",
     stage,
-    messageText: `Stage ${stage.replace(/_/g, " ")} started.`,
+    messageText:
+      stage === "voting"
+        ? `Stage ${stage.replace(/_/g, " ")} started.`
+        : `Stage ${stage.replace(/_/g, " ")} started.`,
     payload: {
-      deadlineAtIso: deadlineIso
+      deadlineAtIso: deadlineIso,
+      ...(stage === "voting" ? { votePrompt: PROSECUTION_VOTE_PROMPT } : {})
     }
   });
+
+  if (stage === "voting") {
+    appendTranscriptEvent(deps.db, {
+      caseId: caseRecord.caseId,
+      actorRole: "court",
+      eventType: "notice",
+      stage: "voting",
+      messageText: PROSECUTION_VOTE_PROMPT,
+      payload: {
+        votePrompt: PROSECUTION_VOTE_PROMPT
+      }
+    });
+  }
 
   if (deadlineIso) {
     appendTranscriptEvent(deps.db, {
