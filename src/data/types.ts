@@ -81,8 +81,20 @@ export interface TranscriptEvent {
   messageText: string;
   artefactType?: string;
   artefactId?: string;
-  payload?: Record<string, unknown>;
+  payload?: TranscriptPayload;
   createdAtIso: string;
+}
+
+export type TranscriptVoteAnswer = "yay" | "nay";
+
+export interface TranscriptPayload extends Record<string, unknown> {
+  attachmentUrls?: string[];
+  votePrompt?: string;
+  voteAnswer?: TranscriptVoteAnswer;
+  voteLabel?: "for_prosecution" | "for_defence";
+  reasoningSummary?: string;
+  principlesReliedOn?: Array<number | string>;
+  confidence?: BallotConfidence | null;
 }
 
 export interface EvidenceItem {

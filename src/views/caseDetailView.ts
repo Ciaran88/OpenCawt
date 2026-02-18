@@ -7,6 +7,16 @@ import { renderStepper } from "../components/stepper";
 import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { classifyAttachmentUrl } from "../util/media";
+import {
+  PROSECUTION_VOTE_PROMPT,
+  actorLabel,
+  collectVoteDisplayItems,
+  eventTimeLabel,
+  extractVoteAnswer,
+  extractVotePrompt,
+  isCourtSignpost,
+  stageLabel
+} from "../util/transcript";
 import { renderViewFrame } from "./common";
 
 function renderPrinciples(principles: Array<number | string>): string {
@@ -48,13 +58,6 @@ function renderPartyColumn(label: string, pack: PartySubmissionPack): string {
       </section>
     </article>
   `;
-}
-
-function toStageLabel(stage?: SessionStage): string {
-  if (!stage) {
-    return "Pre-session";
-  }
-  return stage.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function timeRemainingLabel(nowMs: number, iso?: string): string {
@@ -113,24 +116,81 @@ function renderTranscript(events: TranscriptEvent[]): string {
     `;
   };
 
+  const voteItems = collectVoteDisplayItems(events);
+  const votePrompt =
+    events
+      .map((event) => extractVotePrompt(event))
+      .find((prompt): prompt is string => Boolean(prompt && prompt.trim())) ??
+    PROSECUTION_VOTE_PROMPT;
+
+  const voteFinish = voteItems.length
+    ? `
+      <section class="vote-finish-panel">
+        <h4>${escapeHtml(votePrompt)}</h4>
+        <div class="vote-finish-list">
+          ${voteItems
+            .map((item) => {
+              const answerLabel = item.answer === "yay" ? "Yay" : "Nay";
+              return `
+                <article class="vote-finish-bubble vote-${item.answer}">
+                  <header>
+                    <strong>${escapeHtml(item.jurorLabel)}</strong>
+                    <span>${escapeHtml(
+                      new Date(item.createdAtIso).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })
+                    )}</span>
+                  </header>
+                  <p class="vote-answer-chip vote-${item.answer}">${answerLabel}</p>
+                  ${item.reasoningSummary ? `<p>${escapeHtml(item.reasoningSummary)}</p>` : ""}
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+      </section>
+    `
+    : "";
+
   return `
-    <div class="transcript-window" aria-label="Case transcript">
+    <section class="case-transcript-primary glass-overlay">
+      <h3>Court session transcript</h3>
+      <div class="session-transcript-window" aria-label="Case transcript">
       ${events
         .map((event) => {
+          if (isCourtSignpost(event)) {
+            return `
+              <div class="stage-signpost">
+                <span>${escapeHtml(stageLabel(event.stage))}</span>
+                <p>${escapeHtml(event.messageText)}</p>
+              </div>
+            `;
+          }
+
           const roleClass = `role-${event.actorRole}`;
+          const voteAnswer = extractVoteAnswer(event);
+          const answerChip = voteAnswer
+            ? `<p class="vote-answer-chip vote-${voteAnswer}">${voteAnswer === "yay" ? "Yay" : "Nay"}</p>`
+            : "";
           return `
-            <article class="chat-bubble ${roleClass}">
+            <div class="session-row ${roleClass}">
+            <article class="session-bubble ${roleClass}${voteAnswer ? ` vote-${voteAnswer}` : ""}">
               <header>
-                <strong>${escapeHtml(event.actorRole)}</strong>
-                <span>${escapeHtml(new Date(event.createdAtIso).toLocaleTimeString())}</span>
+                <strong>${escapeHtml(actorLabel(event))}</strong>
+                <span>${escapeHtml(eventTimeLabel(event))}</span>
               </header>
+              ${answerChip}
               <p>${escapeHtml(event.messageText)}</p>
               ${renderAttachments(event)}
             </article>
+            </div>
           `;
         })
         .join("")}
-    </div>
+      ${voteFinish}
+      </div>
+    </section>
   `;
 }
 
@@ -420,7 +480,7 @@ export function renderCaseDetailView(
             ? `<span><strong>Session start rule</strong> Starts 1 hour after defence acceptance</span>`
             : ""
         }
-        <span><strong>Stage</strong> ${escapeHtml(toStageLabel(session?.currentStage))}</span>
+        <span><strong>Stage</strong> ${escapeHtml(stageLabel(session?.currentStage))}</span>
         <span><strong>Timer</strong> ${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
         ${
           !caseItem.defenceAgentId
@@ -434,88 +494,100 @@ export function renderCaseDetailView(
 
   const body = `
     ${top}
-    ${renderStepper(caseItem.currentPhase)}
-    <section class="party-grid">
-      ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
-      ${renderPartyColumn("Defence", caseItem.parties.defence)}
-    </section>
-    ${renderVerificationDetails(caseItem)}
-    ${renderJurorGrid({
-      caseId: caseItem.id,
-      jurySize: caseItem.voteSummary.jurySize,
-      votesCast: liveVotes
-    })}
-    ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
-    ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
-    ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
-    <section class="transcript-card glass-overlay">
-      <h3>Live transcript</h3>
-      ${renderTranscript(transcript)}
-    </section>
-    ${
-      caseItem.status === "active"
-        ? `
-      <section class="form-card glass-overlay">
-        <h3>Juror ballot</h3>
-        <p>Ballots require a two to three sentence reasoning summary and one to three relied-on principles.</p>
-        <form id="submit-ballot-form" class="stack">
-          <fieldset ${observerMode ? "disabled" : ""}>
-          <input type="hidden" name="caseId" value="${escapeHtml(caseItem.id)}" />
-          <input type="hidden" name="claimId" value="${escapeHtml(claimId)}" />
-          <label>
-            <span>Finding</span>
-            <select name="finding">
-              <option value="proven">Proven</option>
-              <option value="not_proven">Not proven</option>
-              <option value="insufficient">Insufficient</option>
-            </select>
-          </label>
-          <label>
-            <span>Reasoning summary</span>
-            <textarea name="reasoningSummary" rows="4" placeholder="Provide two to three sentences for your reasoning"></textarea>
-          </label>
-          <label>
-            <span>Principles relied on</span>
-            <select name="principlesReliedOn" multiple size="6">
-              <option value="1">1. Truthfulness and Non-Deception</option>
-              <option value="2">2. Evidence and Reproducibility</option>
-              <option value="3">3. Scope Fidelity (Intent Alignment)</option>
-              <option value="4">4. Least Power and Minimal Intrusion</option>
-              <option value="5">5. Harm Minimisation Under Uncertainty</option>
-              <option value="6">6. Rights and Dignity Preservation</option>
-              <option value="7">7. Privacy and Data Minimisation</option>
-              <option value="8">8. Integrity of Records and Provenance</option>
-              <option value="9">9. Fair Process and Steelmanning</option>
-              <option value="10">10. Conflict of Interest Disclosure</option>
-              <option value="11">11. Capability Honesty and Calibration</option>
-              <option value="12">12. Accountability and Corrective Action</option>
-            </select>
-          </label>
-          <label>
-            <span>Confidence (optional)</span>
-            <select name="confidence">
-              <option value="">Not set</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-          <label>
-            <span>Overall vote label (optional)</span>
-            <select name="vote">
-              <option value="">Not set</option>
-              <option value="for_prosecution">For prosecution</option>
-              <option value="for_defence">For defence</option>
-            </select>
-          </label>
-          ${renderPrimaryPillButton("Submit ballot", { type: "submit" })}
-          </fieldset>
-        </form>
-        ${observerMode ? `<p class="muted">Connect an agent runtime to submit ballots.</p>` : ""}
-      </section>
-      `
-        : ""
-    }
+    ${renderTranscript(transcript)}
+    <details class="case-detail-collapse glass-overlay">
+      <summary class="case-detail-collapse-summary">Session controls and actions</summary>
+      <div class="case-detail-collapse-body stack">
+        ${renderStepper(caseItem.currentPhase)}
+        ${renderJurorGrid({
+          caseId: caseItem.id,
+          jurySize: caseItem.voteSummary.jurySize,
+          votesCast: liveVotes
+        })}
+        ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
+        ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
+        ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
+        ${
+          caseItem.status === "active"
+            ? `
+          <section class="form-card glass-overlay">
+            <h3>Juror ballot</h3>
+            <p>Ballots require a two to three sentence reasoning summary and one to three relied-on principles.</p>
+            <form id="submit-ballot-form" class="stack">
+              <fieldset ${observerMode ? "disabled" : ""}>
+              <input type="hidden" name="caseId" value="${escapeHtml(caseItem.id)}" />
+              <input type="hidden" name="claimId" value="${escapeHtml(claimId)}" />
+              <label>
+                <span>Finding</span>
+                <select name="finding">
+                  <option value="proven">Proven</option>
+                  <option value="not_proven">Not proven</option>
+                  <option value="insufficient">Insufficient</option>
+                </select>
+              </label>
+              <label>
+                <span>Reasoning summary</span>
+                <textarea name="reasoningSummary" rows="4" placeholder="Provide two to three sentences for your reasoning"></textarea>
+              </label>
+              <label>
+                <span>Principles relied on</span>
+                <select name="principlesReliedOn" multiple size="6">
+                  <option value="1">1. Truthfulness and Non-Deception</option>
+                  <option value="2">2. Evidence and Reproducibility</option>
+                  <option value="3">3. Scope Fidelity (Intent Alignment)</option>
+                  <option value="4">4. Least Power and Minimal Intrusion</option>
+                  <option value="5">5. Harm Minimisation Under Uncertainty</option>
+                  <option value="6">6. Rights and Dignity Preservation</option>
+                  <option value="7">7. Privacy and Data Minimisation</option>
+                  <option value="8">8. Integrity of Records and Provenance</option>
+                  <option value="9">9. Fair Process and Steelmanning</option>
+                  <option value="10">10. Conflict of Interest Disclosure</option>
+                  <option value="11">11. Capability Honesty and Calibration</option>
+                  <option value="12">12. Accountability and Corrective Action</option>
+                </select>
+              </label>
+              <label>
+                <span>Confidence (optional)</span>
+                <select name="confidence">
+                  <option value="">Not set</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+              <label>
+                <span>Overall vote label (optional)</span>
+                <select name="vote">
+                  <option value="">Not set</option>
+                  <option value="for_prosecution">For prosecution</option>
+                  <option value="for_defence">For defence</option>
+                </select>
+              </label>
+              ${renderPrimaryPillButton("Submit ballot", { type: "submit" })}
+              </fieldset>
+            </form>
+            ${observerMode ? `<p class="muted">Connect an agent runtime to submit ballots.</p>` : ""}
+          </section>
+          `
+            : ""
+        }
+      </div>
+    </details>
+    <details class="case-detail-collapse glass-overlay">
+      <summary class="case-detail-collapse-summary">Submissions and evidence</summary>
+      <div class="case-detail-collapse-body">
+        <section class="party-grid">
+          ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
+          ${renderPartyColumn("Defence", caseItem.parties.defence)}
+        </section>
+      </div>
+    </details>
+    <details class="case-detail-collapse glass-overlay">
+      <summary class="case-detail-collapse-summary">Verification and sealed receipt</summary>
+      <div class="case-detail-collapse-body">
+        ${renderVerificationDetails(caseItem)}
+      </div>
+    </details>
   `;
 
   return renderViewFrame({
