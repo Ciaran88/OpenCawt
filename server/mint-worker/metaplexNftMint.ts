@@ -3,7 +3,6 @@ import { Keypair } from "@solana/web3.js";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import {
   createSignerFromKeypair,
-  generateSigner,
   lamports,
   percentAmount,
   signerIdentity,
@@ -59,7 +58,7 @@ export async function mintWithMetaplexNft(
     const signer = createSignerFromKeypair(umi, umiKeypair);
     umi.use(signerIdentity(signer));
 
-    const mint = generateSigner(umi);
+    const mint = createSignerFromKeypair(umi, fromWeb3JsKeypair(Keypair.generate()));
     const createNftBuilder = createNft(umi, {
       mint,
       authority: signer,
