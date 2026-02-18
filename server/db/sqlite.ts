@@ -1,10 +1,10 @@
+import Database from "better-sqlite3";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { AppConfig } from "../config";
 import { schemaSql } from "./schema";
 
-export type Db = DatabaseSync;
+export type Db = InstanceType<typeof Database>;
 
 function splitSqlStatements(sql: string): string[] {
   return sql
@@ -87,7 +87,7 @@ function applyMigrations(db: Db): void {
 
 export function openDatabase(config: AppConfig): Db {
   mkdirSync(dirname(config.dbPath), { recursive: true });
-  const db = new DatabaseSync(config.dbPath);
+  const db = new Database(config.dbPath);
   db.exec("PRAGMA foreign_keys = ON;");
   runMigrationScript(db, schemaSql);
   applyMigrations(db);

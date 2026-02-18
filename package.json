@@ -25,10 +25,14 @@
     "smoke:seal": "node --import tsx tests/smoke/seal-callback.smoke.ts"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.0",
     "prettier": "^3.6.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vite": "^7.2.1"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2"
   }
 }

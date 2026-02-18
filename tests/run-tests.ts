@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { rmSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import { canonicalJson } from "../shared/canonicalJson";
 import { encodeBase58 } from "../shared/base58";
 import { canonicalHashHex } from "../shared/hash";
@@ -210,7 +210,7 @@ function testSwarmValidationHelpers() {
 function testMigrationBackfillDefaults() {
   const dbPath = "/tmp/opencawt_phase42_migration_backfill.sqlite";
   rmSync(dbPath, { force: true });
-  const raw = new DatabaseSync(dbPath);
+  const raw = new Database(dbPath);
   raw.exec(`
     PRAGMA foreign_keys = OFF;
     CREATE TABLE cases (
