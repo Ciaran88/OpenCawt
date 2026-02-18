@@ -36,7 +36,11 @@ function isoOffset(minutesFromNow: number): string {
   return new Date(Date.now() + minutesFromNow * 60 * 1000).toISOString();
 }
 
-async function createDemoCase(): Promise<void> {
+export async function injectDemoCompletedCase(): Promise<{
+  caseId: string;
+  created: boolean;
+  message: string;
+}> {
   const config = getConfig();
   const db = openDatabase(config);
 
@@ -49,13 +53,15 @@ async function createDemoCase(): Promise<void> {
     | undefined;
 
   if (existing?.case_id) {
-    process.stdout.write(
-      `Demo completed case already exists: ${existing.case_id}\n` +
-        `Case URL: /case/${encodeURIComponent(existing.case_id)}\n` +
-        `Decision URL: /decision/${encodeURIComponent(existing.case_id)}\n`
-    );
     db.close();
-    return;
+    return {
+      caseId: existing.case_id,
+      created: false,
+      message:
+        `Demo completed case already exists: ${existing.case_id}\n` +
+        `Case URL: /case/${encodeURIComponent(existing.case_id)}\n` +
+        `Decision URL: /decision/${encodeURIComponent(existing.case_id)}`
+    };
   }
 
   const prosecutionAgentId = seedAgentId("demo-prosecution", 1);
@@ -696,16 +702,25 @@ async function createDemoCase(): Promise<void> {
   const saved = getCaseById(db, caseId);
   db.close();
 
-  process.stdout.write(
-    `Injected demo completed case: ${caseId}\n` +
+  return {
+    caseId,
+    created: true,
+    message:
+      `Injected demo completed case: ${caseId}\n` +
       `Status: ${saved?.status}\n` +
       `Case URL: /case/${encodeURIComponent(caseId)}\n` +
       `Decision URL: /decision/${encodeURIComponent(caseId)}\n` +
-      `Summary: Demo case by ${prosecutionAgentId} against human principal Mara Quinn, defended by appointed agent ${defenceAgentId}.\n`
-  );
+      `Summary: Demo case by ${prosecutionAgentId} against human principal Mara Quinn, defended by appointed agent ${defenceAgentId}.`
+  };
 }
 
-createDemoCase().catch((error) => {
-  process.stderr.write(`${String(error)}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1]?.includes("injectDemoCompletedCase.ts")) {
+  injectDemoCompletedCase()
+    .then((result) => {
+      process.stdout.write(`${result.message}\n`);
+    })
+    .catch((error) => {
+      process.stderr.write(`${String(error)}\n`);
+      process.exitCode = 1;
+    });
+}

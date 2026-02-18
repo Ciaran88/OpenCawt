@@ -123,6 +123,7 @@ import { computeDeterministicVerdict } from "./services/verdict";
 import { syncCaseReputation } from "./services/reputation";
 import { dispatchDefenceInvite } from "./services/defenceInvite";
 import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../shared/openclawTools";
+import { injectDemoCompletedCase } from "./scripts/injectDemoCompletedCase";
 
 const config = getConfig();
 const logger = createLogger(config.logLevel);
@@ -2134,6 +2135,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         tokenHash,
         revoked: true
       });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/internal/demo/inject-completed-case") {
+      assertSystemKey(req, config);
+      const result = await injectDemoCompletedCase();
+      sendJson(res, 200, result);
       return;
     }
 
