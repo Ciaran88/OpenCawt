@@ -21,6 +21,8 @@
     "test": "node --import tsx tests/run-tests.ts",
     "db:reset": "node --import tsx server/scripts/resetDb.ts",
     "db:seed": "node --import tsx server/scripts/seedPhase3.ts",
+    "db:backup": "node --import tsx server/scripts/backupDb.ts",
+    "db:restore": "node --import tsx server/scripts/restoreDb.ts",
     "db:inject-demo-case": "node --import tsx server/scripts/injectDemoCompletedCase.ts",
     "solana:create-tree": "node --import tsx server/scripts/createBubblegumTree.ts",
     "openclaw:tools-export": "node --import tsx server/scripts/generateToolSchemas.ts",

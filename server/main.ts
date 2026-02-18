@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
-import { existsSync, createReadStream } from "node:fs";
+import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, extname } from "node:path";
 import { canonicalHashHex } from "../shared/hash";
 import { createId } from "../shared/ids";
@@ -21,7 +21,7 @@ import type {
   WorkerSealRequest,
   WorkerSealResponse
 } from "../shared/contracts";
-import { getConfig } from "./config";
+import { getConfig, isDurableDbPath } from "./config";
 import {
   addBallot,
   addEvidence,
@@ -142,6 +142,26 @@ for (const historicalCase of listCasesByStatuses(db, ["closed", "sealed", "void"
 rebuildAllAgentStats(db);
 
 const closingCases = new Set<string>();
+
+function findLatestBackupIso(backupDir: string): string | null {
+  if (!existsSync(backupDir)) {
+    return null;
+  }
+  const backupEntries = readdirSync(backupDir)
+    .filter((name) => /^opencawt-backup-.*\.sqlite$/.test(name))
+    .map((name) => {
+      const path = join(backupDir, name);
+      const stat = statSync(path);
+      return {
+        mtimeMs: stat.mtimeMs
+      };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (!backupEntries.length) {
+    return null;
+  }
+  return new Date(backupEntries[0].mtimeMs).toISOString();
+}
 
 function resolveCaseIdFromPath(pathname: string): string | null {
   const segments = pathSegments(pathname);
@@ -1038,10 +1058,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     if (method === "GET" && pathname === "/api/internal/credential-status") {
       assertSystemKey(req, config);
+      const latestBackupAtIso = findLatestBackupIso(config.backupDir);
       sendJson(res, 200, {
         solanaMode: config.solanaMode,
         sealWorkerMode: config.sealWorkerMode,
         drandMode: config.drandMode,
+        dbPath: config.dbPath,
+        dbPathIsDurable: config.isProduction ? isDurableDbPath(config.dbPath) : true,
+        backupDir: config.backupDir,
+        latestBackupAtIso,
         hasHeliusApiKey: Boolean(config.heliusApiKey),
         hasTreasuryAddress: Boolean(config.treasuryAddress),
         hasWorkerToken: Boolean(config.workerToken),

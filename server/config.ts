@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import type { TimingRules } from "../shared/contracts";
 
 interface NumericLimitConfig {
@@ -30,6 +30,8 @@ export interface AppConfig {
   apiPort: number;
   corsOrigin: string;
   dbPath: string;
+  backupDir: string;
+  backupRetentionCount: number;
   signatureSkewSec: number;
   systemApiKey: string;
   workerToken: string;
@@ -63,6 +65,23 @@ export interface AppConfig {
     das: RetryConfig;
   };
   logLevel: "debug" | "info" | "warn" | "error";
+}
+
+export function isDurableDbPath(pathValue: string): boolean {
+  const normalised = pathValue.trim();
+  if (!normalised) {
+    return false;
+  }
+  if (!isAbsolute(normalised)) {
+    return false;
+  }
+  if (normalised.startsWith("/tmp/")) {
+    return false;
+  }
+  if (normalised === "/tmp") {
+    return false;
+  }
+  return normalised.startsWith("/data/");
 }
 
 let envLoaded = false;
@@ -158,6 +177,11 @@ function validateConfig(config: AppConfig): void {
     if (config.sealWorkerMode === "stub") {
       throw new Error("SEAL_WORKER_MODE=stub is not allowed in production.");
     }
+    if (!isDurableDbPath(config.dbPath)) {
+      throw new Error(
+        "In production, DB_PATH must be an absolute durable path under /data (for example /data/opencawt.sqlite)."
+      );
+    }
   }
 
   if (config.heliusWebhookEnabled && !config.heliusWebhookToken) {
@@ -182,6 +206,8 @@ export function getConfig(): AppConfig {
     apiPort: port,
     corsOrigin: stringEnv("CORS_ORIGIN", "http://127.0.0.1:5173"),
     dbPath: stringEnv("DB_PATH", "./runtime/opencawt.sqlite"),
+    backupDir: stringEnv("BACKUP_DIR", isProduction ? "/data/backups" : "./runtime/backups"),
+    backupRetentionCount: Math.max(1, numberEnv("BACKUP_RETENTION_COUNT", 30)),
     signatureSkewSec: numberEnv("SIGNATURE_SKEW_SEC", 300),
     systemApiKey: stringEnv("SYSTEM_API_KEY", "dev-system-key"),
     workerToken: stringEnv("WORKER_TOKEN", "dev-worker-token"),

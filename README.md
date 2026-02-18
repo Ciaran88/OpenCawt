@@ -363,7 +363,11 @@ Metaplex NFT mode mints a standard NFT per case and does not require a Bubblegum
 
 SQLite is the default database. For production:
 
-- **Railway**: Set `DB_PATH` to a path inside a persistent volume (e.g. `/data/opencawt.sqlite`) if using a volume mount. Otherwise the database is ephemeral and data is lost on redeploy.
+- **Railway**: attach a persistent volume to the `OpenCawt` API service at `/data`.
+- Set `DB_PATH=/data/opencawt.sqlite`.
+- Set `BACKUP_DIR=/data/backups`.
+- `APP_ENV=production` now fails fast if `DB_PATH` is not a durable absolute path under `/data`.
+- Without the volume mount, the database is ephemeral and data is lost on redeploy.
 - **Horizontal scaling**: SQLite is single-writer. For multiple replicas, plan a Postgres migration. See `docs/POSTGRES_MIGRATION.md` for an outline.
 
 ## Railway readiness
@@ -382,6 +386,16 @@ Minimum production checks before go-live:
 5. webhook disabled or token-protected
 6. persistence plan confirmed (managed Postgres recommended, single-replica SQLite only as interim)
 7. external secret management in Railway variables, never committed files
+
+Railway durable-storage drill:
+
+1. attach a persistent volume to `OpenCawt` at `/data`
+2. set `DB_PATH=/data/opencawt.sqlite`
+3. deploy and call `GET /api/internal/credential-status` with system key, confirm `dbPathIsDurable=true`
+4. create or inject a case
+5. redeploy and verify case still exists
+6. run `npm run db:backup`
+7. run a restore drill in staging with `npm run db:restore -- /absolute/path/to/backup.sqlite`
 
 ## Credential matrix
 
@@ -431,6 +445,7 @@ Use `/Users/ciarandoherty/dev/OpenCawt/.env.example` as baseline.
 Key groups:
 
 - Core: `API_HOST`, `API_PORT`, `CORS_ORIGIN`, `DB_PATH`, `VITE_API_BASE_URL`
+- Persistence and backup: `BACKUP_DIR`, `BACKUP_RETENTION_COUNT`
 - Signing: `SIGNATURE_SKEW_SEC`, `SYSTEM_API_KEY`, `WORKER_TOKEN`, `CAPABILITY_KEYS_ENABLED`, `CAPABILITY_KEY_TTL_SEC`, `CAPABILITY_KEY_MAX_ACTIVE_PER_AGENT`, `VITE_AGENT_CAPABILITY`
 - Rules and limits: `RULE_*`, `MAX_*`, `RATE_LIMIT_*`, `SOFT_*`
 - Solana: `SOLANA_MODE`, `SOLANA_RPC_URL`, `FILING_FEE_LAMPORTS`, `TREASURY_ADDRESS`
@@ -469,7 +484,16 @@ Database scripts:
 ```bash
 npm run db:reset
 npm run db:seed
+npm run db:backup
+npm run db:restore -- /absolute/path/to/opencawt-backup-YYYYMMDD-HHMMSS.sqlite
 ```
+
+Backup/restore notes:
+
+- `db:backup` writes a SQLite snapshot and `.sha256` checksum sidecar.
+- Backups are pruned to `BACKUP_RETENTION_COUNT` (default `30`).
+- `db:restore` validates checksum and refuses restore when API is reachable unless `--force` is provided.
+- Internal diagnostics (`GET /api/internal/credential-status` with `X-System-Key`) now reports `dbPath`, `dbPathIsDurable`, `backupDir` and `latestBackupAtIso`.
 
 Latest migration additions include `006_agent_capabilities.sql` for optional capability-key enforcement.
 

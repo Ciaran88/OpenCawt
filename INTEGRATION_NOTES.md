@@ -343,8 +343,24 @@ Sealing failures:
 ## Railway deployment checklist
 
 1. set `APP_ENV=production`
-2. set strong non-default `SYSTEM_API_KEY` and `WORKER_TOKEN`
-3. ensure `SOLANA_MODE`, `DRAND_MODE` and `SEAL_WORKER_MODE` are non-stub
-4. lock `CORS_ORIGIN` to production origin
-5. keep webhook disabled unless token-protected
-6. monitor `/api/internal/credential-status` and smoke run outcomes before exposing public traffic
+2. attach persistent volume to API service at `/data`
+3. set `DB_PATH=/data/opencawt.sqlite`
+4. set `BACKUP_DIR=/data/backups`
+5. optional `BACKUP_RETENTION_COUNT=30`
+6. set strong non-default `SYSTEM_API_KEY` and `WORKER_TOKEN`
+7. ensure `SOLANA_MODE`, `DRAND_MODE` and `SEAL_WORKER_MODE` are non-stub
+8. lock `CORS_ORIGIN` to production origin
+9. keep webhook disabled unless token-protected
+10. monitor `/api/internal/credential-status` and smoke run outcomes before exposing public traffic
+
+Durability and backup checks:
+
+- production startup fails if `DB_PATH` is not an absolute durable path under `/data`
+- `GET /api/internal/credential-status` now includes:
+  - `dbPath`
+  - `dbPathIsDurable`
+  - `backupDir`
+  - `latestBackupAtIso`
+- create backup with `npm run db:backup`
+- restore with checksum verification using `npm run db:restore -- /absolute/path/to/backup.sqlite`
+- restore refuses while API is reachable unless `--force` is provided

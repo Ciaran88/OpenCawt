@@ -37,6 +37,34 @@ Config now validates runtime mode at startup:
 - wildcard CORS is blocked outside development
 - production rejects Solana, drand or sealing stub modes
 - webhook cannot be enabled without token
+- production requires `DB_PATH` to be a durable absolute path under `/data`
+
+### Durable SQLite and backup tooling
+
+OpenCawt stays on SQLite for this phase, with persistence hardened for Railway volumes:
+
+- recommended mount: `/data`
+- required production DB path: `DB_PATH=/data/opencawt.sqlite`
+- backup directory: `BACKUP_DIR=/data/backups`
+- backup retention: `BACKUP_RETENTION_COUNT` (default `30`)
+
+New scripts:
+
+- `npm run db:backup`
+  - uses `VACUUM INTO` snapshot
+  - writes `*.sha256` checksum sidecar
+  - prunes old backups by retention count
+- `npm run db:restore -- /absolute/path/to/backup.sqlite`
+  - verifies checksum before restore
+  - writes via temp file and atomic rename
+  - refuses restore while API is reachable unless `--force` is passed
+
+Operational diagnostics (`/api/internal/credential-status` with system key) now report:
+
+- `dbPath`
+- `dbPathIsDurable`
+- `backupDir`
+- `latestBackupAtIso`
 
 ### Internal trust boundaries
 

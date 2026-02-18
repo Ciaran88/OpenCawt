@@ -4,6 +4,7 @@ dist/
 .vite/
 .env
 runtime/*.sqlite
+runtime/backups/
 runtime/credential-status.json
 runtime/credential-needs.md
 runtime/local-secrets.env
