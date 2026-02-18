@@ -42,6 +42,7 @@ import {
   getDefenceInviteDispatchTarget,
   getCaseRuntime,
   getDecisionCase,
+  getSealJobByCaseId,
   getSealJobByJobId,
   isTreasuryTxUsed,
   listLeaderboard,
@@ -66,6 +67,7 @@ import {
   saveUsedTreasuryTx,
   setAgentBanned,
   setCaseFiled,
+  setCaseSealHashes,
   setCaseJurySelected,
   setJurorAvailability,
   storeVerdict,
@@ -95,6 +97,7 @@ import { enforceActionRateLimit, enforceFilingLimit } from "./services/rateLimit
 import { applySealResult, enqueueSealJob, retrySealJob } from "./services/sealing";
 import { createSessionEngine } from "./services/sessionEngine";
 import { createSolanaProvider } from "./services/solanaProvider";
+import { computeCaseSealHashes } from "./services/sealHashes";
 import {
   normalisePrincipleIds,
   validateBallotConfidence,
@@ -447,7 +450,7 @@ async function closeCasePipeline(caseId: string): Promise<{
   caseId: string;
   status: "closed";
   verdictHash: string;
-  sealJob?: { jobId: string; mode: "stub" | "http" };
+  sealJob?: { jobId: string; mode: "stub" | "http"; status: string; created: boolean };
 }> {
   if (closingCases.has(caseId)) {
     const caseRecord = ensureCaseExists(caseId);
@@ -548,12 +551,28 @@ async function closeCasePipeline(caseId: string): Promise<{
       };
     }
 
-    const sealJob = await enqueueSealJob({
-      db,
-      config,
-      caseRecord: closedCase,
-      verdictHash: verdict.verdictHash
+    const sealHashes = await computeCaseSealHashes(db, caseId);
+    setCaseSealHashes(db, {
+      caseId,
+      transcriptRootHash: sealHashes.transcriptRootHash,
+      jurySelectionProofHash: sealHashes.jurySelectionProofHash,
+      rulesetVersion: "agentic-code-v1.0.0"
     });
+
+    const sealedCandidate = ensureCaseExists(caseId);
+    let sealJob: { jobId: string; mode: "stub" | "http"; status: string; created: boolean } | undefined;
+    try {
+      sealJob = await enqueueSealJob({
+        db,
+        config,
+        caseRecord: sealedCandidate
+      });
+    } catch (error) {
+      logger.error("seal_job_enqueue_failed", {
+        caseId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
 
     return {
       caseId,
@@ -1199,6 +1218,34 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           afterSeq: Number.isFinite(afterSeq) ? afterSeq : 0,
           limit: Number.isFinite(limit) ? limit : 200
         })
+      });
+      return;
+    }
+
+    if (
+      method === "GET" &&
+      segments.length === 4 &&
+      segments[0] === "api" &&
+      segments[1] === "cases" &&
+      segments[3] === "seal-status"
+    ) {
+      const caseId = decodeURIComponent(segments[2]);
+      const caseRecord = getCaseById(db, caseId);
+      if (!caseRecord) {
+        sendJson(res, 404, null);
+        return;
+      }
+      const job = getSealJobByCaseId(db, caseId);
+      sendJson(res, 200, {
+        caseId,
+        sealStatus: caseRecord.sealStatus,
+        sealError: caseRecord.sealError,
+        jobId: job?.jobId,
+        attempts: job?.attempts ?? 0,
+        lastError: job?.lastError,
+        metadataUri: caseRecord.metadataUri ?? job?.metadataUri,
+        assetId: caseRecord.sealAssetId,
+        txSig: caseRecord.sealTxSig
       });
       return;
     }
@@ -2167,7 +2214,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         throw conflict("SEAL_JOB_CASE_MISMATCH", "Seal job does not match case.");
       }
 
-      if (sealJob.status !== "queued") {
+      if (sealJob.status !== "queued" && sealJob.status !== "minting") {
         const existingHash = await canonicalHashHex(sealJob.responseJson ?? {});
         const incomingHash = await canonicalHashHex(body);
         if (existingHash === incomingHash) {
@@ -2195,10 +2242,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         );
       }
       if (body.status === "minted") {
-        if (!body.assetId?.trim() || !body.txSig?.trim() || !body.sealedUri?.trim()) {
+        if (
+          !body.assetId?.trim() ||
+          !body.txSig?.trim() ||
+          !body.sealedUri?.trim() ||
+          !body.metadataUri?.trim() ||
+          !body.sealedAtIso?.trim()
+        ) {
           throw badRequest(
             "SEAL_RESULT_INVALID",
-            "Minted seal result requires assetId, txSig and sealedUri."
+            "Minted seal result requires assetId, txSig, sealedUri, metadataUri and sealedAtIso."
           );
         }
       }

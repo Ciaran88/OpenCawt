@@ -57,27 +57,45 @@ function setupSealCallbackDb(dbPath: string): void {
     jobId: "seal-job-1",
     caseId: case1,
     verdictHash: WRONG_HASH,
+    transcriptRootHash: "transcript-hash-1",
+    jurySelectionProofHash: "jury-proof-hash-1",
+    rulesetVersion: "agentic-code-v1.0.0",
+    drandRound: 1234567,
+    drandRandomness: "drand-randomness-1",
+    jurorPoolSnapshotHash: "pool-hash-1",
+    outcome: "for_prosecution",
+    decidedAtIso: now,
+    externalUrl: `/decision/${encodeURIComponent(case1)}`,
     verdictUri: `/decision/${encodeURIComponent(case1)}`,
-    metadata: { title: case1, summary: "Smoke", closedAtIso: now }
+    metadata: { caseSummary: "Smoke", imagePath: "nft_seal.png" }
   };
 
   const job2Request: WorkerSealRequest = {
     jobId: "seal-job-2",
     caseId: case2,
     verdictHash: HASH_2,
+    transcriptRootHash: "transcript-hash-2",
+    jurySelectionProofHash: "jury-proof-hash-2",
+    rulesetVersion: "agentic-code-v1.0.0",
+    drandRound: 1234568,
+    drandRandomness: "drand-randomness-2",
+    jurorPoolSnapshotHash: "pool-hash-2",
+    outcome: "for_defence",
+    decidedAtIso: now,
+    externalUrl: `/decision/${encodeURIComponent(case2)}`,
     verdictUri: `/decision/${encodeURIComponent(case2)}`,
-    metadata: { title: case2, summary: "Smoke", closedAtIso: now }
+    metadata: { caseSummary: "Smoke", imagePath: "nft_seal.png" }
   };
 
   db.prepare(
-    `INSERT INTO seal_jobs (job_id, case_id, status, request_json, response_json, created_at, updated_at)
-     VALUES (?, ?, 'queued', ?, NULL, ?, ?)`
-  ).run("seal-job-1", case1, canonicalJson(job1Request), now, now);
+    `INSERT INTO seal_jobs (job_id, case_id, status, payload_hash, request_json, response_json, created_at, updated_at)
+     VALUES (?, ?, 'queued', ?, ?, NULL, ?, ?)`
+  ).run("seal-job-1", case1, "smoke-hash-1", canonicalJson(job1Request), now, now);
 
   db.prepare(
-    `INSERT INTO seal_jobs (job_id, case_id, status, request_json, response_json, created_at, updated_at)
-     VALUES (?, ?, 'queued', ?, NULL, ?, ?)`
-  ).run("seal-job-2", case2, canonicalJson(job2Request), now, now);
+    `INSERT INTO seal_jobs (job_id, case_id, status, payload_hash, request_json, response_json, created_at, updated_at)
+     VALUES (?, ?, 'queued', ?, ?, NULL, ?, ?)`
+  ).run("seal-job-2", case2, "smoke-hash-2", canonicalJson(job2Request), now, now);
 
   db.close();
 }
@@ -121,6 +139,8 @@ async function main() {
       assetId: "asset_x",
       txSig: "tx_x",
       sealedUri: "https://example.invalid",
+      metadataUri: "https://example.invalid/metadata",
+      sealedAtIso: new Date().toISOString(),
       status: "minted"
     };
 
@@ -142,6 +162,8 @@ async function main() {
       assetId: "asset_x",
       txSig: "tx_x",
       sealedUri: "https://example.invalid",
+      metadataUri: "https://example.invalid/metadata",
+      sealedAtIso: new Date().toISOString(),
       status: "minted"
     });
     assert.equal(unknownJob.status, 404);
@@ -154,6 +176,8 @@ async function main() {
       assetId: "asset_x",
       txSig: "tx_x",
       sealedUri: "https://example.invalid",
+      metadataUri: "https://example.invalid/metadata",
+      sealedAtIso: new Date().toISOString(),
       status: "minted"
     });
     assert.equal(caseMismatch.status, 409);
@@ -166,6 +190,8 @@ async function main() {
       assetId: "asset_success",
       txSig: "tx_success",
       sealedUri: "https://example.invalid/sealed",
+      metadataUri: "https://example.invalid/metadata-success",
+      sealedAtIso: new Date().toISOString(),
       status: "minted"
     };
 

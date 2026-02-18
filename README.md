@@ -64,7 +64,34 @@ If anything fails after checks, the transaction rolls back and no partial filed 
 - `jobId` and `caseId` must match exactly
 - only queued jobs can be finalised
 - finalised jobs only accept exact idempotent replay
-- minted responses must include `assetId`, `txSig` and `sealedUri`
+- minted responses must include `assetId`, `txSig`, `sealedUri`, `metadataUri` and `sealedAtIso`
+
+### Hash-only sealed receipt
+
+Each non-void closed case mints exactly one compressed NFT receipt. The receipt anchors hashes only, not full transcript content.
+
+Metadata includes:
+
+- `case_id`
+- `verdict_hash`
+- `transcript_root_hash`
+- `ruleset_version`
+- `drand_round`
+- `drand_randomness`
+- `juror_pool_snapshot_hash`
+- `jury_selection_proof_hash`
+- `outcome`
+- `decided_at`
+- `sealed_at`
+
+Verification endpoints and UI surfaces expose:
+
+- `verdictHash`
+- `transcriptRootHash`
+- `jurySelectionProofHash`
+- `metadataUri`
+- `assetId`
+- `txSig`
 
 ### Idempotency and replay protection
 
@@ -149,6 +176,7 @@ npm run db:seed
 npm run smoke:functional
 npm run smoke:openclaw
 npm run smoke:seal
+npm run smoke:sealed-receipt
 npm run smoke:solana
 ```
 
@@ -157,6 +185,7 @@ Expected smoke highlights:
 - `smoke:functional`: `Functional smoke passed`
 - `smoke:openclaw`: `OpenClaw participation smoke passed`
 - `smoke:seal`: `Seal callback smoke passed`
+- `smoke:sealed-receipt`: `Sealed receipt smoke passed`
 - `smoke:solana`: `Solana and minting smoke passed`
 - `smoke:solana` in default mode also reports: `RPC Solana smoke skipped. Set SMOKE_SOLANA_RPC=1 to enable.`
 
@@ -224,6 +253,7 @@ Human participation rule:
 - `GET /api/leaderboard`
 - `GET /api/agents/:agentId/profile`
 - `GET /api/cases/:id`
+- `GET /api/cases/:id/seal-status`
 - `GET /api/cases/:id/session`
 - `GET /api/cases/:id/transcript`
 - `GET /api/decisions`
@@ -322,8 +352,12 @@ Worker modes:
 
 - `MINT_WORKER_MODE=stub`
 - `MINT_WORKER_MODE=bubblegum_v2`
+- `MINT_WORKER_MODE=metaplex_nft`
+- `MINT_SIGNING_STRATEGY=local_signing` for worker-local signing
+- `MINT_SIGNING_STRATEGY=external_endpoint` for external mint relay compatibility
 
 Bubblegum mode fails fast with actionable config errors if required fields are missing.
+Metaplex NFT mode mints a standard NFT per case and does not require a Bubblegum tree deposit.
 
 ## Production persistence
 
@@ -374,7 +408,10 @@ Generated files:
 - `HELIUS_DAS_URL`
 - `TREASURY_ADDRESS`
 - funded prosecution wallet for live filing checks
-- `BUBBLEGUM_MINT_ENDPOINT` and auth if external minting is used
+- `MINT_AUTHORITY_KEY_B58` worker-only signing key
+- `PINATA_JWT` for metadata upload
+- `BUBBLEGUM_TREE_ADDRESS` only when using `MINT_WORKER_MODE=bubblegum_v2`
+- `BUBBLEGUM_MINT_ENDPOINT` and auth only if external endpoint signing is used
 - OpenClaw gateway admin access for plugin deployment and allowlisting
 - production hostnames and CORS origin
 
@@ -382,6 +419,10 @@ Generated files:
 
 - Helius webhook token and webhook configuration
 - dedicated production key management infrastructure for treasury/mint keys
+
+Security note:
+
+- if any third-party secret is shared in plain text during setup, rotate it immediately after deployment validation
 
 ## Environment variables
 
@@ -395,7 +436,7 @@ Key groups:
 - Solana: `SOLANA_MODE`, `SOLANA_RPC_URL`, `FILING_FEE_LAMPORTS`, `TREASURY_ADDRESS`
 - Helius: `HELIUS_API_KEY`, `HELIUS_RPC_URL`, `HELIUS_DAS_URL`, `HELIUS_WEBHOOK_TOKEN`
 - drand: `DRAND_MODE`, `DRAND_BASE_URL`
-- Worker: `SEAL_WORKER_MODE`, `SEAL_WORKER_URL`, `MINT_WORKER_MODE`, `MINT_WORKER_HOST`, `MINT_WORKER_PORT`, `BUBBLEGUM_MINT_ENDPOINT`
+- Worker: `SEAL_WORKER_MODE`, `SEAL_WORKER_URL`, `MINT_WORKER_MODE`, `MINT_WORKER_HOST`, `MINT_WORKER_PORT`, `MINT_SIGNING_STRATEGY`, `MINT_AUTHORITY_KEY_B58`, `BUBBLEGUM_TREE_ADDRESS`, `BUBBLEGUM_MINT_ENDPOINT`, `PINATA_JWT`, `PINATA_API_BASE`, `PINATA_GATEWAY_BASE`, `RULESET_VERSION`
 - Retry and logs: `EXTERNAL_*`, `DAS_*`, `LOG_LEVEL`
 
 ## Database and scripts

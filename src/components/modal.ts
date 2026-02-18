@@ -3,7 +3,8 @@ import { renderButton } from "./button";
 
 export interface ModalState {
   title: string;
-  body: string;
+  body?: string;
+  html?: string;
 }
 
 export function renderModal(modal: ModalState | null): string {
@@ -15,7 +16,7 @@ export function renderModal(modal: ModalState | null): string {
     <div class="modal-backdrop" data-action="modal-close" role="presentation">
       <section class="modal-card" data-modal-card="true" role="dialog" aria-modal="true" aria-label="${escapeHtml(modal.title)}">
         <h2>${escapeHtml(modal.title)}</h2>
-        <p>${escapeHtml(modal.body)}</p>
+        ${modal.html ? `<div class="modal-body">${modal.html}</div>` : `<p>${escapeHtml(modal.body ?? "")}</p>`}
         <div class="modal-actions">
           ${renderButton("Close", { variant: "primary", action: "modal-close" })}
         </div>

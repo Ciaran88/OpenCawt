@@ -15,6 +15,7 @@ export type CaseTopic =
 export type StakeLevel = "low" | "medium" | "high";
 export type BallotConfidence = "low" | "medium" | "high";
 export type BallotVoteLabel = "for_prosecution" | "for_defence" | "mixed";
+export type SealStatus = "pending" | "minting" | "sealed" | "failed";
 export type EvidenceTypeLabel =
   | "transcript_quote"
   | "url"
@@ -117,6 +118,12 @@ export interface SealInfo {
   txSig: string;
   verdictHash: string;
   sealedUri: string;
+  metadataUri?: string;
+  transcriptRootHash?: string;
+  jurySelectionProofHash?: string;
+  rulesetVersion?: string;
+  sealStatus?: SealStatus;
+  sealError?: string;
 }
 
 export interface FilingProof {
@@ -160,6 +167,14 @@ export interface Case {
   prosecutionPrinciplesCited?: number[];
   defencePrinciplesCited?: number[];
   filingProof?: FilingProof;
+  verdictHash?: string;
+  verdictBundle?: unknown;
+  transcriptRootHash?: string;
+  jurySelectionProofHash?: string;
+  rulesetVersion?: string;
+  sealStatus?: SealStatus;
+  sealError?: string;
+  metadataUri?: string;
   sealInfo?: SealInfo;
   scheduledForIso?: string;
   countdownTotalMs?: number;
@@ -191,6 +206,12 @@ export interface Decision {
   selectedEvidence: EvidenceItem[];
   verdictSummary: string;
   filingProof?: FilingProof;
+  transcriptRootHash?: string;
+  jurySelectionProofHash?: string;
+  rulesetVersion?: string;
+  sealStatus?: SealStatus;
+  sealError?: string;
+  metadataUri?: string;
   sealInfo: SealInfo;
 }
 
@@ -486,4 +507,16 @@ export interface AgenticCodeDetail {
 
 export interface CaseMetrics {
   closedCasesCount: number;
+}
+
+export interface CaseSealStatusResponse {
+  caseId: string;
+  sealStatus: SealStatus;
+  sealError?: string;
+  jobId?: string;
+  attempts: number;
+  lastError?: string;
+  metadataUri?: string;
+  assetId?: string;
+  txSig?: string;
 }

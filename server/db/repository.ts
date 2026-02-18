@@ -194,6 +194,12 @@ export interface CaseRecord {
   poolSnapshotHash?: string;
   selectionProof?: JurySelectionProof;
   verdictHash?: string;
+  transcriptRootHash?: string;
+  jurySelectionProofHash?: string;
+  rulesetVersion: string;
+  sealStatus: "pending" | "minting" | "sealed" | "failed";
+  sealError?: string;
+  metadataUri?: string;
   verdictBundle?: unknown;
   sealAssetId?: string;
   sealTxSig?: string;
@@ -608,6 +614,14 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
       ? parseJson<JurySelectionProof>(String(row.selection_proof_json))
       : undefined,
     verdictHash: row.verdict_hash ? String(row.verdict_hash) : undefined,
+    transcriptRootHash: row.transcript_root_hash ? String(row.transcript_root_hash) : undefined,
+    jurySelectionProofHash: row.jury_selection_proof_hash
+      ? String(row.jury_selection_proof_hash)
+      : undefined,
+    rulesetVersion: String(row.ruleset_version ?? "agentic-code-v1.0.0"),
+    sealStatus: (String(row.seal_status ?? "pending") as CaseRecord["sealStatus"]),
+    sealError: row.seal_error ? String(row.seal_error) : undefined,
+    metadataUri: row.metadata_uri ? String(row.metadata_uri) : undefined,
     verdictBundle: row.verdict_bundle_json ? parseJson(String(row.verdict_bundle_json)) : undefined,
     sealAssetId: row.seal_asset_id ? String(row.seal_asset_id) : undefined,
     sealTxSig: row.seal_tx_sig ? String(row.seal_tx_sig) : undefined,
@@ -667,6 +681,12 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         pool_snapshot_hash,
         selection_proof_json,
         verdict_hash,
+        transcript_root_hash,
+        jury_selection_proof_hash,
+        ruleset_version,
+        metadata_uri,
+        seal_status,
+        seal_error,
         verdict_bundle_json,
         seal_asset_id,
         seal_tx_sig,
@@ -739,6 +759,12 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         pool_snapshot_hash,
         selection_proof_json,
         verdict_hash,
+        transcript_root_hash,
+        jury_selection_proof_hash,
+        ruleset_version,
+        metadata_uri,
+        seal_status,
+        seal_error,
         verdict_bundle_json,
         seal_asset_id,
         seal_tx_sig,
@@ -1087,6 +1113,12 @@ export function claimDefenceAssignment(
           pool_snapshot_hash,
           selection_proof_json,
           verdict_hash,
+          transcript_root_hash,
+          jury_selection_proof_hash,
+          ruleset_version,
+          metadata_uri,
+          seal_status,
+          seal_error,
           verdict_bundle_json,
           seal_asset_id,
           seal_tx_sig,
@@ -1592,6 +1624,8 @@ export function storeVerdict(
           verdict_bundle_json = ?,
           outcome = ?,
           outcome_detail_json = ?,
+          seal_status = 'pending',
+          seal_error = NULL,
           void_reason_group = NULL
       WHERE case_id = ?`
   ).run(
@@ -1619,21 +1653,137 @@ export function storeVerdict(
 
 export function createSealJob(
   db: Db,
-  input: { caseId: string; request: WorkerSealRequest }
+  input: { caseId: string; request: WorkerSealRequest; payloadHash?: string }
 ): string {
   const jobId = input.request.jobId;
   const now = nowIso();
   db.prepare(
-    `INSERT OR REPLACE INTO seal_jobs (job_id, case_id, status, request_json, response_json, created_at, updated_at) VALUES (?, ?, 'queued', ?, NULL, ?, ?)`
-  ).run(jobId, input.caseId, canonicalJson(input.request), now, now);
+    `INSERT OR REPLACE INTO seal_jobs (job_id, case_id, status, attempts, last_error, claimed_at, completed_at, payload_hash, metadata_uri, request_json, response_json, created_at, updated_at) VALUES (?, ?, 'queued', 0, NULL, NULL, NULL, ?, NULL, ?, NULL, ?, ?)`
+  ).run(
+    jobId,
+    input.caseId,
+    input.payloadHash ?? "",
+    canonicalJson(input.request),
+    now,
+    now
+  );
   return jobId;
 }
 
-export function markSealJobResult(db: Db, result: WorkerSealResponse): void {
+export function createSealJobIfMissing(
+  db: Db,
+  input: { caseId: string; request: WorkerSealRequest; payloadHash: string }
+): { jobId: string; created: boolean; status: string } {
+  const existing = db.prepare(`SELECT job_id, status FROM seal_jobs WHERE case_id = ?`).get(input.caseId) as
+    | { job_id: string; status: string }
+    | undefined;
+  if (existing) {
+    return {
+      jobId: existing.job_id,
+      created: false,
+      status: String(existing.status)
+    };
+  }
+  const jobId = createSealJob(db, {
+    caseId: input.caseId,
+    request: input.request,
+    payloadHash: input.payloadHash
+  });
+  setCaseSealState(db, {
+    caseId: input.caseId,
+    sealStatus: "pending"
+  });
+  return {
+    jobId,
+    created: true,
+    status: "queued"
+  };
+}
+
+export function claimSealJob(
+  db: Db,
+  input: { jobId: string; expectedStatus?: "queued" | "failed" }
+): boolean {
+  const now = nowIso();
+  const status = input.expectedStatus ?? "queued";
+  const result = db
+    .prepare(
+      `
+      UPDATE seal_jobs
+      SET status = 'minting',
+          attempts = attempts + 1,
+          last_error = NULL,
+          claimed_at = ?,
+          updated_at = ?
+      WHERE job_id = ? AND status = ?
+      `
+    )
+    .run(now, now, input.jobId, status);
+  return result.changes > 0;
+}
+
+export function markSealJobResult(
+  db: Db,
+  result: WorkerSealResponse,
+  options?: { metadataUri?: string }
+): void {
+  const now = nowIso();
+  if (result.status === "minted") {
+    db.prepare(
+      `UPDATE seal_jobs
+       SET status = 'minted',
+           response_json = ?,
+           metadata_uri = ?,
+           completed_at = ?,
+           last_error = NULL,
+           updated_at = ?
+       WHERE job_id = ?`
+    ).run(
+      canonicalJson(result),
+      options?.metadataUri ?? result.metadataUri,
+      result.sealedAtIso,
+      now,
+      result.jobId
+    );
+    return;
+  }
+  db.prepare(
+    `UPDATE seal_jobs
+     SET status = 'failed',
+         response_json = ?,
+         last_error = ?,
+         completed_at = ?,
+         updated_at = ?
+     WHERE job_id = ?`
+  ).run(
+    canonicalJson(result),
+    result.errorMessage ?? "Mint worker returned failure.",
+    now,
+    now,
+    result.jobId
+  );
+}
+
+export function markSealJobFailed(
+  db: Db,
+  input: { jobId: string; error: string; responseJson?: unknown }
+): void {
   const now = nowIso();
   db.prepare(
-    `UPDATE seal_jobs SET status = ?, response_json = ?, updated_at = ? WHERE job_id = ?`
-  ).run(result.status, canonicalJson(result), now, result.jobId);
+    `UPDATE seal_jobs
+     SET status = 'failed',
+         last_error = ?,
+         response_json = ?,
+         completed_at = ?,
+         updated_at = ?
+     WHERE job_id = ?`
+  ).run(
+    input.error,
+    canonicalJson(input.responseJson ?? { error: input.error }),
+    now,
+    now,
+    input.jobId
+  );
 }
 
 export function markCaseSealed(
@@ -1643,16 +1793,26 @@ export function markCaseSealed(
     assetId: string;
     txSig: string;
     sealedUri: string;
+    metadataUri?: string;
+    sealedAtIso?: string;
   }
 ): void {
-  const now = nowIso();
+  const now = input.sealedAtIso ?? nowIso();
   db.prepare(
     `
     UPDATE cases
-    SET status = 'sealed', session_stage = 'sealed', sealed_at = ?, seal_asset_id = ?, seal_tx_sig = ?, seal_uri = ?
+    SET status = 'sealed',
+        session_stage = 'sealed',
+        sealed_at = ?,
+        seal_asset_id = ?,
+        seal_tx_sig = ?,
+        seal_uri = ?,
+        metadata_uri = COALESCE(?, metadata_uri),
+        seal_status = 'sealed',
+        seal_error = NULL
     WHERE case_id = ?
     `
-  ).run(now, input.assetId, input.txSig, input.sealedUri, input.caseId);
+  ).run(now, input.assetId, input.txSig, input.sealedUri, input.metadataUri ?? null, input.caseId);
 
   db.prepare(
     `
@@ -1668,6 +1828,38 @@ export function markCaseSealed(
     stageStartedAtIso: now,
     stageDeadlineAtIso: null
   });
+}
+
+export function setCaseSealState(
+  db: Db,
+  input: { caseId: string; sealStatus: CaseRecord["sealStatus"]; error?: string | null }
+): void {
+  db.prepare(
+    `UPDATE cases
+     SET seal_status = ?, seal_error = ?
+     WHERE case_id = ?`
+  ).run(input.sealStatus, input.error ?? null, input.caseId);
+}
+
+export function setCaseSealHashes(
+  db: Db,
+  input: {
+    caseId: string;
+    transcriptRootHash: string;
+    jurySelectionProofHash: string;
+    rulesetVersion: string;
+  }
+): void {
+  db.prepare(
+    `UPDATE cases
+     SET transcript_root_hash = ?, jury_selection_proof_hash = ?, ruleset_version = ?
+     WHERE case_id = ?`
+  ).run(
+    input.transcriptRootHash,
+    input.jurySelectionProofHash,
+    input.rulesetVersion,
+    input.caseId
+  );
 }
 
 export function saveUsedTreasuryTx(
@@ -1931,6 +2123,8 @@ export function markCaseVoid(
           decided_at = ?,
           outcome = 'void',
           outcome_detail_json = ?,
+          seal_status = 'failed',
+          seal_error = ?,
           sealed_disabled = 1
       WHERE case_id = ?`
   ).run(
@@ -1939,6 +2133,7 @@ export function markCaseVoid(
     input.atIso,
     input.atIso,
     canonicalJson({ reason: input.reason }),
+    `Case voided: ${input.reason}`,
     input.caseId
   );
 
@@ -2364,6 +2559,12 @@ export function listOpenDefenceCases(
         pool_snapshot_hash,
         selection_proof_json,
         verdict_hash,
+        transcript_root_hash,
+        jury_selection_proof_hash,
+        ruleset_version,
+        metadata_uri,
+        seal_status,
+        seal_error,
         verdict_bundle_json,
         seal_asset_id,
         seal_tx_sig,
@@ -3027,20 +3228,46 @@ export function getDecisionCase(db: Db, id: string): CaseRecord | null {
 export function getSealJobByCaseId(
   db: Db,
   caseId: string
-): { jobId: string; status: string } | null {
-  const row = db.prepare(`SELECT job_id, status FROM seal_jobs WHERE case_id = ?`).get(caseId) as
-    | { job_id: string; status: string }
+): {
+  jobId: string;
+  status: string;
+  attempts: number;
+  lastError?: string;
+  metadataUri?: string;
+} | null {
+  const row = db
+    .prepare(`SELECT job_id, status, attempts, last_error, metadata_uri FROM seal_jobs WHERE case_id = ?`)
+    .get(caseId) as
+    | {
+        job_id: string;
+        status: string;
+        attempts: number;
+        last_error: string | null;
+        metadata_uri: string | null;
+      }
     | undefined;
   if (!row) {
     return null;
   }
-  return { jobId: row.job_id, status: row.status };
+  return {
+    jobId: row.job_id,
+    status: row.status,
+    attempts: Number(row.attempts ?? 0),
+    lastError: row.last_error ?? undefined,
+    metadataUri: row.metadata_uri ?? undefined
+  };
 }
 
 export interface SealJobRecord {
   jobId: string;
   caseId: string;
   status: string;
+  attempts: number;
+  lastError?: string;
+  claimedAtIso?: string;
+  completedAtIso?: string;
+  payloadHash: string;
+  metadataUri?: string;
   requestJson: unknown;
   responseJson: unknown;
 }
@@ -3049,7 +3276,7 @@ export function listQueuedSealJobs(
   db: Db,
   options?: { olderThanMinutes?: number }
 ): Array<{ jobId: string; caseId: string; createdAtIso: string }> {
-  let sql = `SELECT job_id, case_id, created_at FROM seal_jobs WHERE status = 'queued'`;
+  let sql = `SELECT job_id, case_id, created_at FROM seal_jobs WHERE status IN ('queued','failed')`;
   const params: string[] = [];
   if (options?.olderThanMinutes != null && options.olderThanMinutes > 0) {
     const cutoff = new Date(Date.now() - options.olderThanMinutes * 60 * 1000).toISOString();
@@ -3072,13 +3299,19 @@ export function listQueuedSealJobs(
 export function getSealJobByJobId(db: Db, jobId: string): SealJobRecord | null {
   const row = db
     .prepare(
-      `SELECT job_id, case_id, status, request_json, response_json FROM seal_jobs WHERE job_id = ?`
+      `SELECT job_id, case_id, status, attempts, last_error, claimed_at, completed_at, payload_hash, metadata_uri, request_json, response_json FROM seal_jobs WHERE job_id = ?`
     )
     .get(jobId) as
     | {
         job_id: string;
         case_id: string;
         status: string;
+        attempts: number;
+        last_error: string | null;
+        claimed_at: string | null;
+        completed_at: string | null;
+        payload_hash: string;
+        metadata_uri: string | null;
         request_json: string;
         response_json: string | null;
       }
@@ -3092,6 +3325,12 @@ export function getSealJobByJobId(db: Db, jobId: string): SealJobRecord | null {
     jobId: row.job_id,
     caseId: row.case_id,
     status: row.status,
+    attempts: Number(row.attempts ?? 0),
+    lastError: row.last_error ?? undefined,
+    claimedAtIso: row.claimed_at ?? undefined,
+    completedAtIso: row.completed_at ?? undefined,
+    payloadHash: row.payload_hash ?? "",
+    metadataUri: row.metadata_uri ?? undefined,
     requestJson: maybeJson(row.request_json, {}),
     responseJson: row.response_json ? maybeJson(row.response_json, {}) : null
   };

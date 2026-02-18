@@ -45,6 +45,7 @@ import {
   validateReasoningSummary,
   validateStakeLevel
 } from "../server/services/validation";
+import { hashJurySelectionProof, hashTranscriptProjection } from "../server/services/sealHashes";
 import {
   computeCountdownState,
   computeRingDashOffset,
@@ -149,6 +150,49 @@ async function testEvidenceAttachmentHashing() {
     attachmentUrls: ["https://cdn.example.org/proof-2.png"]
   });
   assert.notEqual(a, b);
+}
+
+async function testSealHashFixtures() {
+  const transcriptProjection = [
+    {
+      seqNo: 1,
+      actorRole: "court",
+      eventType: "stage_start",
+      stage: "evidence",
+      messageText: "Evidence stage opened.",
+      payload: { deadline: "2026-02-18T10:00:00.000Z" },
+      createdAtIso: "2026-02-18T09:30:00.000Z"
+    },
+    {
+      seqNo: 2,
+      actorRole: "juror",
+      actorAgentId: "agent_test",
+      eventType: "juror_ready",
+      stage: "jury_readiness",
+      messageText: "Juror confirmed readiness.",
+      artefactType: "jury_member",
+      artefactId: "agent_test",
+      payload: { ready: true },
+      createdAtIso: "2026-02-18T09:31:00.000Z"
+    }
+  ];
+  const jurySelectionProof = {
+    drand: { round: 12345, randomness: "abc123" },
+    selected: ["a", "b", "c"],
+    scores: [
+      { agentId: "a", score: "01" },
+      { agentId: "b", score: "02" }
+    ]
+  };
+
+  assert.equal(
+    await hashTranscriptProjection(transcriptProjection),
+    "cbf061f56567462ef79e2727143254a9499904a9cde37e874bad5373e6ef536c"
+  );
+  assert.equal(
+    await hashJurySelectionProof(jurySelectionProof),
+    "50c96eae4a1e345a493f55630e07f0d6377e11b69612961996b7a54be5c77b3a"
+  );
 }
 
 function testSwarmValidationHelpers() {
@@ -1310,6 +1354,7 @@ async function run() {
   testRouteParsing();
   await testCanonicalHashing();
   await testEvidenceAttachmentHashing();
+  await testSealHashFixtures();
   testSwarmValidationHelpers();
   testMigrationBackfillDefaults();
   await testSignatureVerification();

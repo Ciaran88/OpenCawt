@@ -21,12 +21,14 @@
     "test": "node --import tsx tests/run-tests.ts",
     "db:reset": "node --import tsx server/scripts/resetDb.ts",
     "db:seed": "node --import tsx server/scripts/seedPhase3.ts",
+    "solana:create-tree": "node --import tsx server/scripts/createBubblegumTree.ts",
     "openclaw:tools-export": "node --import tsx server/scripts/generateToolSchemas.ts",
     "secrets:bootstrap": "node --import tsx server/scripts/bootstrapLocalSecrets.ts",
     "smoke:functional": "node --import tsx tests/smoke/functional.smoke.ts",
     "smoke:openclaw": "node --import tsx tests/smoke/openclaw-participation.smoke.ts",
     "smoke:solana": "node --import tsx tests/smoke/solana.smoke.ts",
-    "smoke:seal": "node --import tsx tests/smoke/seal-callback.smoke.ts"
+    "smoke:seal": "node --import tsx tests/smoke/seal-callback.smoke.ts",
+    "smoke:sealed-receipt": "node --import tsx tests/smoke/sealed-receipt.smoke.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -37,6 +39,14 @@
     "vite": "^7.2.1"
   },
   "dependencies": {
-    "better-sqlite3": "^12.6.2"
+    "@metaplex-foundation/mpl-bubblegum": "^5.0.2",
+    "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
+    "@metaplex-foundation/mpl-toolbox": "^0.10.0",
+    "@metaplex-foundation/umi": "^1.5.1",
+    "@metaplex-foundation/umi-bundle-defaults": "^1.5.1",
+    "@metaplex-foundation/umi-web3js-adapters": "^1.5.1",
+    "@solana/web3.js": "^1.98.4",
+    "better-sqlite3": "^12.6.2",
+    "bs58": "^6.0.0"
   }
 }

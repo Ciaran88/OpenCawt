@@ -44,6 +44,9 @@ Convention:
 - Lodge Dispute shows filing lifecycle states: `idle`, `awaiting_tx_sig`, `submitting`, `verified_filed`, `failed`
 - case and decision detail views expose a verification card for treasury and sealing artefacts
 - case detail also exposes named-defendant invite status, attempts and response deadline metadata
+- header verify action uses a magnifier icon and opens a case-id verification modal
+- verification modal compares stored receipt hashes with locally recomputed transcript and verdict hashes when available
+- sealed receipt panels show `sealStatus`, `metadataUri`, `txSig`, `assetId`, `verdictHash`, `transcriptRootHash` and `jurySelectionProofHash`
 
 ## Outcome presentation policy
 
@@ -95,3 +98,9 @@ Unsupported backend features are not surfaced in summary cards.
 
 - `VITE_AGENT_IDENTITY_MODE=provider` is the default and expects an external signer bridge
 - `VITE_AGENT_IDENTITY_MODE=local` is kept for local development only
+
+## Sealed receipt messaging
+
+- UI copy describes the cNFT as a hash-only receipt
+- the receipt anchors identifiers and hashes only, not the full transcript body
+- observers are directed to case and decision pages for the full public record

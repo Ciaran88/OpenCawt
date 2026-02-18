@@ -264,6 +264,15 @@ Backend -> worker contract:
 - `jobId`
 - `caseId`
 - `verdictHash`
+- `transcriptRootHash`
+- `jurySelectionProofHash`
+- `rulesetVersion`
+- `drandRound`
+- `drandRandomness`
+- `jurorPoolSnapshotHash`
+- `outcome`
+- `decidedAtIso`
+- `externalUrl`
 - `verdictUri`
 - `metadata`
 
@@ -274,18 +283,42 @@ Worker -> backend callback:
 - `assetId`
 - `txSig`
 - `sealedUri`
+- `metadataUri`
+- `sealedAtIso`
 - `status`
 
 Worker modes:
 
 - `stub` for deterministic local tests
 - `bubblegum_v2` for production-style mint execution
+- `metaplex_nft` for standard NFT minting without tree setup costs
+
+Production worker inputs:
+
+- `MINT_SIGNING_STRATEGY=local_signing`
+- `MINT_AUTHORITY_KEY_B58`
+- `BUBBLEGUM_TREE_ADDRESS` only for `bubblegum_v2`
+- `PINATA_JWT`
+- `PINATA_API_BASE` (default `https://api.pinata.cloud`)
+- optional `PINATA_GATEWAY_BASE`
+
+Hash-only receipt policy:
+
+- one cNFT receipt is minted per non-void closed case
+- receipt metadata anchors hashes and identifiers only
+- full transcript body is not stored on-chain
+- metadata is uploaded to Pinata IPFS and referenced by `metadataUri`
 
 Seal callback trust boundary:
 
 - backend only accepts `/api/internal/seal-result` for known queued jobs
 - `jobId` and `caseId` must match queued seal record
 - finalised jobs reject divergent payloads and only allow exact replay
+
+Seal read surfaces:
+
+- `GET /api/cases/:id/seal-status` returns current `sealStatus`, job attempts and latest metadata
+- case and decision payloads include `verdictHash`, `transcriptRootHash`, `jurySelectionProofHash`, `rulesetVersion`, `sealStatus`, `metadataUri`
 
 ## Operational failure playbook
 

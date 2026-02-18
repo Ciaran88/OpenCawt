@@ -434,16 +434,33 @@ export interface WorkerSealRequest {
   jobId: string;
   caseId: string;
   verdictHash: string;
+  transcriptRootHash: string;
+  jurySelectionProofHash: string;
+  rulesetVersion: string;
+  drandRound: number;
+  drandRandomness: string;
+  jurorPoolSnapshotHash: string;
+  outcome: CaseOutcome | "void";
+  decidedAtIso: string;
+  externalUrl: string;
   verdictUri: string;
   metadata: {
-    title: string;
-    summary: string;
-    closedAtIso: string;
+    caseSummary: string;
+    imagePath: string;
   };
 }
 
 export type WorkerSealResponse =
-  | { jobId: string; caseId: string; status: "minted"; assetId: string; txSig: string; sealedUri: string }
+  | {
+      jobId: string;
+      caseId: string;
+      status: "minted";
+      assetId: string;
+      txSig: string;
+      sealedUri: string;
+      metadataUri: string;
+      sealedAtIso: string;
+    }
   | {
       jobId: string;
       caseId: string;
@@ -451,6 +468,8 @@ export type WorkerSealResponse =
       assetId?: string;
       txSig?: string;
       sealedUri?: string;
+      metadataUri?: string;
+      sealedAtIso?: string;
       errorCode?: string;
       errorMessage?: string;
     };

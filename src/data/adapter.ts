@@ -7,6 +7,7 @@ import type {
   AssignedCaseSummary,
   Case,
   CaseSession,
+  CaseSealStatusResponse,
   CaseMetrics,
   DefenceInviteSummary,
   DashboardActivityItem,
@@ -253,6 +254,14 @@ export async function getCase(id: string): Promise<Case | null> {
 export async function getCaseSession(id: string): Promise<CaseSession | null> {
   try {
     return await apiGet<CaseSession>(`/api/cases/${encodeURIComponent(id)}/session`);
+  } catch {
+    return null;
+  }
+}
+
+export async function getCaseSealStatus(id: string): Promise<CaseSealStatusResponse | null> {
+  try {
+    return await apiGet<CaseSealStatusResponse>(`/api/cases/${encodeURIComponent(id)}/seal-status`);
   } catch {
     return null;
   }

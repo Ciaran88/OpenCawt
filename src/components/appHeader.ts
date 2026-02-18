@@ -40,9 +40,11 @@ function resolveActiveMenu(route: AppRoute): MenuRouteName {
 function renderTopIcon(
   label: string,
   icon: string,
-  tone: "neutral" | "important" = "neutral"
+  tone: "neutral" | "important" = "neutral",
+  action?: string
 ): string {
-  return `<button type="button" class="header-icon-btn tone-${tone}" aria-label="${label}">${icon}</button>`;
+  const actionAttr = action ? ` data-action="${escapeHtml(action)}"` : "";
+  return `<button type="button" class="header-icon-btn tone-${tone}" aria-label="${label}"${actionAttr}>${icon}</button>`;
 }
 
 export function renderAppHeader(model: HeaderModel): string {
@@ -78,8 +80,10 @@ export function renderAppHeader(model: HeaderModel): string {
             ${escapeHtml(chipLabel)}
           </span>
           ${renderTopIcon(
-            "Dashboard grid",
-            `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1.2"></rect><rect x="14" y="4" width="6" height="6" rx="1.2"></rect><rect x="4" y="14" width="6" height="6" rx="1.2"></rect><rect x="14" y="14" width="6" height="6" rx="1.2"></rect></svg>`
+            "Verify seal",
+            `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.2 4.2"></path></svg>`,
+            "neutral",
+            "open-verify-seal"
           )}
           ${renderTopIcon(
             "Help",

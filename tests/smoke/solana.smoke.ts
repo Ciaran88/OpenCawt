@@ -19,29 +19,39 @@ async function testStubProvider() {
 
 async function testWorkerStub() {
   const worker = startNodeTsxProcess("smoke-worker-stub", "server/mint-worker/main.ts", {
+    APP_ENV: "development",
     MINT_WORKER_HOST: "127.0.0.1",
-    MINT_WORKER_PORT: "8798",
+    MINT_WORKER_PORT: "8898",
     WORKER_TOKEN: "smoke-worker-token",
     MINT_WORKER_MODE: "stub"
   });
 
   try {
-    await wait(600);
+    await wait(1400);
 
-    const noToken = await fetch("http://127.0.0.1:8798/mint", {
+    const noToken = await fetch("http://127.0.0.1:8898/mint", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jobId: "smoke-stub-job",
         caseId: "OC-SMOKE-STUB",
         verdictHash: "hash-smoke",
+        transcriptRootHash: "transcript-hash-smoke",
+        jurySelectionProofHash: "jury-proof-hash-smoke",
+        rulesetVersion: "agentic-code-v1.0.0",
+        drandRound: 1234567,
+        drandRandomness: "drand-randomness-smoke",
+        jurorPoolSnapshotHash: "pool-snapshot-hash-smoke",
+        outcome: "for_prosecution",
+        decidedAtIso: new Date().toISOString(),
+        externalUrl: "https://example.invalid/decision/smoke",
         verdictUri: "https://example.invalid/decision/smoke",
-        metadata: { title: "Smoke", summary: "Stub smoke", closedAtIso: new Date().toISOString() }
+        metadata: { caseSummary: "Stub smoke", imagePath: "nft_seal.png" }
       })
     });
     assert.equal(noToken.status, 401);
 
-    const invalidJson = await fetch("http://127.0.0.1:8798/mint", {
+    const invalidJson = await fetch("http://127.0.0.1:8898/mint", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -53,7 +63,7 @@ async function testWorkerStub() {
     const invalidBody = (await invalidJson.json()) as { error?: string };
     assert.equal(invalidBody.error, "invalid_json");
 
-    const response = await fetch("http://127.0.0.1:8798/mint", {
+    const response = await fetch("http://127.0.0.1:8898/mint", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -63,11 +73,19 @@ async function testWorkerStub() {
         jobId: "smoke-stub-job",
         caseId: "OC-SMOKE-STUB",
         verdictHash: "hash-smoke",
+        transcriptRootHash: "transcript-hash-smoke",
+        jurySelectionProofHash: "jury-proof-hash-smoke",
+        rulesetVersion: "agentic-code-v1.0.0",
+        drandRound: 1234567,
+        drandRandomness: "drand-randomness-smoke",
+        jurorPoolSnapshotHash: "pool-snapshot-hash-smoke",
+        outcome: "for_prosecution",
+        decidedAtIso: new Date().toISOString(),
+        externalUrl: "https://example.invalid/decision/smoke",
         verdictUri: "https://example.invalid/decision/smoke",
         metadata: {
-          title: "Smoke",
-          summary: "Stub smoke",
-          closedAtIso: new Date().toISOString()
+          caseSummary: "Stub smoke",
+          imagePath: "nft_seal.png"
         }
       })
     });
@@ -84,14 +102,22 @@ async function testWorkerStub() {
       jobId: "smoke-stub-job-big",
       caseId: "OC-SMOKE-STUB-BIG",
       verdictHash: "hash-smoke",
+      transcriptRootHash: "transcript-hash-smoke",
+      jurySelectionProofHash: "jury-proof-hash-smoke",
+      rulesetVersion: "agentic-code-v1.0.0",
+      drandRound: 1234567,
+      drandRandomness: "drand-randomness-smoke",
+      jurorPoolSnapshotHash: "pool-snapshot-hash-smoke",
+      outcome: "for_prosecution",
+      decidedAtIso: new Date().toISOString(),
+      externalUrl: "https://example.invalid/decision/smoke",
       verdictUri: "https://example.invalid/decision/smoke",
       metadata: {
-        title: "Smoke",
-        summary: "x".repeat(1024 * 1024 + 128),
-        closedAtIso: new Date().toISOString()
+        caseSummary: "x".repeat(1024 * 1024 + 128),
+        imagePath: "nft_seal.png"
       }
     });
-    const oversized = await fetch("http://127.0.0.1:8798/mint", {
+    const oversized = await fetch("http://127.0.0.1:8898/mint", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -106,17 +132,27 @@ async function testWorkerStub() {
 }
 
 async function testWorkerBubblegumConfigGuard() {
+  if (process.env.SMOKE_MINT_NETWORK !== "1") {
+    process.stdout.write(
+      "Bubblegum worker smoke skipped. Set SMOKE_MINT_NETWORK=1 to exercise metadata upload and mint endpoint retries.\n"
+    );
+    return;
+  }
+
   const worker = startNodeTsxProcess("smoke-worker-bubblegum", "server/mint-worker/main.ts", {
+    APP_ENV: "development",
     MINT_WORKER_HOST: "127.0.0.1",
-    MINT_WORKER_PORT: "8799",
+    MINT_WORKER_PORT: "8899",
     WORKER_TOKEN: "smoke-worker-token",
     MINT_WORKER_MODE: "bubblegum_v2",
+    MINT_SIGNING_STRATEGY: "external_endpoint",
+    PINATA_JWT: "smoke-pinata-jwt",
     BUBBLEGUM_MINT_ENDPOINT: "http://127.0.0.1:65530/mock-bubblegum-mint"
   });
 
   try {
-    await wait(600);
-    const response = await fetch("http://127.0.0.1:8799/mint", {
+    await wait(1400);
+    const response = await fetch("http://127.0.0.1:8899/mint", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -126,11 +162,19 @@ async function testWorkerBubblegumConfigGuard() {
         jobId: "smoke-bubblegum-job",
         caseId: "OC-SMOKE-BUBBLEGUM",
         verdictHash: "hash-smoke",
+        transcriptRootHash: "transcript-hash-smoke",
+        jurySelectionProofHash: "jury-proof-hash-smoke",
+        rulesetVersion: "agentic-code-v1.0.0",
+        drandRound: 1234567,
+        drandRandomness: "drand-randomness-smoke",
+        jurorPoolSnapshotHash: "pool-snapshot-hash-smoke",
+        outcome: "for_prosecution",
+        decidedAtIso: new Date().toISOString(),
+        externalUrl: "https://example.invalid/decision/smoke",
         verdictUri: "https://example.invalid/decision/smoke",
         metadata: {
-          title: "Smoke",
-          summary: "Bubblegum smoke",
-          closedAtIso: new Date().toISOString()
+          caseSummary: "Bubblegum smoke",
+          imagePath: "nft_seal.png"
         }
       })
     });
@@ -143,7 +187,8 @@ async function testWorkerBubblegumConfigGuard() {
     assert.equal(body.status, "failed");
     assert.equal(body.errorCode, "MINT_FAILED");
     assert.ok(
-      (body.errorMessage || "").includes("Mint request failed after retries"),
+      (body.errorMessage || "").includes("Pinata upload failed") ||
+        (body.errorMessage || "").includes("Mint request failed after retries"),
       "Expected actionable bubblegum execution failure message."
     );
   } finally {

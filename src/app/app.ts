@@ -15,6 +15,7 @@ import {
   getCase,
   getCaseMetrics,
   getCaseSession,
+  getCaseSealStatus,
   getCaseTranscript,
   getDecision,
   getDashboardSnapshot,
@@ -53,6 +54,7 @@ import {
   computeRingDashOffset,
   formatDurationLabel
 } from "../util/countdown";
+import { escapeHtml } from "../util/html";
 import { parseRoute, routeToPath, type AppRoute } from "../util/router";
 import {
   readDrafts,
@@ -83,6 +85,43 @@ interface AppDom {
 }
 
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function canonicalise(value: unknown): string {
+  const normalise = (input: unknown): unknown => {
+    if (input === null || typeof input === "string" || typeof input === "boolean") {
+      return input;
+    }
+    if (typeof input === "number") {
+      if (!Number.isFinite(input)) {
+        throw new Error("Non-finite number in verification payload.");
+      }
+      return input;
+    }
+    if (Array.isArray(input)) {
+      return input.map((item) => normalise(item));
+    }
+    if (typeof input === "object") {
+      const out: Record<string, unknown> = {};
+      for (const key of Object.keys(input as Record<string, unknown>).sort()) {
+        const next = (input as Record<string, unknown>)[key];
+        if (next === undefined) {
+          continue;
+        }
+        out[key] = normalise(next);
+      }
+      return out;
+    }
+    throw new Error("Unsupported verification value.");
+  };
+
+  return JSON.stringify(normalise(value));
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const encoded = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  return [...new Uint8Array(digest)].map((part) => part.toString(16).padStart(2, "0")).join("");
+}
 
 export function mountApp(root: HTMLElement): void {
   root.innerHTML = renderAppShell();
@@ -277,6 +316,171 @@ export function mountApp(root: HTMLElement): void {
       state.ui.toast = null;
       renderToast();
     }, 3200);
+  };
+
+  const buildVerifySealModalHtml = (stateModel: {
+    caseId: string;
+    loading: boolean;
+    summary?: string;
+    error?: string;
+    stored?: {
+      verdictHash?: string;
+      transcriptRootHash?: string;
+      jurySelectionProofHash?: string;
+      sealStatus?: string;
+      metadataUri?: string;
+      assetId?: string;
+      txSig?: string;
+    };
+    recomputed?: {
+      verdictHash?: string;
+      transcriptRootHash?: string;
+      verdictMatch?: boolean;
+      transcriptMatch?: boolean;
+    };
+  }): string => {
+    const caseIdValue = escapeHtml(stateModel.caseId);
+    const statusLine = stateModel.loading
+      ? `<p class="muted">Verifying...</p>`
+      : stateModel.error
+        ? `<p class="muted">${escapeHtml(stateModel.error)}</p>`
+        : stateModel.summary
+          ? `<p class="muted">${escapeHtml(stateModel.summary)}</p>`
+          : `<p class="muted">Enter a case ID to verify sealed receipt hashes.</p>`;
+
+    const resultRows = stateModel.stored
+      ? `
+        <dl class="verify-grid">
+          <div><dt>Seal status</dt><dd>${escapeHtml(stateModel.stored.sealStatus ?? "unknown")}</dd></div>
+          <div><dt>Verdict hash</dt><dd>${escapeHtml(stateModel.stored.verdictHash ?? "missing")}</dd></div>
+          <div><dt>Transcript root hash</dt><dd>${escapeHtml(stateModel.stored.transcriptRootHash ?? "missing")}</dd></div>
+          <div><dt>Jury proof hash</dt><dd>${escapeHtml(stateModel.stored.jurySelectionProofHash ?? "missing")}</dd></div>
+          <div><dt>Asset ID</dt><dd>${escapeHtml(stateModel.stored.assetId ?? "pending")}</dd></div>
+          <div><dt>Tx signature</dt><dd>${escapeHtml(stateModel.stored.txSig ?? "pending")}</dd></div>
+          <div><dt>Metadata URI</dt><dd>${escapeHtml(stateModel.stored.metadataUri ?? "pending")}</dd></div>
+        </dl>
+      `
+      : "";
+
+    const compareRows = stateModel.recomputed
+      ? `
+        <dl class="verify-grid">
+          <div><dt>Recomputed verdict hash</dt><dd>${escapeHtml(stateModel.recomputed.verdictHash ?? "not available")}</dd></div>
+          <div><dt>Recomputed transcript hash</dt><dd>${escapeHtml(stateModel.recomputed.transcriptRootHash ?? "not available")}</dd></div>
+          <div><dt>Verdict match</dt><dd>${stateModel.recomputed.verdictMatch === undefined ? "n/a" : stateModel.recomputed.verdictMatch ? "Match" : "Mismatch"}</dd></div>
+          <div><dt>Transcript match</dt><dd>${stateModel.recomputed.transcriptMatch === undefined ? "n/a" : stateModel.recomputed.transcriptMatch ? "Match" : "Mismatch"}</dd></div>
+        </dl>
+      `
+      : "";
+
+    return `
+      <form id="verify-seal-form" class="stack">
+        <label>
+          <span>Case ID</span>
+          <input name="caseId" value="${caseIdValue}" placeholder="OC-000123" />
+        </label>
+        <button class="btn btn-primary" type="submit" ${stateModel.loading ? "disabled" : ""}>Verify seal</button>
+      </form>
+      ${statusLine}
+      ${resultRows}
+      ${compareRows}
+    `;
+  };
+
+  const setVerifySealModal = (payload: Parameters<typeof buildVerifySealModalHtml>[0]) => {
+    state.ui.modal = {
+      title: "Verify seal",
+      html: buildVerifySealModalHtml(payload)
+    };
+    renderOverlay();
+  };
+
+  const verifySealCase = async (caseIdRaw: string) => {
+    const caseId = caseIdRaw.trim();
+    if (!caseId) {
+      setVerifySealModal({
+        caseId: "",
+        loading: false,
+        error: "Enter a valid case ID."
+      });
+      return;
+    }
+
+    setVerifySealModal({
+      caseId,
+      loading: true
+    });
+
+    try {
+      const [caseItem, sealStatus, transcript] = await Promise.all([
+        getCase(caseId),
+        getCaseSealStatus(caseId),
+        getCaseTranscript(caseId, 0, 2000)
+      ]);
+      if (!caseItem) {
+        setVerifySealModal({
+          caseId,
+          loading: false,
+          error: "Case not found."
+        });
+        return;
+      }
+
+      const transcriptProjection = transcript.map((event) => ({
+        seqNo: event.seqNo,
+        actorRole: event.actorRole,
+        actorAgentId: event.actorAgentId,
+        eventType: event.eventType,
+        stage: event.stage,
+        messageText: event.messageText,
+        artefactType: event.artefactType,
+        artefactId: event.artefactId,
+        payload: event.payload,
+        createdAtIso: event.createdAtIso
+      }));
+
+      const recomputedTranscriptHash = await sha256Hex(canonicalise(transcriptProjection));
+      const recomputedVerdictHash = caseItem.verdictBundle
+        ? await sha256Hex(canonicalise(caseItem.verdictBundle))
+        : undefined;
+
+      const storedVerdictHash = caseItem.verdictHash ?? caseItem.sealInfo?.verdictHash;
+      const storedTranscriptHash = caseItem.transcriptRootHash ?? caseItem.sealInfo?.transcriptRootHash;
+
+      setVerifySealModal({
+        caseId,
+        loading: false,
+        summary: "Verification compares stored hashes with local canonical recomputation.",
+        stored: {
+          verdictHash: storedVerdictHash,
+          transcriptRootHash: storedTranscriptHash,
+          jurySelectionProofHash:
+            caseItem.jurySelectionProofHash ?? caseItem.sealInfo?.jurySelectionProofHash,
+          sealStatus: caseItem.sealStatus ?? sealStatus?.sealStatus,
+          metadataUri: caseItem.metadataUri ?? caseItem.sealInfo?.metadataUri ?? sealStatus?.metadataUri,
+          assetId: caseItem.sealInfo?.assetId ?? sealStatus?.assetId,
+          txSig: caseItem.sealInfo?.txSig ?? sealStatus?.txSig
+        },
+        recomputed: {
+          verdictHash: recomputedVerdictHash,
+          transcriptRootHash: recomputedTranscriptHash,
+          verdictMatch: storedVerdictHash
+            ? recomputedVerdictHash
+              ? recomputedVerdictHash === storedVerdictHash
+              : undefined
+            : undefined,
+          transcriptMatch: storedTranscriptHash
+            ? recomputedTranscriptHash === storedTranscriptHash
+            : undefined
+        }
+      });
+    } catch (error) {
+      setVerifySealModal({
+        caseId,
+        loading: false,
+        error: error instanceof Error ? error.message : "Unable to verify this case."
+      });
+    }
   };
 
   const renderHeader = () => {
@@ -1057,6 +1261,18 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "open-verify-seal") {
+      const seedCaseId = activeRenderedCase?.id ?? "";
+      setVerifySealModal({
+        caseId: seedCaseId,
+        loading: false
+      });
+      if (seedCaseId) {
+        void verifySealCase(seedCaseId);
+      }
+      return;
+    }
+
     if (action === "copy-agent-id") {
       const agentId = actionTarget.getAttribute("data-agent-id") || "";
       if (!agentId) {
@@ -1176,6 +1392,13 @@ export function mountApp(root: HTMLElement): void {
 
   const onSubmit = (event: Event) => {
     const form = event.target as HTMLFormElement;
+    if (form.id === "verify-seal-form") {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const caseId = String(formData.get("caseId") || "").trim();
+      void verifySealCase(caseId);
+      return;
+    }
     if (form.id === "lodge-dispute-form") {
       event.preventDefault();
       void submitLodgeDispute(form);

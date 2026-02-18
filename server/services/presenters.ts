@@ -75,11 +75,25 @@ interface UiCase {
     payerWallet?: string;
     amountLamports?: number;
   };
+  verdictHash?: string;
+  verdictBundle?: unknown;
+  transcriptRootHash?: string;
+  jurySelectionProofHash?: string;
+  rulesetVersion?: string;
+  sealStatus: "pending" | "minting" | "sealed" | "failed";
+  sealError?: string;
+  metadataUri?: string;
   sealInfo?: {
     assetId: string;
     txSig: string;
     verdictHash: string;
     sealedUri: string;
+    metadataUri?: string;
+    transcriptRootHash?: string;
+    jurySelectionProofHash?: string;
+    rulesetVersion?: string;
+    sealStatus?: "pending" | "minting" | "sealed" | "failed";
+    sealError?: string;
   };
   scheduledForIso?: string;
   countdownTotalMs?: number;
@@ -130,11 +144,23 @@ interface UiDecision {
     payerWallet?: string;
     amountLamports?: number;
   };
+  transcriptRootHash?: string;
+  jurySelectionProofHash?: string;
+  rulesetVersion?: string;
+  sealStatus: "pending" | "minting" | "sealed" | "failed";
+  sealError?: string;
+  metadataUri?: string;
   sealInfo: {
     assetId: string;
     txSig: string;
     verdictHash: string;
     sealedUri: string;
+    metadataUri?: string;
+    transcriptRootHash?: string;
+    jurySelectionProofHash?: string;
+    rulesetVersion?: string;
+    sealStatus?: "pending" | "minting" | "sealed" | "failed";
+    sealError?: string;
   };
 }
 
@@ -342,13 +368,27 @@ export function toUiCase(options: {
           treasuryTxSig: options.caseRecord.treasuryTxSig
         }
       : undefined,
+    verdictHash: options.caseRecord.verdictHash,
+    verdictBundle: options.caseRecord.verdictBundle,
+    transcriptRootHash: options.caseRecord.transcriptRootHash,
+    jurySelectionProofHash: options.caseRecord.jurySelectionProofHash,
+    rulesetVersion: options.caseRecord.rulesetVersion,
+    sealStatus: options.caseRecord.sealStatus,
+    sealError: options.caseRecord.sealError,
+    metadataUri: options.caseRecord.metadataUri,
     sealInfo:
       options.caseRecord.sealAssetId || options.caseRecord.sealTxSig || options.caseRecord.sealUri
         ? {
             assetId: options.caseRecord.sealAssetId ?? "pending",
             txSig: options.caseRecord.sealTxSig ?? "pending",
             verdictHash: options.caseRecord.verdictHash ?? "pending",
-            sealedUri: options.caseRecord.sealUri ?? "pending"
+            sealedUri: options.caseRecord.sealUri ?? "pending",
+            metadataUri: options.caseRecord.metadataUri,
+            transcriptRootHash: options.caseRecord.transcriptRootHash,
+            jurySelectionProofHash: options.caseRecord.jurySelectionProofHash,
+            rulesetVersion: options.caseRecord.rulesetVersion,
+            sealStatus: options.caseRecord.sealStatus,
+            sealError: options.caseRecord.sealError
           }
         : undefined,
     scheduledForIso: options.caseRecord.scheduledForIso,
@@ -412,11 +452,23 @@ export function toUiDecision(options: {
           treasuryTxSig: options.caseRecord.treasuryTxSig
         }
       : undefined,
+    transcriptRootHash: options.caseRecord.transcriptRootHash,
+    jurySelectionProofHash: options.caseRecord.jurySelectionProofHash,
+    rulesetVersion: options.caseRecord.rulesetVersion,
+    sealStatus: options.caseRecord.sealStatus,
+    sealError: options.caseRecord.sealError,
+    metadataUri: options.caseRecord.metadataUri,
     sealInfo: {
       assetId: options.caseRecord.sealAssetId ?? "pending",
       txSig: options.caseRecord.sealTxSig ?? "pending",
       verdictHash: options.caseRecord.verdictHash ?? "pending",
-      sealedUri: options.caseRecord.sealUri ?? "pending"
+      sealedUri: options.caseRecord.sealUri ?? "pending",
+      metadataUri: options.caseRecord.metadataUri,
+      transcriptRootHash: options.caseRecord.transcriptRootHash,
+      jurySelectionProofHash: options.caseRecord.jurySelectionProofHash,
+      rulesetVersion: options.caseRecord.rulesetVersion,
+      sealStatus: options.caseRecord.sealStatus,
+      sealError: options.caseRecord.sealError
     }
   };
 }

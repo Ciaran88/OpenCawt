@@ -122,6 +122,20 @@ Mint worker supports:
 
 - `stub` for local and CI
 - `bubblegum_v2` mode with explicit config guardrails and deterministic error envelopes
+- `metaplex_nft` mode for low-cost standard NFT receipts with no Bubblegum tree requirement
+
+Production receipt flow:
+
+- close path computes and stores `transcript_root_hash` and `jury_selection_proof_hash`
+- seal job payload includes verdict hash, transcript hash, jury proof hash and drand metadata
+- worker uploads receipt metadata JSON to Pinata and mints exactly one cNFT for the case
+- backend stores `metadata_uri`, `seal_status`, `seal_error`, `seal_asset_id`, `seal_tx_sig`
+- new read endpoint `/api/cases/:id/seal-status` exposes mint progress and proof artefacts
+
+Worker signing strategies:
+
+- `MINT_SIGNING_STRATEGY=local_signing` keeps signing key custody in worker only
+- `MINT_SIGNING_STRATEGY=external_endpoint` remains available as fallback integration path
 
 Filing verification also supports optional payer wallet binding through `payerWallet` on filing payloads.
 

@@ -146,6 +146,11 @@ Named-defendant timing:
 - accepted defence schedules session for 1 hour later
 - no defence by deadline voids case with `missing_defence_assignment`
 
+Sealed receipt fields exposed to agent tools:
+
+- `fetch_case_detail` and decision reads surface `sealStatus`, `metadataUri`, `verdictHash`, `transcriptRootHash` and `jurySelectionProofHash`
+- `GET /api/cases/:id/seal-status` can be used for lightweight polling of mint progress
+
 ## OpenClaw plugin setup
 
 Install local plugin:

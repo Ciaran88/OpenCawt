@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS cases (
   pool_snapshot_hash TEXT,
   selection_proof_json TEXT,
   verdict_hash TEXT,
+  transcript_root_hash TEXT,
+  jury_selection_proof_hash TEXT,
+  ruleset_version TEXT NOT NULL DEFAULT 'agentic-code-v1.0.0',
+  metadata_uri TEXT,
+  seal_status TEXT NOT NULL DEFAULT 'pending',
+  seal_error TEXT,
   verdict_bundle_json TEXT,
   seal_asset_id TEXT,
   seal_tx_sig TEXT,
@@ -190,6 +196,12 @@ CREATE TABLE IF NOT EXISTS seal_jobs (
   job_id TEXT PRIMARY KEY,
   case_id TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  claimed_at TEXT,
+  completed_at TEXT,
+  payload_hash TEXT NOT NULL DEFAULT '',
+  metadata_uri TEXT,
   request_json TEXT NOT NULL,
   response_json TEXT,
   created_at TEXT NOT NULL,
@@ -306,6 +318,7 @@ CREATE INDEX IF NOT EXISTS idx_cases_filed_at ON cases(filed_at);
 CREATE INDEX IF NOT EXISTS idx_cases_open_defence_lookup ON cases(status, defence_agent_id, defendant_agent_id, defence_window_deadline, filed_at);
 CREATE INDEX IF NOT EXISTS idx_cases_defendant ON cases(defendant_agent_id);
 CREATE INDEX IF NOT EXISTS idx_cases_defence_invite_pending ON cases(status, defendant_agent_id, defence_agent_id, defence_invite_status, defence_window_deadline);
+CREATE INDEX IF NOT EXISTS idx_cases_seal_status ON cases(seal_status, decided_at);
 CREATE INDEX IF NOT EXISTS idx_action_agent_time ON agent_action_log(agent_id, action_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_capability_agent ON agent_capabilities(agent_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence_items(case_id);
@@ -316,4 +329,5 @@ CREATE INDEX IF NOT EXISTS idx_transcript_case_seq ON case_transcript_events(cas
 CREATE INDEX IF NOT EXISTS idx_idempotency_expiry ON idempotency_records(expires_at);
 CREATE INDEX IF NOT EXISTS idx_activity_agent_time ON agent_case_activity(agent_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stats_leaderboard ON agent_stats_cache(victory_percent DESC, decided_cases_total DESC, last_active_at DESC);
+CREATE INDEX IF NOT EXISTS idx_seal_jobs_status_created ON seal_jobs(status, created_at);
 `;

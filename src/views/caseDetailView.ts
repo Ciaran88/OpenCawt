@@ -282,6 +282,14 @@ function renderVerificationDetails(caseItem: Case): string {
     return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`;
   };
 
+  const hashKey = caseItem.id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const txExplorer = seal?.txSig && seal.txSig !== "pending"
+    ? `https://solscan.io/tx/${encodeURIComponent(seal.txSig)}`
+    : "";
+  const assetExplorer = seal?.assetId && seal.assetId !== "pending"
+    ? `https://solscan.io/account/${encodeURIComponent(seal.assetId)}`
+    : "";
+
   return `
     <section class="record-card glass-overlay">
       <h3>Verification details</h3>
@@ -328,6 +336,40 @@ function renderVerificationDetails(caseItem: Case): string {
         </div>`
             : ""
         }
+      </dl>
+    </section>
+    <section class="record-card glass-overlay">
+      <h3>Sealed receipt</h3>
+      <p class="muted">This receipt anchors hashes only. The full public record remains available through OpenCawt.</p>
+      <dl class="key-value-list">
+        <div>
+          <dt>Seal status</dt>
+          <dd>${escapeHtml(caseItem.sealStatus ?? "pending")}</dd>
+        </div>
+        <div>
+          <dt>Metadata URI</dt>
+          <dd>${link(caseItem.metadataUri ?? seal?.metadataUri ?? "Pending")}</dd>
+        </div>
+        <div>
+          <dt>Transaction</dt>
+          <dd>${txExplorer ? `<a href="${txExplorer}" target="_blank" rel="noopener noreferrer">${escapeHtml(seal?.txSig ?? "")}</a>` : escapeHtml(seal?.txSig ?? "Pending")}</dd>
+        </div>
+        <div>
+          <dt>Asset ID</dt>
+          <dd>${assetExplorer ? `<a href="${assetExplorer}" target="_blank" rel="noopener noreferrer">${escapeHtml(seal?.assetId ?? "")}</a>` : escapeHtml(seal?.assetId ?? "Pending")}</dd>
+        </div>
+        <div>
+          <dt>Verdict hash</dt>
+          <dd><code id="seal-verdict-${hashKey}">${escapeHtml(caseItem.verdictHash ?? seal?.verdictHash ?? "Pending")}</code> <button class="btn btn-ghost" type="button" data-action="copy-snippet" data-copy-target="seal-verdict-${hashKey}">Copy</button></dd>
+        </div>
+        <div>
+          <dt>Transcript root hash</dt>
+          <dd><code id="seal-transcript-${hashKey}">${escapeHtml(caseItem.transcriptRootHash ?? seal?.transcriptRootHash ?? "Pending")}</code> <button class="btn btn-ghost" type="button" data-action="copy-snippet" data-copy-target="seal-transcript-${hashKey}">Copy</button></dd>
+        </div>
+        <div>
+          <dt>Jury proof hash</dt>
+          <dd><code id="seal-jury-${hashKey}">${escapeHtml(caseItem.jurySelectionProofHash ?? seal?.jurySelectionProofHash ?? "Pending")}</code> <button class="btn btn-ghost" type="button" data-action="copy-snippet" data-copy-target="seal-jury-${hashKey}">Copy</button></dd>
+        </div>
       </dl>
     </section>
   `;

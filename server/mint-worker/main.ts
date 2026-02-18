@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { createId } from "../../shared/ids";
 import type { WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
 import { mintWithBubblegumV2 } from "./bubblegumMint";
+import { mintWithMetaplexNft } from "./metaplexNftMint";
 import { getMintWorkerConfig } from "./workerConfig";
 
 const config = getMintWorkerConfig();
@@ -21,12 +22,15 @@ async function readJson<T>(req: IncomingMessage, limitBytes = 1024 * 1024): Prom
 }
 
 function createStubResponse(body: WorkerSealRequest): WorkerSealResponse {
+  const sealedAtIso = new Date().toISOString();
   return {
     jobId: body.jobId,
     caseId: body.caseId,
     assetId: `asset_${createId("cnft")}`,
     txSig: `tx_${createId("mint")}`,
-    sealedUri: `${body.verdictUri}/sealed`,
+    sealedUri: body.externalUrl,
+    metadataUri: `${body.externalUrl}#metadata`,
+    sealedAtIso,
     status: "minted"
   };
 }
@@ -71,6 +75,8 @@ const server = createServer((req, res) => {
     try {
       if (config.mode === "bubblegum_v2") {
         response = await mintWithBubblegumV2(config, body);
+      } else if (config.mode === "metaplex_nft") {
+        response = await mintWithMetaplexNft(config, body);
       } else {
         response = createStubResponse(body);
       }

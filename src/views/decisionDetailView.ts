@@ -41,6 +41,14 @@ export function renderDecisionDetailView(decision: Decision): string {
     }
     return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`;
   };
+  const txLink =
+    decision.sealInfo.txSig && decision.sealInfo.txSig !== "pending"
+      ? `https://solscan.io/tx/${encodeURIComponent(decision.sealInfo.txSig)}`
+      : "";
+  const assetLink =
+    decision.sealInfo.assetId && decision.sealInfo.assetId !== "pending"
+      ? `https://solscan.io/account/${encodeURIComponent(decision.sealInfo.assetId)}`
+      : "";
 
   const body = `
     <section class="detail-top">
@@ -78,11 +86,11 @@ export function renderDecisionDetailView(decision: Decision): string {
         <dl class="key-value-list">
           <div>
             <dt>Asset ID</dt>
-            <dd>${escapeHtml(decision.sealInfo.assetId)}</dd>
+            <dd>${assetLink ? `<a href="${assetLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.assetId)}</a>` : escapeHtml(decision.sealInfo.assetId)}</dd>
           </div>
           <div>
             <dt>Tx sig</dt>
-            <dd>${escapeHtml(decision.sealInfo.txSig)}</dd>
+            <dd>${txLink ? `<a href="${txLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.txSig)}</a>` : escapeHtml(decision.sealInfo.txSig)}</dd>
           </div>
           <div>
             <dt>Verdict hash</dt>
@@ -91,6 +99,14 @@ export function renderDecisionDetailView(decision: Decision): string {
           <div>
             <dt>URI</dt>
             <dd>${escapeHtml(decision.sealInfo.sealedUri)}</dd>
+          </div>
+          <div>
+            <dt>Metadata URI</dt>
+            <dd>${linkValue(decision.metadataUri ?? decision.sealInfo.metadataUri ?? "Pending")}</dd>
+          </div>
+          <div>
+            <dt>Seal status</dt>
+            <dd>${escapeHtml(decision.sealStatus ?? decision.sealInfo.sealStatus ?? "pending")}</dd>
           </div>
         </dl>
       </article>
@@ -118,6 +134,18 @@ export function renderDecisionDetailView(decision: Decision): string {
             <dt>Public URI</dt>
             <dd>${linkValue(decision.sealInfo.sealedUri)}</dd>
           </div>
+          <div>
+            <dt>Transcript root hash</dt>
+            <dd>${escapeHtml(
+              decision.transcriptRootHash ?? decision.sealInfo.transcriptRootHash ?? "Pending"
+            )}</dd>
+          </div>
+          <div>
+            <dt>Jury proof hash</dt>
+            <dd>${escapeHtml(
+              decision.jurySelectionProofHash ?? decision.sealInfo.jurySelectionProofHash ?? "Pending"
+            )}</dd>
+          </div>
         </dl>
       </article>
     </section>
@@ -125,7 +153,7 @@ export function renderDecisionDetailView(decision: Decision): string {
 
   return renderViewFrame({
     title: "Decision Detail",
-    subtitle: "Recorded verdict summary with sealing placeholders for on-chain references.",
+    subtitle: "Recorded verdict summary with sealed receipt hashes and on-chain verification artefacts.",
     ornament: "Public Record",
     body
   });

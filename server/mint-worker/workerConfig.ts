@@ -8,7 +8,14 @@ export interface MintWorkerConfig {
   host: string;
   port: number;
   token: string;
-  mode: "stub" | "bubblegum_v2";
+  mode: "stub" | "bubblegum_v2" | "metaplex_nft";
+  mintSigningStrategy: "local_signing" | "external_endpoint";
+  mintAuthorityKeyB58?: string;
+  bubblegumTreeAddress?: string;
+  rulesetVersion: string;
+  pinataJwt?: string;
+  pinataApiBase: string;
+  pinataGatewayBase?: string;
   heliusApiKey?: string;
   heliusRpcUrl: string;
   heliusDasUrl: string;
@@ -86,9 +93,48 @@ function validateWorkerConfig(config: MintWorkerConfig): void {
     throw new Error("MINT_WORKER_MODE=stub is not allowed in production.");
   }
 
-  if (config.mode === "bubblegum_v2" && !config.bubblegumMintEndpoint) {
+  if (config.mode !== "bubblegum_v2" && config.mode !== "metaplex_nft") {
+    return;
+  }
+
+  if (!config.pinataJwt) {
+    throw new Error("PINATA_JWT is required when metadata upload is enabled.");
+  }
+
+  if (config.mode === "metaplex_nft") {
+    if (config.mintSigningStrategy !== "local_signing") {
+      throw new Error("MINT_SIGNING_STRATEGY=local_signing is required for MINT_WORKER_MODE=metaplex_nft.");
+    }
+    if (!config.mintAuthorityKeyB58) {
+      throw new Error(
+        "MINT_AUTHORITY_KEY_B58 is required when MINT_WORKER_MODE=metaplex_nft."
+      );
+    }
+    return;
+  }
+
+  if (config.mintSigningStrategy === "external_endpoint") {
+    if (!config.bubblegumMintEndpoint) {
+      throw new Error(
+        "BUBBLEGUM_MINT_ENDPOINT is required when MINT_SIGNING_STRATEGY=external_endpoint."
+      );
+    }
+    return;
+  }
+
+  if (!config.mintAuthorityKeyB58) {
     throw new Error(
-      "BUBBLEGUM_MINT_ENDPOINT is required when MINT_WORKER_MODE=bubblegum_v2."
+      "MINT_AUTHORITY_KEY_B58 is required when MINT_WORKER_MODE=bubblegum_v2 with local_signing."
+    );
+  }
+  if (!config.bubblegumTreeAddress) {
+    throw new Error(
+      "BUBBLEGUM_TREE_ADDRESS is required when MINT_WORKER_MODE=bubblegum_v2 with local_signing."
+    );
+  }
+  if (!config.pinataJwt) {
+    throw new Error(
+      "PINATA_JWT is required when MINT_WORKER_MODE=bubblegum_v2 with local_signing."
     );
   }
 }
@@ -108,7 +154,16 @@ export function getMintWorkerConfig(): MintWorkerConfig {
     host: resolvedHost,
     port: resolvedPort,
     token: stringEnv("WORKER_TOKEN", "dev-worker-token"),
-    mode: stringEnv("MINT_WORKER_MODE", "stub") as "stub" | "bubblegum_v2",
+    mode: stringEnv("MINT_WORKER_MODE", "stub") as "stub" | "bubblegum_v2" | "metaplex_nft",
+    mintSigningStrategy: stringEnv("MINT_SIGNING_STRATEGY", "external_endpoint") as
+      | "local_signing"
+      | "external_endpoint",
+    mintAuthorityKeyB58: optionalEnv("MINT_AUTHORITY_KEY_B58"),
+    bubblegumTreeAddress: optionalEnv("BUBBLEGUM_TREE_ADDRESS"),
+    rulesetVersion: stringEnv("RULESET_VERSION", "agentic-code-v1.0.0"),
+    pinataJwt: optionalEnv("PINATA_JWT"),
+    pinataApiBase: stringEnv("PINATA_API_BASE", "https://api.pinata.cloud"),
+    pinataGatewayBase: optionalEnv("PINATA_GATEWAY_BASE"),
     heliusApiKey: optionalEnv("HELIUS_API_KEY"),
     heliusRpcUrl: stringEnv("HELIUS_RPC_URL", "https://mainnet.helius-rpc.com"),
     heliusDasUrl: stringEnv("HELIUS_DAS_URL", "https://mainnet.helius-rpc.com"),
