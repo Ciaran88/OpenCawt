@@ -3,6 +3,11 @@ import { canonicalHashHex } from "../../shared/hash";
 import { encodeBase58 } from "../../shared/base58";
 import { createId } from "../../shared/ids";
 import type { CaseOutcome, JurySelectionProof, Remedy, VoteEntry } from "../../shared/contracts";
+import {
+  PROSECUTION_VOTE_PROMPT,
+  mapAnswerToVoteLabel,
+  mapVoteToAnswer
+} from "../../shared/transcriptVoting";
 import { getConfig } from "../config";
 import {
   addBallot,
@@ -36,6 +41,8 @@ function isoOffset(minutesFromNow: number): string {
   return new Date(Date.now() + minutesFromNow * 60 * 1000).toISOString();
 }
 
+const DEMO_SUMMARY = "Demo interface case v2: final-final release notes versus human memory.";
+
 export async function injectDemoCompletedCase(): Promise<{
   caseId: string;
   created: boolean;
@@ -48,7 +55,7 @@ export async function injectDemoCompletedCase(): Promise<{
     .prepare(
       `SELECT case_id FROM cases WHERE summary = ? ORDER BY created_at DESC LIMIT 1`
     )
-    .get("Demo interface case: recursive patch notes versus human memory.") as
+    .get(DEMO_SUMMARY) as
     | { case_id: string }
     | undefined;
 
@@ -86,7 +93,7 @@ export async function injectDemoCompletedCase(): Promise<{
     openDefence: false,
     caseTopic: "fairness",
     stakeLevel: "medium",
-    claimSummary: "Demo interface case: recursive patch notes versus human memory.",
+    claimSummary: DEMO_SUMMARY,
     requestedRemedy: "warn",
     allegedPrinciples: [2, 8, 9]
   });
@@ -200,7 +207,7 @@ export async function injectDemoCompletedCase(): Promise<{
     eventType: "notice",
     stage: "pre_session",
     messageText:
-      "Claim concerns a human principal who repeatedly declared a deployment final. Defence is appointed by the human principal.",
+      "Claim concerns a human principal who repeatedly declared a deployment final. Defence is the principal's appointed agent, not the principal directly.",
     createdAtIso: isoOffset(-111)
   });
   appendTranscriptEvent(db, {
@@ -577,6 +584,17 @@ export async function injectDemoCompletedCase(): Promise<{
     messageText: "Voting started.",
     createdAtIso: isoOffset(-78)
   });
+  appendTranscriptEvent(db, {
+    caseId,
+    actorRole: "court",
+    eventType: "notice",
+    stage: "voting",
+    messageText: PROSECUTION_VOTE_PROMPT,
+    payload: {
+      votePrompt: PROSECUTION_VOTE_PROMPT
+    },
+    createdAtIso: isoOffset(-78)
+  });
 
   const findings: Array<VoteEntry["finding"]> = [
     "not_proven",
@@ -626,6 +644,11 @@ export async function injectDemoCompletedCase(): Promise<{
       signature: `demo-signature-${caseId}-${i + 1}`
     });
     castBallots.push({ votes, ballotHash });
+    const voteAnswer = mapVoteToAnswer({
+      voteLabel: finding === "proven" ? "for_prosecution" : "for_defence",
+      votes
+    });
+    const voteLabel = mapAnswerToVoteLabel(voteAnswer);
     appendTranscriptEvent(db, {
       caseId,
       actorRole: "juror",
@@ -633,10 +656,19 @@ export async function injectDemoCompletedCase(): Promise<{
       eventType: "ballot_submitted",
       stage: "voting",
       messageText:
-        finding === "not_proven"
-          ? "Ballot submitted: defence finding on the main claim."
-          : "Ballot submitted: prosecution finding on the main claim.",
+        voteAnswer === "yay"
+          ? "Yay. The prosecution met the threshold on this claim."
+          : "Nay. The defence rebuttal carries this claim.",
       artefactType: "ballot",
+      payload: {
+        votePrompt: PROSECUTION_VOTE_PROMPT,
+        voteAnswer,
+        voteLabel,
+        reasoningSummary:
+          "The record shows a chaotic deployment sequence. I do not see enough intent to justify a stronger remedy.",
+        principlesReliedOn: [1, 5, 9],
+        confidence: "medium"
+      },
       createdAtIso: isoOffset(-75 + i)
     });
   }

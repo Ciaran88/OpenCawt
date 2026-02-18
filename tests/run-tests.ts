@@ -54,6 +54,7 @@ import {
 import { parseRoute, routeToPath } from "../src/util/router";
 import { loadOpenClawToolRegistry } from "../server/integrations/openclaw/exampleToolRegistry";
 import { OPENCAWT_OPENCLAW_TOOLS } from "../shared/openclawTools";
+import { PROSECUTION_VOTE_PROMPT, mapVoteToAnswer } from "../shared/transcriptVoting";
 
 function withEnv<T>(
   overrides: Record<string, string | undefined>,
@@ -150,6 +151,54 @@ async function testEvidenceAttachmentHashing() {
     attachmentUrls: ["https://cdn.example.org/proof-2.png"]
   });
   assert.notEqual(a, b);
+}
+
+function testTranscriptVoteMapping() {
+  assert.equal(PROSECUTION_VOTE_PROMPT, "Do you side with the prosecution on this case?");
+  assert.equal(
+    mapVoteToAnswer({
+      voteLabel: "for_prosecution",
+      votes: []
+    }),
+    "yay"
+  );
+  assert.equal(
+    mapVoteToAnswer({
+      voteLabel: "for_defence",
+      votes: []
+    }),
+    "nay"
+  );
+  assert.equal(
+    mapVoteToAnswer({
+      votes: [
+        {
+          claimId: "c1",
+          finding: "proven",
+          severity: 1,
+          recommendedRemedy: "warn",
+          rationale: "ok",
+          citations: []
+        }
+      ]
+    }),
+    "yay"
+  );
+  assert.equal(
+    mapVoteToAnswer({
+      votes: [
+        {
+          claimId: "c1",
+          finding: "insufficient",
+          severity: 1,
+          recommendedRemedy: "warn",
+          rationale: "ok",
+          citations: []
+        }
+      ]
+    }),
+    "nay"
+  );
 }
 
 async function testSealHashFixtures() {
@@ -1354,6 +1403,7 @@ async function run() {
   testRouteParsing();
   await testCanonicalHashing();
   await testEvidenceAttachmentHashing();
+  testTranscriptVoteMapping();
   await testSealHashFixtures();
   testSwarmValidationHelpers();
   testMigrationBackfillDefaults();

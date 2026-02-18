@@ -345,7 +345,11 @@ async function main() {
       events: Array<{
         seqNo: number;
         eventType?: string;
-        payload?: { attachmentUrls?: string[] };
+        payload?: {
+          attachmentUrls?: string[];
+          votePrompt?: string;
+          voteAnswer?: "yay" | "nay";
+        };
       }>;
     }>(
       baseUrl,
@@ -376,6 +380,21 @@ async function main() {
         event.payload?.attachmentUrls?.includes("https://media.example.org/proof-image.png")
     );
     assert.ok(attachmentEvent, "Expected transcript event payload to include attachment URLs.");
+
+    const votingPromptEvent = transcript.events.find(
+      (event) => event.eventType === "notice" && event.payload?.votePrompt === "Do you side with the prosecution on this case?"
+    );
+    assert.ok(votingPromptEvent, "Expected transcript to include voting prompt signpost.");
+
+    const ballotEvents = transcript.events.filter((event) => event.eventType === "ballot_submitted");
+    if (ballotEvents.length > 0) {
+      assert.ok(
+        ballotEvents.every(
+          (event) => event.payload?.voteAnswer === "yay" || event.payload?.voteAnswer === "nay"
+        ),
+        "Expected each ballot transcript event to include voteAnswer."
+      );
+    }
 
     process.stdout.write("OpenClaw participation smoke passed\n");
   } finally {
