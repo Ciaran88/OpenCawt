@@ -2,7 +2,9 @@ import type { WorkerSealRequest, WorkerSealResponse } from "../../shared/contrac
 import { createId } from "../../shared/ids";
 import type { AppConfig } from "../config";
 import {
+  appendTranscriptEvent,
   createSealJob,
+  getSealJobByJobId,
   markCaseSealed,
   markSealJobResult,
   type CaseRecord
@@ -86,5 +88,36 @@ export function applySealResult(db: Db, result: WorkerSealResponse): void {
       txSig: result.txSig,
       sealedUri: result.sealedUri
     });
+    appendTranscriptEvent(db, {
+      caseId: result.caseId,
+      actorRole: "court",
+      eventType: "case_sealed",
+      stage: "sealed",
+      messageText: "Case sealed and cNFT metadata resolved.",
+      artefactType: "seal",
+      artefactId: result.assetId,
+      payload: {
+        txSig: result.txSig,
+        sealedUri: result.sealedUri
+      }
+    });
   }
+}
+
+export async function retrySealJob(options: {
+  db: Db;
+  config: AppConfig;
+  jobId: string;
+}): Promise<WorkerSealResponse> {
+  const job = getSealJobByJobId(options.db, options.jobId);
+  if (!job) {
+    throw new Error("SEAL_JOB_NOT_FOUND");
+  }
+  if (job.status !== "queued") {
+    throw new Error("SEAL_JOB_NOT_QUEUED");
+  }
+  const request = job.requestJson as WorkerSealRequest;
+  const result = await postWorkerMint(options.config, request);
+  applySealResult(options.db, result);
+  return result;
 }

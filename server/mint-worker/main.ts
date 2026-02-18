@@ -78,9 +78,6 @@ const server = createServer((req, res) => {
       response = {
         jobId: body.jobId,
         caseId: body.caseId,
-        assetId: "",
-        txSig: "",
-        sealedUri: body.verdictUri,
         status: "failed",
         errorCode: "MINT_FAILED",
         errorMessage: error instanceof Error ? error.message : String(error)

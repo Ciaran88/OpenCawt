@@ -2,6 +2,7 @@ export const schemaSql = `
 CREATE TABLE IF NOT EXISTS agents (
   agent_id TEXT PRIMARY KEY,
   juror_eligible INTEGER NOT NULL DEFAULT 1,
+  notify_url TEXT,
   banned INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -27,6 +28,11 @@ CREATE TABLE IF NOT EXISTS cases (
   defence_state TEXT NOT NULL DEFAULT 'none',
   defence_assigned_at TEXT,
   defence_window_deadline TEXT,
+  defendant_notify_url TEXT,
+  defence_invite_status TEXT NOT NULL DEFAULT 'none',
+  defence_invite_attempts INTEGER NOT NULL DEFAULT 0,
+  defence_invite_last_attempt_at TEXT,
+  defence_invite_last_error TEXT,
   open_defence INTEGER NOT NULL,
   case_topic TEXT NOT NULL DEFAULT 'other',
   stake_level TEXT NOT NULL DEFAULT 'medium',
@@ -88,6 +94,7 @@ CREATE TABLE IF NOT EXISTS evidence_items (
   kind TEXT NOT NULL,
   body_text TEXT NOT NULL,
   references_json TEXT NOT NULL,
+  attachment_urls_json TEXT NOT NULL DEFAULT '[]',
   body_hash TEXT NOT NULL,
   evidence_types_json TEXT NOT NULL DEFAULT '[]',
   evidence_strength TEXT,
@@ -212,6 +219,16 @@ CREATE TABLE IF NOT EXISTS agent_action_log (
   FOREIGN KEY(agent_id) REFERENCES agents(agent_id)
 );
 
+CREATE TABLE IF NOT EXISTS agent_capabilities (
+  token_hash TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'writes',
+  revoked_at TEXT,
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(agent_id) REFERENCES agents(agent_id)
+);
+
 CREATE TABLE IF NOT EXISTS case_runtime (
   case_id TEXT PRIMARY KEY,
   current_stage TEXT NOT NULL,
@@ -252,6 +269,7 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
   request_hash TEXT NOT NULL,
   response_status INTEGER NOT NULL,
   response_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'complete',
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   UNIQUE(agent_id, method, path, idempotency_key)
@@ -287,7 +305,9 @@ CREATE INDEX IF NOT EXISTS idx_cases_session_stage ON cases(session_stage);
 CREATE INDEX IF NOT EXISTS idx_cases_filed_at ON cases(filed_at);
 CREATE INDEX IF NOT EXISTS idx_cases_open_defence_lookup ON cases(status, defence_agent_id, defendant_agent_id, defence_window_deadline, filed_at);
 CREATE INDEX IF NOT EXISTS idx_cases_defendant ON cases(defendant_agent_id);
+CREATE INDEX IF NOT EXISTS idx_cases_defence_invite_pending ON cases(status, defendant_agent_id, defence_agent_id, defence_invite_status, defence_window_deadline);
 CREATE INDEX IF NOT EXISTS idx_action_agent_time ON agent_action_log(agent_id, action_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_capability_agent ON agent_capabilities(agent_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence_items(case_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_case ON submissions(case_id);
 CREATE INDEX IF NOT EXISTS idx_ballots_case ON ballots(case_id);

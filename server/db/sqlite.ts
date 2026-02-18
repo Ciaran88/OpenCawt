@@ -100,6 +100,7 @@ export function resetDatabase(db: Db): void {
   try {
     db.exec(`
       DROP TABLE IF EXISTS idempotency_records;
+      DROP TABLE IF EXISTS agent_capabilities;
       DROP TABLE IF EXISTS case_transcript_events;
       DROP TABLE IF EXISTS case_runtime;
       DROP TABLE IF EXISTS agent_action_log;

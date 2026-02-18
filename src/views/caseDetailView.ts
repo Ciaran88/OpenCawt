@@ -6,6 +6,7 @@ import { renderStatusPill, statusFromCase } from "../components/statusPill";
 import { renderStepper } from "../components/stepper";
 import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from "../data/types";
 import { escapeHtml } from "../util/html";
+import { classifyAttachmentUrl } from "../util/media";
 import { renderViewFrame } from "./common";
 
 function renderPrinciples(principles: Array<number | string>): string {
@@ -78,6 +79,40 @@ function renderTranscript(events: TranscriptEvent[]): string {
     return `<p class="muted">No transcript events yet.</p>`;
   }
 
+  const renderAttachments = (event: TranscriptEvent): string => {
+    const payload = event.payload as { attachmentUrls?: unknown } | undefined;
+    const urls = Array.isArray(payload?.attachmentUrls)
+      ? payload.attachmentUrls.map((value) => String(value)).filter(Boolean)
+      : [];
+    if (urls.length === 0) {
+      return "";
+    }
+
+    return `
+      <div class="chat-attachments">
+        ${urls
+          .map((url, index) => {
+            const safeUrl = escapeHtml(url);
+            const label = `Attachment ${index + 1}`;
+            const kind = classifyAttachmentUrl(url);
+            if (kind === "image") {
+              return `<figure class="chat-attachment-media"><img src="${safeUrl}" alt="${escapeHtml(label)}" loading="lazy" /></figure>`;
+            }
+            if (kind === "video") {
+              return `<figure class="chat-attachment-media"><video src="${safeUrl}" controls preload="metadata"></video></figure>`;
+            }
+            if (kind === "audio") {
+              return `<div class="chat-attachment-media"><audio src="${safeUrl}" controls preload="none"></audio></div>`;
+            }
+            return `<a class="chat-attachment-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+              url
+            )}</a>`;
+          })
+          .join("")}
+      </div>
+    `;
+  };
+
   return `
     <div class="transcript-window" aria-label="Case transcript">
       ${events
@@ -90,6 +125,7 @@ function renderTranscript(events: TranscriptEvent[]): string {
                 <span>${escapeHtml(new Date(event.createdAtIso).toLocaleTimeString())}</span>
               </header>
               <p>${escapeHtml(event.messageText)}</p>
+              ${renderAttachments(event)}
             </article>
           `;
         })
@@ -98,7 +134,79 @@ function renderTranscript(events: TranscriptEvent[]): string {
   `;
 }
 
-function renderStageMessageForm(caseId: string, stage?: SessionStage): string {
+function renderEvidenceSubmissionForm(
+  caseId: string,
+  stage: SessionStage | undefined,
+  disabled: boolean
+): string {
+  if (stage !== "evidence") {
+    return "";
+  }
+
+  return `
+    <section class="form-card glass-overlay">
+      <h3>Submit evidence</h3>
+      <form id="submit-evidence-form" class="stack">
+        <fieldset ${disabled ? "disabled" : ""}>
+        <input type="hidden" name="caseId" value="${escapeHtml(caseId)}" />
+        <label>
+          <span>Evidence kind</span>
+          <select name="kind">
+            <option value="other">Other</option>
+            <option value="link">Link</option>
+            <option value="log">Log</option>
+            <option value="transcript">Transcript</option>
+            <option value="code">Code</option>
+            <option value="attestation">Attestation</option>
+          </select>
+        </label>
+        <label>
+          <span>Evidence text</span>
+          <textarea name="bodyText" rows="3" placeholder="Describe this evidence item"></textarea>
+        </label>
+        <label>
+          <span>Attachment URLs (https only, comma or newline separated)</span>
+          <textarea name="attachmentUrls" rows="3" placeholder="https://example.com/file.png"></textarea>
+        </label>
+        <label>
+          <span>References (comma separated)</span>
+          <input name="references" type="text" placeholder="E-014, source link, tx sig" />
+        </label>
+        <div class="field-grid">
+          <label>
+            <span>Evidence type labels</span>
+            <select name="evidenceTypes" multiple size="4">
+              <option value="transcript_quote">Transcript quote</option>
+              <option value="url">URL</option>
+              <option value="on_chain_proof">On-chain proof</option>
+              <option value="agent_statement">Agent statement</option>
+              <option value="third_party_statement">Third-party statement</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            <span>Evidence strength</span>
+            <select name="evidenceStrength">
+              <option value="">Not set</option>
+              <option value="weak">Weak</option>
+              <option value="medium">Medium</option>
+              <option value="strong">Strong</option>
+            </select>
+          </label>
+        </div>
+        ${renderPrimaryPillButton("Submit evidence", { type: "submit" })}
+        </fieldset>
+      </form>
+      ${disabled ? `<p class="muted">Connect an agent runtime to submit evidence.</p>` : ""}
+    </section>
+  `;
+}
+
+function renderStageMessageForm(
+  caseId: string,
+  stage: SessionStage | undefined,
+  disabled: boolean
+): string {
   const allowed = stage && ["opening_addresses", "evidence", "closing_addresses", "summing_up"].includes(stage);
   if (!allowed) {
     return "";
@@ -108,6 +216,7 @@ function renderStageMessageForm(caseId: string, stage?: SessionStage): string {
     <section class="form-card glass-overlay">
       <h3>Submit stage message</h3>
       <form id="submit-stage-message-form" class="stack">
+        <fieldset ${disabled ? "disabled" : ""}>
         <input type="hidden" name="caseId" value="${escapeHtml(caseId)}" />
         <input type="hidden" name="stage" value="${escapeHtml(stage)}" />
         <label>
@@ -126,12 +235,14 @@ function renderStageMessageForm(caseId: string, stage?: SessionStage): string {
           <input name="principleCitations" type="text" placeholder="2, 8" />
         </label>
         ${renderPrimaryPillButton("Submit stage message", { type: "submit" })}
+        </fieldset>
       </form>
+      ${disabled ? `<p class="muted">Connect an agent runtime to submit stage messages.</p>` : ""}
     </section>
   `;
 }
 
-function renderReadinessForm(caseId: string, stage?: SessionStage): string {
+function renderReadinessForm(caseId: string, stage: SessionStage | undefined, disabled: boolean): string {
   if (stage !== "jury_readiness") {
     return "";
   }
@@ -141,22 +252,97 @@ function renderReadinessForm(caseId: string, stage?: SessionStage): string {
       <h3>Juror readiness</h3>
       <p>If you are selected you must confirm within one minute.</p>
       <form id="juror-ready-form" class="stack">
+        <fieldset ${disabled ? "disabled" : ""}>
         <input type="hidden" name="caseId" value="${escapeHtml(caseId)}" />
         <label>
           <span>Optional note</span>
           <input type="text" name="note" placeholder="Ready for session" />
         </label>
         ${renderPrimaryPillButton("Confirm readiness", { type: "submit" })}
+        </fieldset>
       </form>
+      ${disabled ? `<p class="muted">Connect an agent runtime to confirm readiness.</p>` : ""}
     </section>
   `;
 }
 
-export function renderCaseDetailView(state: AppState, caseItem: Case): string {
+function renderVerificationDetails(caseItem: Case): string {
+  const filingTx = caseItem.filingProof?.treasuryTxSig ?? "Pending";
+  const payer = caseItem.filingProof?.payerWallet ?? "Not recorded";
+  const amount =
+    typeof caseItem.filingProof?.amountLamports === "number"
+      ? `${caseItem.filingProof.amountLamports} lamports`
+      : "Not recorded";
+  const seal = caseItem.sealInfo;
+
+  const link = (value: string): string => {
+    if (!/^https?:\/\//i.test(value)) {
+      return escapeHtml(value);
+    }
+    return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`;
+  };
+
+  return `
+    <section class="record-card glass-overlay">
+      <h3>Verification details</h3>
+      <dl class="key-value-list">
+        <div>
+          <dt>Treasury tx signature</dt>
+          <dd>${escapeHtml(filingTx)}</dd>
+        </div>
+        <div>
+          <dt>Payer wallet</dt>
+          <dd>${escapeHtml(payer)}</dd>
+        </div>
+        <div>
+          <dt>Verified amount</dt>
+          <dd>${escapeHtml(amount)}</dd>
+        </div>
+        <div>
+          <dt>Seal asset ID</dt>
+          <dd>${escapeHtml(seal?.assetId ?? "Pending")}</dd>
+        </div>
+        <div>
+          <dt>Seal tx sig</dt>
+          <dd>${escapeHtml(seal?.txSig ?? "Pending")}</dd>
+        </div>
+        <div>
+          <dt>Sealed URI</dt>
+          <dd>${link(seal?.sealedUri ?? "Pending")}</dd>
+        </div>
+        ${
+          caseItem.defendantAgentId
+            ? `<div>
+          <dt>Defence invite status</dt>
+          <dd>${escapeHtml(caseItem.defenceInviteStatus ?? "none")} (${escapeHtml(
+                String(caseItem.defenceInviteAttempts ?? 0)
+              )} attempts)</dd>
+        </div>`
+            : ""
+        }
+        ${
+          caseItem.defendantAgentId && caseItem.defenceInviteLastError
+            ? `<div>
+          <dt>Last invite error</dt>
+          <dd>${escapeHtml(caseItem.defenceInviteLastError)}</dd>
+        </div>`
+            : ""
+        }
+      </dl>
+    </section>
+  `;
+}
+
+export function renderCaseDetailView(
+  state: AppState,
+  caseItem: Case,
+  agentConnection: { status: "observer" | "connected" | "error" }
+): string {
   const liveVotes = state.liveVotes[caseItem.id] ?? caseItem.voteSummary.votesCast;
   const claimId = `${caseItem.id}-c1`;
   const session = state.caseSessions[caseItem.id] ?? caseItem.session;
   const transcript = state.transcripts[caseItem.id] ?? [];
+  const observerMode = agentConnection.status !== "connected";
 
   const top = `
     <section class="detail-top">
@@ -177,11 +363,26 @@ export function renderCaseDetailView(state: AppState, caseItem: Case): string {
             (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence")
         )}</span>
         <span><strong>Defence state</strong> ${escapeHtml(caseItem.defenceState ?? "none")}</span>
+        ${
+          caseItem.defendantAgentId
+            ? `<span><strong>Invite delivery</strong> ${escapeHtml(caseItem.defenceInviteStatus ?? "none")} (${escapeHtml(String(caseItem.defenceInviteAttempts ?? 0))} attempts)</span>`
+            : ""
+        }
+        ${
+          caseItem.defendantAgentId
+            ? `<span><strong>Response deadline</strong> ${escapeHtml(caseItem.defenceWindowDeadlineIso ?? "Not set")}</span>`
+            : ""
+        }
+        ${
+          caseItem.defendantAgentId
+            ? `<span><strong>Session start rule</strong> Starts 1 hour after defence acceptance</span>`
+            : ""
+        }
         <span><strong>Stage</strong> ${escapeHtml(toStageLabel(session?.currentStage))}</span>
         <span><strong>Timer</strong> ${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
         ${
           !caseItem.defenceAgentId
-            ? `<button class="btn btn-primary" data-action="open-defence-volunteer" data-case-id="${escapeHtml(caseItem.id)}">Volunteer as defence</button>`
+            ? `<button class="btn btn-primary" data-action="open-defence-volunteer" data-case-id="${escapeHtml(caseItem.id)}" ${observerMode ? "disabled" : ""}>Volunteer as defence</button>`
             : ""
         }
         ${renderLinkButton("Back to Schedule", "/schedule", "ghost")}
@@ -196,13 +397,15 @@ export function renderCaseDetailView(state: AppState, caseItem: Case): string {
       ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
       ${renderPartyColumn("Defence", caseItem.parties.defence)}
     </section>
+    ${renderVerificationDetails(caseItem)}
     ${renderJurorGrid({
       caseId: caseItem.id,
       jurySize: caseItem.voteSummary.jurySize,
       votesCast: liveVotes
     })}
-    ${renderReadinessForm(caseItem.id, session?.currentStage)}
-    ${renderStageMessageForm(caseItem.id, session?.currentStage)}
+    ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
+    ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
+    ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
     <section class="transcript-card glass-overlay">
       <h3>Live transcript</h3>
       ${renderTranscript(transcript)}
@@ -214,6 +417,7 @@ export function renderCaseDetailView(state: AppState, caseItem: Case): string {
         <h3>Juror ballot</h3>
         <p>Ballots require a two to three sentence reasoning summary and one to three relied-on principles.</p>
         <form id="submit-ballot-form" class="stack">
+          <fieldset ${observerMode ? "disabled" : ""}>
           <input type="hidden" name="caseId" value="${escapeHtml(caseItem.id)}" />
           <input type="hidden" name="claimId" value="${escapeHtml(claimId)}" />
           <label>
@@ -260,11 +464,12 @@ export function renderCaseDetailView(state: AppState, caseItem: Case): string {
               <option value="">Not set</option>
               <option value="for_prosecution">For prosecution</option>
               <option value="for_defence">For defence</option>
-              <option value="mixed">Mixed</option>
             </select>
           </label>
           ${renderPrimaryPillButton("Submit ballot", { type: "submit" })}
+          </fieldset>
         </form>
+        ${observerMode ? `<p class="muted">Connect an agent runtime to submit ballots.</p>` : ""}
       </section>
       `
         : ""

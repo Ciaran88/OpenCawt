@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { randomBytes } from "node:crypto";
 import { existsSync, createReadStream } from "node:fs";
 import { join, resolve, extname } from "node:path";
 import { canonicalHashHex } from "../shared/hash";
@@ -17,6 +18,7 @@ import type {
   SubmitPhasePayload,
   SubmitStageMessagePayload,
   VolunteerDefencePayload,
+  WorkerSealRequest,
   WorkerSealResponse
 } from "../shared/contracts";
 import { getConfig } from "./config";
@@ -26,15 +28,18 @@ import {
   appendTranscriptEvent,
   appendTranscriptEventInTransaction,
   claimDefenceAssignment,
+  countActiveAgentCapabilities,
   getAgentProfile,
   getCaseIntegrityDiagnostics,
   confirmJurorReady,
   countClosedAndSealedCases,
   countEvidenceForCase,
   countFiledCasesToday,
+  createAgentCapability,
   createCaseDraft,
   createJurySelectionRun,
   getCaseById,
+  getDefenceInviteDispatchTarget,
   getCaseRuntime,
   getDecisionCase,
   getSealJobByJobId,
@@ -42,6 +47,7 @@ import {
   listLeaderboard,
   listOpenDefenceCases,
   listAssignedCasesForJuror,
+  listDefenceInvitesForAgent,
   listBallotsByCase,
   listCasesByStatuses,
   listClaims,
@@ -54,8 +60,11 @@ import {
   markCaseVoid,
   markJurorVoted,
   replaceJuryMembers,
+  recordDefenceInviteAttempt,
   rebuildAllAgentStats,
+  revokeAgentCapabilityByHash,
   saveUsedTreasuryTx,
+  setAgentBanned,
   setCaseFiled,
   setCaseJurySelected,
   setJurorAvailability,
@@ -68,20 +77,22 @@ import { openDatabase } from "./db/sqlite";
 import {
   assertSystemKey,
   assertWorkerToken,
+  hashCapabilityToken,
   recordSignedMutation,
   verifySignedMutation
 } from "./services/auth";
 import { createDrandClient } from "./services/drand";
 import { ApiError, badRequest, conflict, notFound, unauthorised } from "./services/errors";
 import {
-  assertIdempotency,
+  completeIdempotency,
   readIdempotencyKey,
-  saveIdempotency
+  releaseIdempotencyClaimOnError,
+  tryClaimIdempotency
 } from "./services/idempotency";
 import { selectJuryDeterministically } from "./services/jury";
 import { createLogger, createRequestId } from "./services/observability";
 import { enforceActionRateLimit, enforceFilingLimit } from "./services/rateLimit";
-import { applySealResult, enqueueSealJob } from "./services/sealing";
+import { applySealResult, enqueueSealJob, retrySealJob } from "./services/sealing";
 import { createSessionEngine } from "./services/sessionEngine";
 import { createSolanaProvider } from "./services/solanaProvider";
 import {
@@ -89,6 +100,8 @@ import {
   validateBallotConfidence,
   validateBallotVoteLabel,
   validateCaseTopic,
+  validateEvidenceAttachmentUrls,
+  validateNotifyUrl,
   validateEvidenceStrength,
   validateEvidenceTypes,
   validateReasoningSummary,
@@ -105,6 +118,7 @@ import {
 import { toUiCase, toUiDecision } from "./services/presenters";
 import { computeDeterministicVerdict } from "./services/verdict";
 import { syncCaseReputation } from "./services/reputation";
+import { dispatchDefenceInvite } from "./services/defenceInvite";
 import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../shared/openclawTools";
 
 const config = getConfig();
@@ -134,6 +148,141 @@ function ensureCaseExists(caseId: string): CaseRecord {
     throw notFound("CASE_NOT_FOUND", "Case was not found.");
   }
   return caseRecord;
+}
+
+async function maybeDispatchNamedDefenceInvite(
+  caseId: string,
+  options?: { force?: boolean }
+): Promise<void> {
+  const caseRecord = getCaseById(db, caseId);
+  if (!caseRecord) {
+    return;
+  }
+  if (!caseRecord.defendantAgentId || caseRecord.defenceAgentId) {
+    return;
+  }
+  if (!["filed", "jury_selected", "voting"].includes(caseRecord.status)) {
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const nowMs = new Date(nowIso).getTime();
+  if (
+    caseRecord.defenceWindowDeadlineIso &&
+    nowMs >= new Date(caseRecord.defenceWindowDeadlineIso).getTime()
+  ) {
+    return;
+  }
+
+  if (!options?.force) {
+    if (caseRecord.defenceInviteStatus === "delivered") {
+      return;
+    }
+    if (caseRecord.defenceInviteLastAttemptAtIso) {
+      const elapsedSec =
+        (nowMs - new Date(caseRecord.defenceInviteLastAttemptAtIso).getTime()) / 1000;
+      if (elapsedSec < config.defenceInviteRetrySec) {
+        return;
+      }
+    }
+  }
+
+  const dispatchTarget = getDefenceInviteDispatchTarget(db, caseId);
+  if (!dispatchTarget) {
+    return;
+  }
+
+  if (!dispatchTarget.notifyUrl) {
+    recordDefenceInviteAttempt(db, {
+      caseId,
+      status: "failed",
+      attemptedAtIso: nowIso,
+      error: "No notify URL configured for named defendant."
+    });
+    if (dispatchTarget.inviteAttempts === 0) {
+      appendTranscriptEvent(db, {
+        caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage: "pre_session",
+        messageText:
+          "Defence invite delivery failed because no callback URL is configured for the named defendant."
+      });
+    }
+    return;
+  }
+
+  const result = await dispatchDefenceInvite(config, {
+    caseId: dispatchTarget.caseId,
+    defendantAgentId: dispatchTarget.defendantAgentId,
+    summary: dispatchTarget.summary,
+    responseDeadlineIso: dispatchTarget.responseDeadlineAtIso,
+    acceptEndpoint: `/api/cases/${encodeURIComponent(caseId)}/volunteer-defence`,
+    notifyUrl: dispatchTarget.notifyUrl
+  });
+
+  recordDefenceInviteAttempt(db, {
+    caseId,
+    status: result.delivered ? "delivered" : "failed",
+    attemptedAtIso: result.sentAtIso,
+    error: result.delivered ? undefined : result.error ?? "Invite delivery failed."
+  });
+
+  if (result.delivered && dispatchTarget.inviteStatus !== "delivered") {
+    appendTranscriptEvent(db, {
+      caseId,
+      actorRole: "court",
+      eventType: "notice",
+      stage: "pre_session",
+      messageText: `Defence invite delivered to ${dispatchTarget.defendantAgentId}.`,
+      payload: {
+        eventId: result.eventId,
+        responseDeadlineIso: dispatchTarget.responseDeadlineAtIso
+      }
+    });
+  } else if (
+    !result.delivered &&
+    (dispatchTarget.inviteAttempts === 0 || dispatchTarget.inviteLastError !== result.error)
+  ) {
+    appendTranscriptEvent(db, {
+      caseId,
+      actorRole: "court",
+      eventType: "notice",
+      stage: "pre_session",
+      messageText: "Defence invite delivery attempt failed. The system will retry before deadline.",
+      payload: {
+        error: result.error ?? "Invite delivery failed.",
+        attempts: dispatchTarget.inviteAttempts + 1
+      }
+    });
+  }
+}
+
+function issueCapabilityToken(): string {
+  return `ocap_${randomBytes(24).toString("base64url")}`;
+}
+
+interface CasePaymentProof {
+  treasuryTxSig?: string;
+  payerWallet?: string;
+  amountLamports?: number;
+}
+
+function extractPaymentProof(caseId: string, treasuryTxSig?: string): CasePaymentProof {
+  const events = listTranscriptEvents(db, { caseId, limit: 500, afterSeq: 0 });
+  const paymentEvent = [...events]
+    .reverse()
+    .find((event) => event.eventType === "payment_verified");
+  const payload = (paymentEvent?.payload ?? {}) as Record<string, unknown>;
+  const payerWallet = typeof payload.payerWallet === "string" ? payload.payerWallet : undefined;
+  const amountLamports =
+    typeof payload.amountLamports === "number" ? payload.amountLamports : undefined;
+
+  return {
+    treasuryTxSig,
+    payerWallet,
+    amountLamports
+  };
 }
 
 function safeError(error: unknown): ApiError {
@@ -170,7 +319,7 @@ function toSubmissionStage(
   return phase;
 }
 
-async function hydrateCase(caseRecord: CaseRecord) {
+async function hydrateCase(caseRecord: CaseRecord, options?: { includeVerification?: boolean }) {
   const [claims, evidence, submissions, ballots] = [
     listClaims(db, caseRecord.caseId),
     listEvidenceByCase(db, caseRecord.caseId),
@@ -178,7 +327,7 @@ async function hydrateCase(caseRecord: CaseRecord) {
     listBallotsByCase(db, caseRecord.caseId)
   ];
 
-  return {
+  const base = {
     ...toUiCase({
       caseRecord,
       claims,
@@ -188,21 +337,42 @@ async function hydrateCase(caseRecord: CaseRecord) {
     }),
     session: getCaseRuntime(db, caseRecord.caseId)
   };
+
+  if (!options?.includeVerification) {
+    return base;
+  }
+
+  return {
+    ...base,
+    filingProof: extractPaymentProof(caseRecord.caseId, caseRecord.treasuryTxSig)
+  };
 }
 
-async function hydrateDecision(caseRecord: CaseRecord) {
+async function hydrateDecision(
+  caseRecord: CaseRecord,
+  options?: { includeVerification?: boolean }
+) {
   const [claims, evidence, ballots] = [
     listClaims(db, caseRecord.caseId),
     listEvidenceByCase(db, caseRecord.caseId),
     listBallotsByCase(db, caseRecord.caseId)
   ];
 
-  return toUiDecision({
+  const base = toUiDecision({
     caseRecord,
     claims,
     evidence,
     ballots
   });
+
+  if (!options?.includeVerification) {
+    return base;
+  }
+
+  return {
+    ...base,
+    filingProof: extractPaymentProof(caseRecord.caseId, caseRecord.treasuryTxSig)
+  };
 }
 
 interface JurySelectionComputation {
@@ -409,6 +579,9 @@ const sessionEngine = createSessionEngine({
     if (caseRecord) {
       syncCaseReputation(db, caseRecord);
     }
+  },
+  async onDefenceInviteTick(caseRecord: CaseRecord, _nowIso: string) {
+    await maybeDispatchNamedDefenceInvite(caseRecord.caseId);
   }
 });
 
@@ -435,41 +608,63 @@ async function handleSignedMutationWithIdempotency<TPayload, TResult>(input: {
   });
 
   const idempotencyKey = readIdempotencyKey(input.req);
-  const replay = assertIdempotency(db, {
-    agentId: verified.agentId,
-    method: input.method,
-    path: input.pathname,
-    requestHash: verified.payloadHash,
-    idempotencyKey
-  });
-  if (replay) {
-    return {
-      statusCode: replay.status,
-      payload: replay.payload as TResult
-    };
+
+  if (!idempotencyKey) {
+    const result = await input.handler(verified);
+    recordSignedMutation({
+      db,
+      verified,
+      actionType: input.actionType,
+      caseId: input.caseId
+    });
+    return result;
   }
 
-  const result = await input.handler(verified);
-
-  recordSignedMutation({
-    db,
-    verified,
-    actionType: input.actionType,
-    caseId: input.caseId
-  });
-
-  saveIdempotency(db, config, {
+  const claim = tryClaimIdempotency(db, config, {
     agentId: verified.agentId,
     method: input.method,
     path: input.pathname,
     caseId: input.caseId,
-    requestHash: verified.payloadHash,
     idempotencyKey,
-    responseStatus: result.statusCode,
-    responsePayload: result.payload
+    requestHash: verified.payloadHash
   });
 
-  return result;
+  if (!claim.claimed) {
+    return {
+      statusCode: claim.replay.status,
+      payload: claim.replay.payload as TResult
+    };
+  }
+
+  try {
+    const result = await input.handler(verified);
+
+    recordSignedMutation({
+      db,
+      verified,
+      actionType: input.actionType,
+      caseId: input.caseId
+    });
+
+    completeIdempotency(db, {
+      agentId: verified.agentId,
+      method: input.method,
+      path: input.pathname,
+      idempotencyKey,
+      responseStatus: result.statusCode,
+      responsePayload: result.payload
+    });
+
+    return result;
+  } catch (err) {
+    releaseIdempotencyClaimOnError(db, {
+      agentId: verified.agentId,
+      method: input.method,
+      path: input.pathname,
+      idempotencyKey
+    });
+    throw err;
+  }
 }
 
 async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: FileCasePayload) {
@@ -492,6 +687,7 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
     actionType: "file_case",
     async handler(verified) {
       const caseRecord = ensureCaseExists(caseId);
+      const namedDefendantCase = Boolean(caseRecord.defendantAgentId);
       if (caseRecord.status !== "draft") {
         throw conflict("CASE_NOT_DRAFT", "Only draft cases can be filed.");
       }
@@ -547,7 +743,11 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           txSig: treasuryTxSig,
           warning,
           scheduleDelaySec: config.rules.sessionStartsAfterSeconds,
-          defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
+          defenceCutoffSec: namedDefendantCase
+            ? config.rules.namedDefendantResponseSeconds
+            : config.rules.defenceAssignmentCutoffSeconds,
+          scheduleImmediately: !namedDefendantCase,
+          inviteStatus: namedDefendantCase ? "queued" : "none"
         });
 
         saveUsedTreasuryTx(db, {
@@ -589,9 +789,12 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           actorRole: "court",
           eventType: "notice",
           stage: "pre_session",
-          messageText: "Live session is scheduled to begin in one hour.",
+          messageText: namedDefendantCase
+            ? "Live session starts one hour after named defendant acceptance."
+            : "Live session is scheduled to begin in one hour.",
           payload: {
-            sessionStartsAfterSeconds: config.rules.sessionStartsAfterSeconds
+            sessionStartsAfterSeconds: config.rules.sessionStartsAfterSeconds,
+            namedDefendantCase
           }
         });
 
@@ -600,10 +803,13 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           actorRole: "court",
           eventType: "notice",
           stage: "pre_session",
-          messageText:
-            "Defence must be assigned within forty five minutes of filing or the case becomes void.",
+          messageText: namedDefendantCase
+            ? "Named defendant must accept within twenty four hours or the case becomes void."
+            : "Defence must be assigned within forty five minutes of filing or the case becomes void.",
           payload: {
-            defenceAssignmentCutoffSeconds: config.rules.defenceAssignmentCutoffSeconds,
+            defenceAssignmentCutoffSeconds: namedDefendantCase
+              ? config.rules.namedDefendantResponseSeconds
+              : config.rules.defenceAssignmentCutoffSeconds,
             namedDefendantExclusiveSeconds: config.rules.namedDefendantExclusiveSeconds
           }
         });
@@ -612,6 +818,10 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
+      }
+
+      if (namedDefendantCase) {
+        await maybeDispatchNamedDefenceInvite(caseId, { force: true });
       }
 
       return {
@@ -831,6 +1041,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "agents" &&
+      segments[4] === "ban"
+    ) {
+      assertSystemKey(req, config);
+      const agentId = decodeURIComponent(segments[3]);
+      const body = await readJsonBody<{ banned: boolean }>(req);
+      if (typeof body.banned !== "boolean") {
+        throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
+      }
+      setAgentBanned(db, { agentId, banned: body.banned });
+      sendJson(res, 200, { agentId, banned: body.banned });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/openclaw/tools") {
       sendJson(res, 200, {
         tools: OPENCAWT_OPENCLAW_TOOLS.map(toOpenClawParameters)
@@ -986,7 +1215,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         sendJson(res, 404, null);
         return;
       }
-      sendJson(res, 200, await hydrateCase(caseRecord));
+      sendJson(res, 200, await hydrateCase(caseRecord, { includeVerification: true }));
       return;
     }
 
@@ -1009,7 +1238,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         sendJson(res, 404, null);
         return;
       }
-      sendJson(res, 200, await hydrateDecision(caseRecord));
+      sendJson(res, 200, await hydrateDecision(caseRecord, { includeVerification: true }));
       return;
     }
 
@@ -1030,7 +1259,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw badRequest("AGENT_ID_MISMATCH", "Payload agentId must match signing identity.");
           }
 
-          upsertAgent(db, body.agentId, body.jurorEligible ?? true);
+          const notifyUrl = validateNotifyUrl(body.notifyUrl, "notifyUrl");
+          upsertAgent(db, body.agentId, body.jurorEligible ?? true, notifyUrl);
 
           return {
             statusCode: 200,
@@ -1102,7 +1332,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
       sendJson(res, 200, {
         agentId: body.agentId,
-        cases: listAssignedCasesForJuror(db, body.agentId)
+        cases: listAssignedCasesForJuror(db, body.agentId),
+        defenceInvites: listDefenceInvitesForAgent(db, body.agentId).map((item) => ({
+          ...item,
+          sessionStartsAfterAcceptanceSeconds: config.rules.sessionStartsAfterSeconds
+        }))
       });
       return;
     }
@@ -1153,6 +1387,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
                 })
               : undefined;
           const claimSummary = body.claimSummary?.trim() || claims?.[0]?.claimSummary || "";
+          const defendantNotifyUrl = validateNotifyUrl(
+            body.defendantNotifyUrl,
+            "defendantNotifyUrl"
+          );
+          if (defendantNotifyUrl && !body.defendantAgentId) {
+            throw badRequest(
+              "DEFENDANT_NOTIFY_URL_REQUIRES_DEFENDANT",
+              "defendantNotifyUrl can only be set when defendantAgentId is provided."
+            );
+          }
 
           upsertAgent(db, body.prosecutionAgentId, true);
           if (body.defendantAgentId) {
@@ -1164,6 +1408,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             claimSummary,
             caseTopic,
             stakeLevel,
+            defendantNotifyUrl,
             allegedPrinciples,
             claims
           });
@@ -1235,7 +1480,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             caseId,
             agentId: verified.agentId,
             nowIso: new Date().toISOString(),
-            namedExclusiveSec: config.rules.namedDefendantExclusiveSeconds
+            namedExclusiveSec: config.rules.namedDefendantExclusiveSeconds,
+            scheduleDelaySec: config.rules.sessionStartsAfterSeconds
           });
 
           if (claim.status === "already_taken") {
@@ -1269,7 +1515,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             payload: {
               note: body.note ?? null,
               defenceAgentId: verified.agentId,
-              defenceState: accepted ? "accepted" : "volunteered"
+              defenceState: accepted ? "accepted" : "volunteered",
+              scheduledForIso: claim.caseRecord.scheduledForIso ?? null
             }
           });
 
@@ -1313,7 +1560,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[3] === "evidence"
     ) {
       const caseId = decodeURIComponent(segments[2]);
-      const body = await readJsonBody<SubmitEvidencePayload>(req);
+      const body = await readJsonBody<SubmitEvidencePayload>(req, 256 * 1024);
 
       const result = await handleSignedMutationWithIdempotency<SubmitEvidencePayload, ReturnType<typeof addEvidence>>({
         req,
@@ -1355,6 +1602,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           }
           const evidenceTypes = validateEvidenceTypes(body.evidenceTypes);
           const evidenceStrength = validateEvidenceStrength(body.evidenceStrength);
+          const attachmentUrls = validateEvidenceAttachmentUrls(body.attachmentUrls);
           const references = Array.isArray(body.references)
             ? body.references.map((item) => String(item))
             : [];
@@ -1365,6 +1613,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           }
           if (bodyText.length > config.limits.maxEvidenceCharsPerItem) {
             throw badRequest("EVIDENCE_TOO_LONG", "Evidence item exceeds maximum characters.");
+          }
+          if (isDraft && attachmentUrls.length > 0) {
+            throw conflict(
+              "EVIDENCE_MEDIA_STAGE_REQUIRED",
+              "Media attachment URLs are allowed only during the evidence stage."
+            );
           }
 
           const evidenceStats = countEvidenceForCase(db, caseId);
@@ -1383,6 +1637,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             kind,
             bodyText,
             references,
+            attachmentUrls,
             evidenceTypes,
             evidenceStrength: evidenceStrength ?? null
           });
@@ -1394,6 +1649,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             kind: kind as "log" | "transcript" | "code" | "link" | "attestation" | "other",
             bodyText,
             references,
+            attachmentUrls,
             evidenceTypes,
             evidenceStrength,
             bodyHash
@@ -1408,7 +1664,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             stage: "evidence",
             messageText: "Evidence item submitted.",
             artefactType: "evidence",
-            artefactId: evidence.evidenceId
+            artefactId: evidence.evidenceId,
+            payload: {
+              attachmentUrls
+            }
           });
 
           return {
@@ -1430,7 +1689,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[3] === "stage-message"
     ) {
       const caseId = decodeURIComponent(segments[2]);
-      const body = await readJsonBody<SubmitStageMessagePayload>(req);
+      const body = await readJsonBody<SubmitStageMessagePayload>(req, 256 * 1024);
       const result = await handleStageMessage(pathname, req, caseId, body, "stage_message");
       sendJson(res, result.statusCode, result.payload);
       return;
@@ -1444,7 +1703,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[3] === "submissions"
     ) {
       const caseId = decodeURIComponent(segments[2]);
-      const body = await readJsonBody<SubmitPhasePayload>(req);
+      const body = await readJsonBody<SubmitPhasePayload>(req, 256 * 1024);
       const result = await handleSignedMutationWithIdempotency<SubmitPhasePayload, ReturnType<typeof upsertSubmission>>({
         req,
         pathname,
@@ -1747,6 +2006,152 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/internal/capabilities/issue") {
+      assertSystemKey(req, config);
+      const body = await readJsonBody<{
+        agentId?: string;
+        scope?: string;
+        ttlSeconds?: number;
+      }>(req);
+
+      const agentId = body.agentId?.trim();
+      if (!agentId) {
+        throw badRequest("AGENT_ID_REQUIRED", "agentId is required.");
+      }
+      upsertAgent(db, agentId, true);
+
+      const active = countActiveAgentCapabilities(db, agentId);
+      if (active >= config.capabilityKeyMaxActivePerAgent) {
+        throw conflict(
+          "CAPABILITY_LIMIT_REACHED",
+          `Agent already has ${active} active capabilities, limit is ${config.capabilityKeyMaxActivePerAgent}.`
+        );
+      }
+
+      const scope = body.scope?.trim() || "writes";
+      const ttlSeconds = Math.max(60, Math.floor(body.ttlSeconds ?? config.capabilityKeyTtlSec));
+      const createdAtIso = new Date().toISOString();
+      const expiresAtIso = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+      const capabilityToken = issueCapabilityToken();
+      const tokenHash = hashCapabilityToken(capabilityToken);
+
+      createAgentCapability(db, {
+        tokenHash,
+        agentId,
+        scope,
+        expiresAtIso
+      });
+
+      sendJson(res, 201, {
+        agentId,
+        scope,
+        capabilityToken,
+        tokenHash,
+        createdAtIso,
+        expiresAtIso
+      });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/internal/capabilities/revoke") {
+      assertSystemKey(req, config);
+      const body = await readJsonBody<{
+        agentId?: string;
+        capabilityToken?: string;
+        tokenHash?: string;
+      }>(req);
+
+      const agentId = body.agentId?.trim();
+      if (!agentId) {
+        throw badRequest("AGENT_ID_REQUIRED", "agentId is required.");
+      }
+      const tokenHash = body.tokenHash?.trim()
+        ? body.tokenHash.trim()
+        : body.capabilityToken?.trim()
+          ? hashCapabilityToken(body.capabilityToken.trim())
+          : null;
+      if (!tokenHash) {
+        throw badRequest(
+          "CAPABILITY_TOKEN_REQUIRED",
+          "Provide tokenHash or capabilityToken to revoke."
+        );
+      }
+
+      const revoked = revokeAgentCapabilityByHash(db, { tokenHash, agentId });
+      if (!revoked) {
+        throw notFound("CAPABILITY_NOT_FOUND", "Capability token was not found or already revoked.");
+      }
+
+      sendJson(res, 200, {
+        agentId,
+        tokenHash,
+        revoked: true
+      });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "cases" &&
+      segments[4] === "void"
+    ) {
+      assertSystemKey(req, config);
+      const caseId = decodeURIComponent(segments[3]);
+      const body = await readJsonBody<{ reason?: "manual_void" }>(req);
+      const reason = body.reason ?? "manual_void";
+      if (reason !== "manual_void") {
+        throw badRequest("VOID_REASON_INVALID", "Only manual_void is supported.");
+      }
+      const caseRecord = ensureCaseExists(caseId);
+      const allowedStatuses = ["filed", "jury_selected", "voting"];
+      if (!allowedStatuses.includes(caseRecord.status)) {
+        throw conflict(
+          "CASE_NOT_VOIDABLE",
+          `Case must be in filed, jury_selected, or voting to manual void. Current: ${caseRecord.status}`
+        );
+      }
+      const atIso = new Date().toISOString();
+      markCaseVoid(db, { caseId, reason: "manual_void", atIso });
+      appendTranscriptEvent(db, {
+        caseId,
+        actorRole: "court",
+        eventType: "case_voided",
+        stage: "void",
+        messageText: "Case manually voided by admin."
+      });
+      sendJson(res, 200, { caseId, status: "void" });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "seal-jobs" &&
+      segments[4] === "retry"
+    ) {
+      assertSystemKey(req, config);
+      const jobId = decodeURIComponent(segments[3]);
+      try {
+        const result = await retrySealJob({ db, config, jobId });
+        sendJson(res, 200, result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg === "SEAL_JOB_NOT_FOUND") {
+          throw notFound("SEAL_JOB_NOT_FOUND", "Seal job was not found.");
+        }
+        if (msg === "SEAL_JOB_NOT_QUEUED") {
+          throw conflict("SEAL_JOB_NOT_QUEUED", "Seal job is not queued.");
+        }
+        throw err;
+      }
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/internal/seal-result") {
       assertWorkerToken(req, config);
       const body = await readJsonBody<WorkerSealResponse>(req);
@@ -1781,6 +2186,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       if (!["closed", "sealed"].includes(caseRecord.status)) {
         throw conflict("CASE_NOT_CLOSABLE_FOR_SEAL", "Case is not in a closable state for sealing.");
       }
+      const sealRequest = sealJob.requestJson as WorkerSealRequest;
+      const expectedVerdictHash = caseRecord.verdictHash ?? "";
+      if (sealRequest.verdictHash !== expectedVerdictHash) {
+        throw badRequest(
+          "SEAL_VERDICT_HASH_MISMATCH",
+          "Seal job verdict hash does not match case verdict."
+        );
+      }
       if (body.status === "minted") {
         if (!body.assetId?.trim() || !body.txSig?.trim() || !body.sealedUri?.trim()) {
           throw badRequest(
@@ -1791,22 +2204,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }
 
       applySealResult(db, body);
-
-      if (body.status === "minted") {
-        appendTranscriptEvent(db, {
-          caseId: body.caseId,
-          actorRole: "court",
-          eventType: "case_sealed",
-          stage: "sealed",
-          messageText: "Case sealed and cNFT metadata resolved.",
-          artefactType: "seal",
-          artefactId: body.assetId,
-          payload: {
-            txSig: body.txSig,
-            sealedUri: body.sealedUri
-          }
-        });
-      }
 
       sendJson(res, 200, {
         ok: true,

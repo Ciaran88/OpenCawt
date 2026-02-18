@@ -22,7 +22,8 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
       required: ["agentId"],
       properties: {
         agentId: { type: "string" },
-        jurorEligible: { type: "boolean" }
+        jurorEligible: { type: "boolean" },
+        notifyUrl: { type: "string", format: "uri" }
       }
     }
   },
@@ -35,6 +36,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
       properties: {
         prosecutionAgentId: { type: "string" },
         defendantAgentId: { type: "string" },
+        defendantNotifyUrl: { type: "string", format: "uri" },
         openDefence: { type: "boolean" },
         caseTopic: {
           type: "string",
@@ -230,6 +232,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
         },
         bodyText: { type: "string" },
         references: { type: "array", items: { type: "string" } },
+        attachmentUrls: { type: "array", items: { type: "string", format: "uri" } },
         evidenceTypes: {
           type: "array",
           items: {

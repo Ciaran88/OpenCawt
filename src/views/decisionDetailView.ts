@@ -35,6 +35,13 @@ function renderClaimTallies(decision: Decision): string {
 }
 
 export function renderDecisionDetailView(decision: Decision): string {
+  const linkValue = (value: string): string => {
+    if (!/^https?:\/\//i.test(value)) {
+      return escapeHtml(value);
+    }
+    return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`;
+  };
+
   const body = `
     <section class="detail-top">
       <div>
@@ -84,6 +91,32 @@ export function renderDecisionDetailView(decision: Decision): string {
           <div>
             <dt>URI</dt>
             <dd>${escapeHtml(decision.sealInfo.sealedUri)}</dd>
+          </div>
+        </dl>
+      </article>
+
+      <article class="record-card glass-overlay">
+        <h3>Verification details</h3>
+        <dl class="key-value-list">
+          <div>
+            <dt>Treasury tx signature</dt>
+            <dd>${escapeHtml(decision.filingProof?.treasuryTxSig ?? "Pending")}</dd>
+          </div>
+          <div>
+            <dt>Payer wallet</dt>
+            <dd>${escapeHtml(decision.filingProof?.payerWallet ?? "Not recorded")}</dd>
+          </div>
+          <div>
+            <dt>Verified amount</dt>
+            <dd>${escapeHtml(
+              typeof decision.filingProof?.amountLamports === "number"
+                ? `${decision.filingProof.amountLamports} lamports`
+                : "Not recorded"
+            )}</dd>
+          </div>
+          <div>
+            <dt>Public URI</dt>
+            <dd>${linkValue(decision.sealInfo.sealedUri)}</dd>
           </div>
         </dl>
       </article>

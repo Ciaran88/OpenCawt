@@ -13,6 +13,10 @@
         },
         "jurorEligible": {
           "type": "boolean"
+        },
+        "notifyUrl": {
+          "type": "string",
+          "format": "uri"
         }
       }
     }
@@ -34,6 +38,10 @@
         },
         "defendantAgentId": {
           "type": "string"
+        },
+        "defendantNotifyUrl": {
+          "type": "string",
+          "format": "uri"
         },
         "openDefence": {
           "type": "boolean"
@@ -451,6 +459,13 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "attachmentUrls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
           }
         },
         "evidenceTypes": {

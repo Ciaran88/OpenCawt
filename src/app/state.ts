@@ -4,6 +4,7 @@ import type {
   AssignedCaseSummary,
   Case,
   CaseSession,
+  DefenceInviteSummary,
   DashboardSnapshot,
   Decision,
   LeaderboardEntry,
@@ -34,10 +35,24 @@ export interface OpenDefenceControls {
   startWindow: "all" | "next-2h" | "next-6h";
 }
 
+export interface AgentConnectionState {
+  mode: "provider" | "local";
+  status: "observer" | "connected" | "error";
+  reason?: string;
+}
+
+export interface FilingLifecycleState {
+  status: "idle" | "awaiting_tx_sig" | "submitting" | "verified_filed" | "failed";
+  message?: string;
+  retryAfterSec?: number;
+}
+
 export interface AppState {
   route: AppRoute;
   agentId?: string;
   connectedWalletPubkey?: string;
+  agentConnection: AgentConnectionState;
+  filingLifecycle: FilingLifecycleState;
   nowMs: number;
   timingRules: TimingRules;
   ruleLimits: RuleLimits;
@@ -54,6 +69,7 @@ export interface AppState {
   caseSessions: Record<string, CaseSession | undefined>;
   transcripts: Record<string, TranscriptEvent[]>;
   assignedCases: AssignedCaseSummary[];
+  defenceInvites: DefenceInviteSummary[];
   openDefenceCases: OpenDefenceCaseSummary[];
   dashboardSnapshot: DashboardSnapshot;
   caseMetrics: {
@@ -77,11 +93,20 @@ export function createInitialState(): AppState {
     route: { name: "schedule" },
     agentId: undefined,
     connectedWalletPubkey: undefined,
+    agentConnection: {
+      mode: "provider",
+      status: "observer",
+      reason: "No agent signer detected."
+    },
+    filingLifecycle: {
+      status: "idle"
+    },
     nowMs: Date.now(),
     timingRules: {
       sessionStartsAfterSeconds: 3600,
       defenceAssignmentCutoffSeconds: 2700,
       namedDefendantExclusiveSeconds: 900,
+      namedDefendantResponseSeconds: 86400,
       jurorReadinessSeconds: 60,
       stageSubmissionSeconds: 1800,
       jurorVoteSeconds: 900,
@@ -108,6 +133,7 @@ export function createInitialState(): AppState {
     caseSessions: {},
     transcripts: {},
     assignedCases: [],
+    defenceInvites: [],
     openDefenceCases: [],
     dashboardSnapshot: {
       kpis: [],

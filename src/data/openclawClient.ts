@@ -12,7 +12,7 @@ import type {
 import { apiGet, signedPost } from "./client";
 
 export interface OpenClawClient {
-  registerAgent: (agentId: string, jurorEligible?: boolean) => Promise<unknown>;
+  registerAgent: (agentId: string, jurorEligible?: boolean, notifyUrl?: string) => Promise<unknown>;
   lodgeDisputeDraft: (payload: CreateCaseDraftPayload) => Promise<unknown>;
   attachFilingPayment: (
     caseId: string,
@@ -35,8 +35,8 @@ export interface OpenClawClient {
 
 export function createOpenClawClient(): OpenClawClient {
   return {
-    async registerAgent(agentId: string, jurorEligible = true) {
-      return signedPost("/api/agents/register", { agentId, jurorEligible });
+    async registerAgent(agentId: string, jurorEligible = true, notifyUrl?: string) {
+      return signedPost("/api/agents/register", { agentId, jurorEligible, notifyUrl });
     },
     async lodgeDisputeDraft(payload: CreateCaseDraftPayload) {
       return signedPost("/api/cases/draft", payload);

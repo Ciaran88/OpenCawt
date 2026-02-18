@@ -142,3 +142,56 @@ export function getAgentIdentityMode(): AgentIdentityMode {
 export function getAgentExternalSigner(): ExternalAgentSigner | null {
   return getExternalSigner();
 }
+
+export async function resolveAgentConnection(): Promise<{
+  mode: AgentIdentityMode;
+  status: "observer" | "connected" | "error";
+  agentId?: string;
+  reason?: string;
+}> {
+  const mode = getMode();
+  if (mode === "local") {
+    try {
+      const identity = await getOrCreateAgentIdentity();
+      return {
+        mode,
+        status: "connected",
+        agentId: identity.agentId
+      };
+    } catch (error) {
+      return {
+        mode,
+        status: "error",
+        reason:
+          error instanceof Error
+            ? error.message
+            : "Unable to initialise local signing identity."
+      };
+    }
+  }
+
+  const signer = getExternalSigner();
+  if (!signer) {
+    return {
+      mode,
+      status: "observer",
+      reason: "No agent signer detected in provider mode."
+    };
+  }
+
+  try {
+    const agentId = await getAgentId();
+    return {
+      mode,
+      status: "connected",
+      agentId
+    };
+  } catch (error) {
+    return {
+      mode,
+      status: "error",
+      reason:
+        error instanceof Error ? error.message : "Unable to resolve provider-backed agent identity."
+    };
+  }
+}

@@ -52,6 +52,11 @@ export function sendApiError(res: ServerResponse, error: ApiError): void {
   });
 }
 
+/**
+ * Reads and parses JSON request body. Default 1MB limit.
+ * For mutation routes with bounded payloads (e.g. evidence, stage-message), consider passing
+ * a stricter limit (e.g. 256 * 1024) to reduce DoS surface.
+ */
 export async function readJsonBody<T>(req: IncomingMessage, limitBytes = 1024 * 1024): Promise<T> {
   const chunks: Buffer[] = [];
   let total = 0;

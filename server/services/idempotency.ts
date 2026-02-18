@@ -1,10 +1,14 @@
 import type { IncomingMessage } from "node:http";
 import type { AppConfig } from "../config";
 import {
+  completeIdempotencyRecord as dbCompleteIdempotencyRecord,
   getIdempotencyRecord,
   purgeExpiredIdempotency,
+  releaseIdempotencyClaim,
   saveIdempotencyRecord,
-  type IdempotencyRecord
+  tryClaimIdempotency as dbTryClaimIdempotency,
+  type IdempotencyRecord,
+  type TryClaimIdempotencyResult
 } from "../db/repository";
 import type { Db } from "../db/sqlite";
 import { conflict } from "./errors";
@@ -13,6 +17,68 @@ export interface IdempotencyReplay {
   replayed: boolean;
   status: number;
   payload: unknown;
+}
+
+export type { TryClaimIdempotencyResult };
+
+export function tryClaimIdempotency(
+  db: Db,
+  config: AppConfig,
+  input: {
+    agentId: string;
+    method: string;
+    path: string;
+    caseId?: string;
+    idempotencyKey: string;
+    requestHash: string;
+  }
+): TryClaimIdempotencyResult {
+  purgeExpiredIdempotency(db);
+  try {
+    return dbTryClaimIdempotency(db, {
+      ...input,
+      ttlSec: config.idempotencyTtlSec
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD") {
+      throw conflict(
+        "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD",
+        "Idempotency key was already used with a different payload."
+      );
+    }
+    if (msg === "IDEMPOTENCY_IN_PROGRESS") {
+      throw conflict(
+        "IDEMPOTENCY_IN_PROGRESS",
+        "Request in progress, retry later."
+      );
+    }
+    throw err;
+  }
+}
+
+export function completeIdempotency(
+  db: Db,
+  input: {
+    agentId: string;
+    method: string;
+    path: string;
+    idempotencyKey: string;
+    responseStatus: number;
+    responsePayload: unknown;
+  }
+): void {
+  dbCompleteIdempotencyRecord(db, {
+    ...input,
+    responseJson: normaliseIdempotencyPayload(input.responsePayload)
+  });
+}
+
+export function releaseIdempotencyClaimOnError(
+  db: Db,
+  input: { agentId: string; method: string; path: string; idempotencyKey: string }
+): void {
+  releaseIdempotencyClaim(db, input);
 }
 
 function normaliseIdempotencyPayload(value: unknown): unknown {

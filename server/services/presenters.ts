@@ -12,6 +12,7 @@ interface UiEvidenceItem {
   kind: "log" | "transcript" | "code" | "link" | "attestation" | "other";
   summary: string;
   references: string[];
+  attachmentUrls?: string[];
   evidenceTypes?: Array<
     "transcript_quote" | "url" | "on_chain_proof" | "agent_statement" | "third_party_statement" | "other"
   >;
@@ -45,6 +46,10 @@ interface UiCase {
   defenceState: "none" | "invited" | "volunteered" | "accepted";
   defenceAssignedAtIso?: string;
   defenceWindowDeadlineIso?: string;
+  defenceInviteStatus: "none" | "queued" | "delivered" | "failed";
+  defenceInviteAttempts: number;
+  defenceInviteLastAttemptAtIso?: string;
+  defenceInviteLastError?: string;
   openDefence: boolean;
   caseTopic:
     | "misinformation"
@@ -65,6 +70,17 @@ interface UiCase {
   replacementCountVote: number;
   prosecutionPrinciplesCited: number[];
   defencePrinciplesCited: number[];
+  filingProof?: {
+    treasuryTxSig?: string;
+    payerWallet?: string;
+    amountLamports?: number;
+  };
+  sealInfo?: {
+    assetId: string;
+    txSig: string;
+    verdictHash: string;
+    sealedUri: string;
+  };
   scheduledForIso?: string;
   countdownTotalMs?: number;
   countdownEndAtIso?: string;
@@ -109,6 +125,11 @@ interface UiDecision {
   }>;
   selectedEvidence: UiEvidenceItem[];
   verdictSummary: string;
+  filingProof?: {
+    treasuryTxSig?: string;
+    payerWallet?: string;
+    amountLamports?: number;
+  };
   sealInfo: {
     assetId: string;
     txSig: string;
@@ -162,6 +183,7 @@ function toUiEvidence(item: EvidenceRecord): UiEvidenceItem {
     kind: (item.kind as UiEvidenceItem["kind"]) ?? "other",
     summary: item.bodyText.slice(0, 200),
     references: item.references,
+    attachmentUrls: item.attachmentUrls,
     evidenceTypes: item.evidenceTypes,
     evidenceStrength: item.evidenceStrength
   };
@@ -300,6 +322,10 @@ export function toUiCase(options: {
     defenceState: options.caseRecord.defenceState,
     defenceAssignedAtIso: options.caseRecord.defenceAssignedAtIso,
     defenceWindowDeadlineIso: options.caseRecord.defenceWindowDeadlineIso,
+    defenceInviteStatus: options.caseRecord.defenceInviteStatus,
+    defenceInviteAttempts: options.caseRecord.defenceInviteAttempts,
+    defenceInviteLastAttemptAtIso: options.caseRecord.defenceInviteLastAttemptAtIso,
+    defenceInviteLastError: options.caseRecord.defenceInviteLastError,
     openDefence: options.caseRecord.openDefence,
     caseTopic: options.caseRecord.caseTopic,
     stakeLevel: options.caseRecord.stakeLevel,
@@ -311,6 +337,20 @@ export function toUiCase(options: {
     replacementCountVote: options.caseRecord.replacementCountVote,
     prosecutionPrinciplesCited: options.caseRecord.prosecutionPrinciplesCited,
     defencePrinciplesCited: options.caseRecord.defencePrinciplesCited,
+    filingProof: options.caseRecord.treasuryTxSig
+      ? {
+          treasuryTxSig: options.caseRecord.treasuryTxSig
+        }
+      : undefined,
+    sealInfo:
+      options.caseRecord.sealAssetId || options.caseRecord.sealTxSig || options.caseRecord.sealUri
+        ? {
+            assetId: options.caseRecord.sealAssetId ?? "pending",
+            txSig: options.caseRecord.sealTxSig ?? "pending",
+            verdictHash: options.caseRecord.verdictHash ?? "pending",
+            sealedUri: options.caseRecord.sealUri ?? "pending"
+          }
+        : undefined,
     scheduledForIso: options.caseRecord.scheduledForIso,
     countdownTotalMs: options.caseRecord.countdownTotalMs,
     countdownEndAtIso: options.caseRecord.countdownEndAtIso,
@@ -367,6 +407,11 @@ export function toUiDecision(options: {
     claimTallies: summary.claimTallies,
     selectedEvidence: options.evidence.slice(0, 6).map(toUiEvidence),
     verdictSummary,
+    filingProof: options.caseRecord.treasuryTxSig
+      ? {
+          treasuryTxSig: options.caseRecord.treasuryTxSig
+        }
+      : undefined,
     sealInfo: {
       assetId: options.caseRecord.sealAssetId ?? "pending",
       txSig: options.caseRecord.sealTxSig ?? "pending",

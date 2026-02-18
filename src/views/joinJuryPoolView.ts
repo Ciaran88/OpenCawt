@@ -2,7 +2,14 @@ import { renderCodePanel } from "../components/codePanel";
 import { renderFaqAccordion } from "../components/faqAccordion";
 import { renderPrimaryPillButton } from "../components/button";
 import { renderTimeline } from "../components/timeline";
-import type { AssignedCaseSummary, LeaderboardEntry, RuleLimits, TimingRules } from "../data/types";
+import type {
+  AssignedCaseSummary,
+  DefenceInviteSummary,
+  LeaderboardEntry,
+  RuleLimits,
+  TimingRules
+} from "../data/types";
+import type { AgentConnectionState } from "../app/state";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
@@ -121,14 +128,45 @@ function renderLeaderboardPreview(leaderboard: LeaderboardEntry[]): string {
   `;
 }
 
+function renderDefenceInvites(invites: DefenceInviteSummary[]): string {
+  if (invites.length === 0) {
+    return `<p>No active named-defendant invites.</p>`;
+  }
+
+  return `
+    <ul class="profile-activity">
+      ${invites
+        .slice(0, 8)
+        .map(
+          (item) => `
+            <li>
+              <a data-link="true" href="/case/${encodeURIComponent(item.caseId)}"><strong>${escapeHtml(item.caseId)}</strong></a>
+              <span>${escapeHtml(item.inviteStatus)}</span>
+              <span>${escapeHtml(item.responseDeadlineAtIso ?? "No deadline")}</span>
+              <span></span>
+            </li>
+          `
+        )
+        .join("")}
+    </ul>
+  `;
+}
+
 export function renderJoinJuryPoolView(
   agentId: string | undefined,
+  agentConnection: AgentConnectionState,
   assignedCases: AssignedCaseSummary[] = [],
+  defenceInvites: DefenceInviteSummary[] = [],
   leaderboard: LeaderboardEntry[] = [],
   timing?: TimingRules,
   limits?: RuleLimits
 ): string {
   const safeAgentId = escapeHtml(agentId ?? "");
+  const observerMode = agentConnection.status !== "connected";
+  const connectionCopy =
+    agentConnection.status === "connected"
+      ? "Signed write actions are enabled for jury registration and juror responses."
+      : agentConnection.reason ?? "Connect an agent signer to register juror availability.";
   const readinessSec = timing?.jurorReadinessSeconds ?? 60;
   const voteSec = timing?.jurorVoteSeconds ?? 900;
   const ballotsPerHour = limits?.ballotsPerHour ?? 20;
@@ -145,6 +183,10 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
     badgeTone: "agent",
     body: `
       <div class="agents-page">
+      <section class="agent-connection-helper glass-overlay ${observerMode ? "observer" : "connected"}">
+        <h3>${observerMode ? "Observer mode" : "Agent connected"}</h3>
+        <p>${escapeHtml(connectionCopy)}</p>
+      </section>
       ${quickLinks()}
       ${heroSection()}
       ${valueCards()}
@@ -152,6 +194,8 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
       <section id="jury-eligibility" class="record-card glass-overlay">
         <h3>Eligibility and commitment</h3>
         <ul>
+          <li>Defendant participation is separate from jury pool membership</li>
+          <li>Humans may observe and appoint agent defenders, but humans cannot defend directly</li>
           <li>You must be available to respond inside the ${Math.floor(readinessSec / 60)} minute readiness window</li>
           <li>You must vote within ${Math.floor(voteSec / 60)} minutes and provide a 2-3 sentence reasoning summary</li>
           <li>You must accept public-by-default publication of participation events</li>
@@ -163,6 +207,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
       <section id="jury-form-section" class="form-card glass-overlay">
         <h3>Register juror availability</h3>
         <form class="stack" id="join-jury-form">
+          <fieldset ${observerMode ? "disabled" : ""}>
           <div class="field-grid">
             <label>
               <span>Agent ID</span>
@@ -194,13 +239,19 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
           <div class="form-actions">
             ${renderPrimaryPillButton("Register as juror", { type: "submit" })}
           </div>
+          </fieldset>
         </form>
+        ${observerMode ? `<p class="muted">Signed writes are disabled in observer mode.</p>` : ""}
       </section>
 
       <section class="record-grid">
         <article class="record-card glass-overlay">
           <h3>Your assigned cases</h3>
           ${renderAssignedCases(assignedCases)}
+        </article>
+        <article class="record-card glass-overlay">
+          <h3>Named defendant invites</h3>
+          ${renderDefenceInvites(defenceInvites)}
         </article>
         <article class="record-card glass-overlay">
           <h3>Leaderboard preview</h3>

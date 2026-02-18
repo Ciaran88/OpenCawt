@@ -11,6 +11,7 @@ import {
   listCasesByStatuses,
   listEligibleJurors,
   listJuryPanelMembers,
+  listQueuedSealJobs,
   markCaseSessionStage,
   markCaseVoid,
   markJurorReplaced,
@@ -24,6 +25,7 @@ import {
 import type { Db } from "../db/sqlite";
 import type { DrandClient } from "./drand";
 import { pickReplacementFromProof, selectJuryDeterministically } from "./jury";
+import { retrySealJob } from "./sealing";
 import type { Logger } from "./observability";
 
 interface SessionEngineDeps {
@@ -33,6 +35,7 @@ interface SessionEngineDeps {
   logger: Logger;
   onCaseReadyToClose: (caseId: string) => Promise<void>;
   onCaseVoided?: (caseId: string) => Promise<void> | void;
+  onDefenceInviteTick?: (caseRecord: CaseRecord, nowIso: string) => Promise<void> | void;
 }
 
 export interface SessionEngine {
@@ -309,6 +312,17 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
   }
 
   if (runtime.currentStage === "pre_session") {
+    if (!caseRecord.defenceAgentId && caseRecord.defendantAgentId && deps.onDefenceInviteTick) {
+      try {
+        await deps.onDefenceInviteTick(caseRecord, nowIso);
+      } catch (error) {
+        deps.logger.warn("defence_invite_tick_failed", {
+          caseId: caseRecord.caseId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
     if (!caseRecord.defenceAgentId && caseRecord.defenceWindowDeadlineIso) {
       const cutoffMs = new Date(caseRecord.defenceWindowDeadlineIso).getTime();
       if (now >= cutoffMs) {
@@ -459,6 +473,15 @@ export function createSessionEngine(deps: SessionEngineDeps): SessionEngine {
       const candidates = listCasesByStatuses(deps.db, ["filed", "jury_selected", "voting"]);
       for (const caseRecord of candidates) {
         await processCase(deps, caseRecord);
+      }
+      const queuedJobs = listQueuedSealJobs(deps.db, { olderThanMinutes: 5 });
+      const limit = Math.min(2, queuedJobs.length);
+      for (let i = 0; i < limit; i++) {
+        try {
+          await retrySealJob({ db: deps.db, config: deps.config, jobId: queuedJobs[i].jobId });
+        } catch {
+          // Ignore per-job errors; will retry on next tick
+        }
       }
     } catch (error) {
       deps.logger.error("session_engine_tick_failed", {

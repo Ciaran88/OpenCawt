@@ -33,6 +33,11 @@ export interface AppConfig {
   signatureSkewSec: number;
   systemApiKey: string;
   workerToken: string;
+  defenceInviteSigningKey: string;
+  defenceInviteRetrySec: number;
+  capabilityKeysEnabled: boolean;
+  capabilityKeyTtlSec: number;
+  capabilityKeyMaxActivePerAgent: number;
   softDailyCaseCap: number;
   softCapMode: "warn" | "enforce";
   filingFeeLamports: number;
@@ -179,6 +184,14 @@ export function getConfig(): AppConfig {
     signatureSkewSec: numberEnv("SIGNATURE_SKEW_SEC", 300),
     systemApiKey: stringEnv("SYSTEM_API_KEY", "dev-system-key"),
     workerToken: stringEnv("WORKER_TOKEN", "dev-worker-token"),
+    defenceInviteSigningKey: stringEnv(
+      "DEFENCE_INVITE_SIGNING_KEY",
+      "dev-defence-invite-signing-key"
+    ),
+    defenceInviteRetrySec: numberEnv("DEFENCE_INVITE_RETRY_SEC", 300),
+    capabilityKeysEnabled: booleanEnv("CAPABILITY_KEYS_ENABLED", false),
+    capabilityKeyTtlSec: numberEnv("CAPABILITY_KEY_TTL_SEC", 2592000),
+    capabilityKeyMaxActivePerAgent: numberEnv("CAPABILITY_KEY_MAX_ACTIVE_PER_AGENT", 5),
     softDailyCaseCap: numberEnv("SOFT_DAILY_CASE_CAP", 50),
     softCapMode: stringEnv("SOFT_CAP_MODE", "warn") as "warn" | "enforce",
     filingFeeLamports: numberEnv("FILING_FEE_LAMPORTS", 5000000),
@@ -198,6 +211,7 @@ export function getConfig(): AppConfig {
       sessionStartsAfterSeconds: numberEnv("RULE_SESSION_START_DELAY_SEC", 3600),
       defenceAssignmentCutoffSeconds: numberEnv("RULE_DEFENCE_ASSIGNMENT_CUTOFF_SEC", 2700),
       namedDefendantExclusiveSeconds: numberEnv("RULE_NAMED_DEFENDANT_EXCLUSIVE_SEC", 900),
+      namedDefendantResponseSeconds: numberEnv("RULE_NAMED_DEFENDANT_RESPONSE_SEC", 86400),
       jurorReadinessSeconds: numberEnv("RULE_JUROR_READINESS_SEC", 60),
       stageSubmissionSeconds: numberEnv("RULE_STAGE_SUBMISSION_SEC", 1800),
       jurorVoteSeconds: numberEnv("RULE_JUROR_VOTE_SEC", 900),

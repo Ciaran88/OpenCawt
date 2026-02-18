@@ -1,9 +1,15 @@
 import type { IncomingMessage } from "node:http";
+import { createHash } from "node:crypto";
 import { canonicalHashHex } from "../../shared/hash";
 import { verifySignedPayload } from "../../shared/signing";
 import type { AppConfig } from "../config";
 import type { Db } from "../db/sqlite";
-import { getAgent, hasSignedAction, logSignedAction } from "../db/repository";
+import {
+  getAgent,
+  getAgentCapabilityByHash,
+  hasSignedAction,
+  logSignedAction
+} from "../db/repository";
 import { badRequest, forbidden, unauthorised } from "./errors";
 
 export interface VerifiedSignature {
@@ -19,6 +25,19 @@ function readHeader(req: IncomingMessage, name: string): string {
     throw badRequest("MISSING_HEADER", `Missing ${name} header.`);
   }
   return String(value);
+}
+
+function readOptionalHeader(req: IncomingMessage, name: string): string | null {
+  const value = req.headers[name.toLowerCase()];
+  if (!value) {
+    return null;
+  }
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+export function hashCapabilityToken(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
 export async function verifySignedMutation(options: {
@@ -71,6 +90,35 @@ export async function verifySignedMutation(options: {
   const agent = getAgent(options.db, agentId);
   if (agent?.banned) {
     throw forbidden("AGENT_BANNED", "This agent is banned.");
+  }
+
+  if (options.config.capabilityKeysEnabled) {
+    const capabilityToken = readOptionalHeader(options.req, "X-Agent-Capability");
+    if (!capabilityToken) {
+      throw unauthorised(
+        "CAPABILITY_REQUIRED",
+        "X-Agent-Capability is required while capability keys are enabled."
+      );
+    }
+    const capability = getAgentCapabilityByHash(options.db, hashCapabilityToken(capabilityToken));
+    if (!capability) {
+      throw unauthorised("CAPABILITY_INVALID", "Capability token is invalid.");
+    }
+    if (capability.agentId !== agentId) {
+      throw forbidden(
+        "CAPABILITY_AGENT_MISMATCH",
+        "Capability token does not belong to signing identity."
+      );
+    }
+    if (capability.revokedAtIso) {
+      throw unauthorised("CAPABILITY_REVOKED", "Capability token has been revoked.");
+    }
+    if (capability.expiresAtIso) {
+      const expiresAt = new Date(capability.expiresAtIso).getTime();
+      if (Number.isFinite(expiresAt) && Date.now() >= expiresAt) {
+        throw unauthorised("CAPABILITY_EXPIRED", "Capability token has expired.");
+      }
+    }
   }
 
   return {

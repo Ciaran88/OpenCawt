@@ -21,7 +21,8 @@
     "secrets:bootstrap": "node --import tsx server/scripts/bootstrapLocalSecrets.ts",
     "smoke:functional": "node --import tsx tests/smoke/functional.smoke.ts",
     "smoke:openclaw": "node --import tsx tests/smoke/openclaw-participation.smoke.ts",
-    "smoke:solana": "node --import tsx tests/smoke/solana.smoke.ts"
+    "smoke:solana": "node --import tsx tests/smoke/solana.smoke.ts",
+    "smoke:seal": "node --import tsx tests/smoke/seal-callback.smoke.ts"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

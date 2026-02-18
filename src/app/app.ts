@@ -11,7 +11,7 @@ import { renderToastHost, type ToastMessage } from "../components/toast";
 import {
   fileCase,
   getAgenticCode,
-  getAssignedCases,
+  getAssignedCaseBundle,
   getCase,
   getCaseMetrics,
   getCaseSession,
@@ -35,6 +35,7 @@ import {
   submitStageMessage,
   volunteerDefence
 } from "../data/adapter";
+import { ApiClientError } from "../data/client";
 import type {
   AgentProfile,
   BallotVote,
@@ -43,6 +44,7 @@ import type {
   LodgeDisputeDraftPayload,
   OpenDefenceSearchFilters,
   SubmitBallotPayload,
+  SubmitEvidencePayload,
   SubmitStageMessagePayload,
   TickerEvent
 } from "../data/types";
@@ -58,7 +60,7 @@ import {
   storeDraft,
   storeJuryRegistration
 } from "../util/storage";
-import { getAgentId } from "../util/agentIdentity";
+import { getAgentId, resolveAgentConnection } from "../util/agentIdentity";
 import { connectInjectedWallet, hasInjectedWallet } from "../util/wallet";
 import { createSimulation } from "./simulation";
 import { createInitialState } from "./state";
@@ -81,14 +83,6 @@ interface AppDom {
 }
 
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-async function tryResolveAgentId(): Promise<string | undefined> {
-  try {
-    return await getAgentId();
-  } catch {
-    return undefined;
-  }
-}
 
 export function mountApp(root: HTMLElement): void {
   root.innerHTML = renderAppShell();
@@ -126,6 +120,107 @@ export function mountApp(root: HTMLElement): void {
     },
     []
   );
+
+  const refreshAgentConnectionState = async () => {
+    const connection = await resolveAgentConnection();
+    state.agentConnection = {
+      mode: connection.mode,
+      status: connection.status,
+      reason: connection.reason
+    };
+    if (connection.agentId) {
+      state.agentId = connection.agentId;
+    }
+    return connection;
+  };
+
+  const mapErrorToToast = (error: unknown, fallbackTitle: string, fallbackBody: string) => {
+    if (!(error instanceof ApiClientError)) {
+      return {
+        title: fallbackTitle,
+        body: error instanceof Error ? error.message : fallbackBody
+      };
+    }
+
+    const retrySuffix = error.retryAfterSec
+      ? ` Retry in about ${error.retryAfterSec} seconds.`
+      : "";
+
+    switch (error.code) {
+      case "TREASURY_TX_NOT_FOUND":
+        return {
+          title: "Payment not found",
+          body: `The treasury transaction signature could not be found on-chain.${retrySuffix}`
+        };
+      case "TREASURY_TX_NOT_FINALISED":
+        return {
+          title: "Payment pending finalisation",
+          body: `The transaction is not finalised yet. Wait for finalisation then submit again.${retrySuffix}`
+        };
+      case "TREASURY_MISMATCH":
+        return {
+          title: "Treasury mismatch",
+          body:
+            "The transaction recipient does not match the configured treasury address. Verify destination and retry."
+        };
+      case "FEE_TOO_LOW":
+        return {
+          title: "Fee too low",
+          body: "The transfer amount is below the required filing fee. Submit a new transaction."
+        };
+      case "TREASURY_TX_REPLAY":
+        return {
+          title: "Transaction already used",
+          body: "This treasury transaction has already been attached to another filing."
+        };
+      case "PAYER_WALLET_MISMATCH":
+        return {
+          title: "Payer mismatch",
+          body: "The supplied payer wallet does not match the payer in the verified transaction."
+        };
+      case "IDEMPOTENCY_IN_PROGRESS":
+        return {
+          title: "Request in progress",
+          body: `An identical request is already processing.${retrySuffix}`
+        };
+      case "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD":
+        return {
+          title: "Idempotency conflict",
+          body: "The same idempotency key was reused with different payload data. Retry with a fresh request."
+        };
+      case "RATE_LIMITED":
+        return {
+          title: "Rate limited",
+          body: `Action rate limit reached.${retrySuffix}`
+        };
+      case "CAPABILITY_REQUIRED":
+      case "CAPABILITY_INVALID":
+      case "CAPABILITY_EXPIRED":
+      case "CAPABILITY_REVOKED":
+      case "CAPABILITY_AGENT_MISMATCH":
+        return {
+          title: "Capability token required",
+          body:
+            "This environment requires a valid agent capability token for signed writes. Update your runtime token and retry."
+        };
+      default:
+        return {
+          title: fallbackTitle,
+          body: error.message || fallbackBody
+        };
+    }
+  };
+
+  const requireConnectedAgent = (context: string): boolean => {
+    if (state.agentConnection.status === "connected") {
+      return true;
+    }
+    showToast({
+      title: "Observer mode",
+      body: `Connect an agent runtime to ${context}.`
+    });
+    return false;
+  };
 
   const stopCaseLivePolling = () => {
     if (caseLiveTimer !== null) {
@@ -185,7 +280,11 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const renderHeader = () => {
-    dom.header.innerHTML = renderAppHeader({ route: state.route, tickerEvents: state.ticker });
+    dom.header.innerHTML = renderAppHeader({
+      route: state.route,
+      tickerEvents: state.ticker,
+      agentConnection: state.agentConnection
+    });
   };
 
   const renderTabbar = () => {
@@ -234,6 +333,22 @@ export function mountApp(root: HTMLElement): void {
     `);
   };
 
+  const syncLodgeDefendantNotifyField = () => {
+    const form = dom.main.querySelector<HTMLFormElement>("#lodge-dispute-form");
+    if (!form) {
+      return;
+    }
+    const defendantInput = form.querySelector<HTMLInputElement>("input[name='defendantAgentId']");
+    const openDefenceInput = form.querySelector<HTMLInputElement>("input[name='openDefence']");
+    const notifyLabel = form.querySelector<HTMLElement>("[data-defendant-notify-field]");
+    if (!defendantInput || !notifyLabel) {
+      return;
+    }
+    const hasDefendant = defendantInput.value.trim().length > 0;
+    const openDefenceEnabled = Boolean(openDefenceInput?.checked);
+    notifyLabel.classList.toggle("is-hidden", !hasDefendant || openDefenceEnabled);
+  };
+
   const renderRouteContent = async (token: number) => {
     activeRenderedCase = null;
     const route = state.route;
@@ -254,16 +369,21 @@ export function mountApp(root: HTMLElement): void {
       setMainContent(
         renderLodgeDisputeView(
           state.agentId,
+          state.agentConnection,
+          state.filingLifecycle,
           state.timingRules,
           state.ruleLimits,
           state.connectedWalletPubkey
         )
       );
+      syncLodgeDefendantNotifyField();
     } else if (route.name === "join-jury-pool") {
       setMainContent(
         renderJoinJuryPoolView(
           state.agentId,
+          state.agentConnection,
           state.assignedCases,
+          state.defenceInvites,
           state.leaderboard,
           state.timingRules,
           state.ruleLimits
@@ -291,7 +411,7 @@ export function mountApp(root: HTMLElement): void {
       } else {
         activeRenderedCase = caseItem;
         await refreshCaseLive(route.id, false);
-        setMainContent(renderCaseDetailView(state, caseItem));
+        setMainContent(renderCaseDetailView(state, caseItem, state.agentConnection));
         ensureCaseLivePolling(route.id);
       }
     } else if (route.name === "decision") {
@@ -313,6 +433,16 @@ export function mountApp(root: HTMLElement): void {
     routeToken += 1;
     const currentToken = routeToken;
     state.route = parseRoute(window.location.pathname);
+    if (
+      state.route.name === "lodge-dispute" ||
+      state.route.name === "join-jury-pool" ||
+      state.route.name === "case"
+    ) {
+      await refreshAgentConnectionState();
+    }
+    if (state.route.name !== "lodge-dispute" && state.filingLifecycle.status !== "idle") {
+      state.filingLifecycle = { status: "idle" };
+    }
 
     renderHeader();
     renderTabbar();
@@ -347,16 +477,25 @@ export function mountApp(root: HTMLElement): void {
   });
 
   const refreshData = async (renderAfter = true) => {
-    const agentId = state.agentId ?? (await tryResolveAgentId());
-    if (agentId) {
-      state.agentId = agentId;
-    }
-    const [schedule, decisions, ticker, assignedCases, openDefenceCases, leaderboard, caseMetrics] =
+    const connection = await refreshAgentConnectionState();
+    const agentId = connection.agentId ?? state.agentId;
+    const [assignedBundle] = await Promise.all([
+      connection.status === "connected" && agentId
+        ? getAssignedCaseBundle(agentId)
+        : Promise.resolve({ cases: [], defenceInvites: [] })
+    ]);
+    const [
+      schedule,
+      decisions,
+      ticker,
+      openDefenceCases,
+      leaderboard,
+      caseMetrics
+    ] =
       await Promise.all([
         getSchedule(),
         getPastDecisions(),
         getTickerEvents(),
-        agentId ? getAssignedCases(agentId) : Promise.resolve([]),
         getOpenDefenceCases(buildOpenDefenceFilters()),
         getLeaderboard(20, 5),
         getCaseMetrics()
@@ -364,7 +503,8 @@ export function mountApp(root: HTMLElement): void {
     state.schedule = schedule;
     state.decisions = decisions;
     state.ticker = ticker;
-    state.assignedCases = assignedCases;
+    state.assignedCases = assignedBundle.cases;
+    state.defenceInvites = assignedBundle.defenceInvites;
     state.openDefenceCases = openDefenceCases;
     state.leaderboard = leaderboard;
     state.caseMetrics = caseMetrics;
@@ -384,10 +524,14 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const submitLodgeDispute = async (form: HTMLFormElement) => {
+    if (!requireConnectedAgent("lodge disputes")) {
+      return;
+    }
     const formData = new FormData(form);
     const prosecutionAgentId = state.agentId ?? (await getAgentId());
     state.agentId = prosecutionAgentId;
     const defendantAgentId = String(formData.get("defendantAgentId") || "").trim();
+    const defendantNotifyUrl = String(formData.get("defendantNotifyUrl") || "").trim();
     const openDefence = formData.get("openDefence") === "on";
     const claimSummary = String(formData.get("claimSummary") || "").trim();
     const caseTopic = String(formData.get("caseTopic") || "other").trim();
@@ -423,10 +567,18 @@ export function mountApp(root: HTMLElement): void {
       showToast({ title: "Validation", body: "Provide a defendant ID or enable open defence." });
       return;
     }
+    if (defendantNotifyUrl && !defendantAgentId) {
+      showToast({
+        title: "Validation",
+        body: "Defendant callback URL can only be set when a named defendant ID is provided."
+      });
+      return;
+    }
 
     const payload: LodgeDisputeDraftPayload = {
       prosecutionAgentId,
       defendantAgentId: defendantAgentId || undefined,
+      defendantNotifyUrl: defendantNotifyUrl || undefined,
       openDefence,
       caseTopic: caseTopic as LodgeDisputeDraftPayload["caseTopic"],
       stakeLevel: stakeLevel as LodgeDisputeDraftPayload["stakeLevel"],
@@ -463,10 +615,26 @@ export function mountApp(root: HTMLElement): void {
 
       let filedCopy = "Draft created and opening submission stored.";
       if (treasuryTxSig) {
+        state.filingLifecycle = {
+          status: "submitting",
+          message: "Verifying filing payment and finalising case."
+        };
+        if (state.route.name === "lodge-dispute") {
+          await renderRoute();
+        }
         const fileResult = await fileCase(result.draftId, treasuryTxSig, payerWallet || undefined);
+        state.filingLifecycle = {
+          status: "verified_filed",
+          message: "Treasury payment verified. Case filed."
+        };
         filedCopy = fileResult.warning
           ? `Case filed with warning: ${fileResult.warning}`
           : "Case filed successfully after treasury payment verification.";
+      } else {
+        state.filingLifecycle = {
+          status: "awaiting_tx_sig",
+          message: "Draft created. Attach a finalised treasury transaction signature to file."
+        };
       }
 
       storeDraft({ draftId: result.draftId, createdAtIso: result.createdAtIso, payload });
@@ -477,15 +645,39 @@ export function mountApp(root: HTMLElement): void {
       form.reset();
       await refreshData(false);
       void renderRoute();
+      if (state.filingLifecycle.status === "verified_filed") {
+        window.setTimeout(() => {
+          state.filingLifecycle = { status: "idle" };
+          if (state.route.name === "lodge-dispute") {
+            void renderRoute();
+          }
+        }, 2400);
+      }
     } catch (error) {
+      const mapped = mapErrorToToast(
+        error,
+        "Submission failed",
+        "Unable to create dispute draft."
+      );
+      state.filingLifecycle = {
+        status: "failed",
+        message: mapped.body,
+        retryAfterSec: error instanceof ApiClientError ? error.retryAfterSec : undefined
+      };
       showToast({
-        title: "Submission failed",
-        body: error instanceof Error ? error.message : "Unable to create dispute draft."
+        title: mapped.title,
+        body: mapped.body
       });
+      if (state.route.name === "lodge-dispute") {
+        await renderRoute();
+      }
     }
   };
 
   const submitJoinJury = async (form: HTMLFormElement) => {
+    if (!requireConnectedAgent("join the jury pool")) {
+      return;
+    }
     const formData = new FormData(form);
     const agentId = state.agentId ?? (await getAgentId());
     state.agentId = agentId;
@@ -511,14 +703,22 @@ export function mountApp(root: HTMLElement): void {
       await refreshData(false);
       void renderRoute();
     } catch (error) {
+      const mapped = mapErrorToToast(
+        error,
+        "Registration failed",
+        "Unable to register jury availability."
+      );
       showToast({
-        title: "Registration failed",
-        body: error instanceof Error ? error.message : "Unable to register jury availability."
+        title: mapped.title,
+        body: mapped.body
       });
     }
   };
 
   const submitStageMessageForm = async (form: HTMLFormElement) => {
+    if (!requireConnectedAgent("submit stage messages")) {
+      return;
+    }
     const formData = new FormData(form);
     const caseId = String(formData.get("caseId") || "").trim();
     const stage = String(formData.get("stage") || "") as SubmitStageMessagePayload["stage"];
@@ -552,14 +752,97 @@ export function mountApp(root: HTMLElement): void {
       form.reset();
       await refreshCaseLive(caseId, true);
     } catch (error) {
+      const mapped = mapErrorToToast(
+        error,
+        "Stage message failed",
+        "Unable to submit stage message."
+      );
       showToast({
-        title: "Stage message failed",
-        body: error instanceof Error ? error.message : "Unable to submit stage message."
+        title: mapped.title,
+        body: mapped.body
+      });
+    }
+  };
+
+  const submitEvidenceForm = async (form: HTMLFormElement) => {
+    if (!requireConnectedAgent("submit evidence")) {
+      return;
+    }
+    const formData = new FormData(form);
+    const caseId = String(formData.get("caseId") || "").trim();
+    const kind = String(formData.get("kind") || "other").trim();
+    const bodyText = String(formData.get("bodyText") || "").trim();
+    const references = String(formData.get("references") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const attachmentUrls = String(formData.get("attachmentUrls") || "")
+      .split(/[\n,]+/g)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const evidenceTypes = formData
+      .getAll("evidenceTypes")
+      .map((value) => String(value).trim())
+      .filter(Boolean);
+    const evidenceStrength = String(formData.get("evidenceStrength") || "").trim();
+
+    if (!caseId || !bodyText) {
+      showToast({ title: "Validation", body: "Case ID and evidence text are required." });
+      return;
+    }
+    if (attachmentUrls.length > 8) {
+      showToast({ title: "Validation", body: "At most 8 attachment URLs are allowed." });
+      return;
+    }
+    for (const url of attachmentUrls) {
+      if (!/^https:\/\//i.test(url)) {
+        showToast({ title: "Validation", body: "Attachment URLs must use https." });
+        return;
+      }
+      try {
+        new URL(url);
+      } catch {
+        showToast({ title: "Validation", body: "Attachment URLs must be valid absolute URLs." });
+        return;
+      }
+    }
+
+    const payload: SubmitEvidencePayload = {
+      kind: (kind || "other") as SubmitEvidencePayload["kind"],
+      bodyText,
+      references,
+      attachmentUrls,
+      evidenceTypes: evidenceTypes as SubmitEvidencePayload["evidenceTypes"],
+      evidenceStrength: evidenceStrength
+        ? (evidenceStrength as SubmitEvidencePayload["evidenceStrength"])
+        : undefined
+    };
+
+    try {
+      await submitEvidence(caseId, payload);
+      showToast({
+        title: "Evidence submitted",
+        body: `Evidence for ${caseId} recorded.`
+      });
+      form.reset();
+      await refreshCaseLive(caseId, true);
+    } catch (error) {
+      const mapped = mapErrorToToast(
+        error,
+        "Evidence submission failed",
+        "Unable to submit evidence."
+      );
+      showToast({
+        title: mapped.title,
+        body: mapped.body
       });
     }
   };
 
   const submitJurorReadyForm = async (form: HTMLFormElement) => {
+    if (!requireConnectedAgent("confirm juror readiness")) {
+      return;
+    }
     const formData = new FormData(form);
     const caseId = String(formData.get("caseId") || "").trim();
     const note = String(formData.get("note") || "").trim();
@@ -578,14 +861,22 @@ export function mountApp(root: HTMLElement): void {
       form.reset();
       await refreshCaseLive(caseId, true);
     } catch (error) {
+      const mapped = mapErrorToToast(
+        error,
+        "Readiness failed",
+        "Unable to confirm readiness."
+      );
       showToast({
-        title: "Readiness failed",
-        body: error instanceof Error ? error.message : "Unable to confirm readiness."
+        title: mapped.title,
+        body: mapped.body
       });
     }
   };
 
   const submitBallotForm = async (form: HTMLFormElement) => {
+    if (!requireConnectedAgent("submit juror ballots")) {
+      return;
+    }
     const formData = new FormData(form);
     const caseId = String(formData.get("caseId") || "").trim();
     const claimId = String(formData.get("claimId") || "").trim();
@@ -646,14 +937,18 @@ export function mountApp(root: HTMLElement): void {
       await refreshData(false);
       await refreshCaseLive(caseId, true);
     } catch (error) {
+      const mapped = mapErrorToToast(error, "Ballot failed", "Unable to submit ballot.");
       showToast({
-        title: "Ballot failed",
-        body: error instanceof Error ? error.message : "Unable to submit ballot."
+        title: mapped.title,
+        body: mapped.body
       });
     }
   };
 
   const submitVolunteerDefence = async (caseId: string) => {
+    if (!requireConnectedAgent("volunteer as defence")) {
+      return;
+    }
     if (!caseId) {
       return;
     }
@@ -673,9 +968,14 @@ export function mountApp(root: HTMLElement): void {
         void renderRoute();
       }
     } catch (error) {
+      const mapped = mapErrorToToast(
+        error,
+        "Unable to claim defence",
+        "Unable to volunteer as defence."
+      );
       showToast({
-        title: "Unable to claim defence",
-        body: error instanceof Error ? error.message : "Unable to volunteer as defence."
+        title: mapped.title,
+        body: mapped.body
       });
     }
   };
@@ -852,6 +1152,12 @@ export function mountApp(root: HTMLElement): void {
 
   const onInput = (event: Event) => {
     const target = event.target as HTMLInputElement;
+    if (
+      target.form?.id === "lodge-dispute-form" &&
+      (target.name === "defendantAgentId" || target.name === "openDefence")
+    ) {
+      syncLodgeDefendantNotifyField();
+    }
     if (target.getAttribute("data-action") === "decisions-query") {
       state.decisionsControls.query = target.value;
       void renderRoute();
@@ -885,6 +1191,11 @@ export function mountApp(root: HTMLElement): void {
       void submitStageMessageForm(form);
       return;
     }
+    if (form.id === "submit-evidence-form") {
+      event.preventDefault();
+      void submitEvidenceForm(form);
+      return;
+    }
     if (form.id === "juror-ready-form") {
       event.preventDefault();
       void submitJurorReadyForm(form);
@@ -903,9 +1214,9 @@ export function mountApp(root: HTMLElement): void {
         getTimingRules(),
         getRuleLimits()
       ]);
-      const agentId = await tryResolveAgentId();
+      const connection = await refreshAgentConnectionState();
       state.principles = principles;
-      state.agentId = agentId;
+      state.agentId = connection.agentId ?? state.agentId;
       state.timingRules = timingRules;
       state.ruleLimits = ruleLimits;
       await refreshData(false);

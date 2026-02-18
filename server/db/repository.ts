@@ -11,6 +11,8 @@ import type {
   CaseVoidReason,
   ClaimOutcome,
   CreateCaseDraftPayload,
+  DefenceInviteStatus,
+  DefenceInviteSummary,
   DefenceState,
   EvidenceStrength,
   EvidenceTypeLabel,
@@ -158,6 +160,10 @@ export interface CaseRecord {
   defenceState: DefenceState;
   defenceAssignedAtIso?: string;
   defenceWindowDeadlineIso?: string;
+  defenceInviteStatus: DefenceInviteStatus;
+  defenceInviteAttempts: number;
+  defenceInviteLastAttemptAtIso?: string;
+  defenceInviteLastError?: string;
   openDefence: boolean;
   caseTopic: CaseTopic;
   stakeLevel: StakeLevel;
@@ -177,6 +183,7 @@ export interface CaseRecord {
   outcomeDetail?: unknown;
   replacementCountReady: number;
   replacementCountVote: number;
+  treasuryTxSig?: string;
   prosecutionPrinciplesCited: number[];
   defencePrinciplesCited: number[];
   scheduledForIso?: string;
@@ -192,6 +199,7 @@ export interface CaseRecord {
   sealTxSig?: string;
   sealUri?: string;
   filingWarning?: string;
+  defendantNotifyUrl?: string;
 }
 
 export interface ClaimRecord {
@@ -223,6 +231,7 @@ export interface EvidenceRecord {
   kind: string;
   bodyText: string;
   references: string[];
+  attachmentUrls: string[];
   bodyHash: string;
   evidenceTypes: EvidenceTypeLabel[];
   evidenceStrength?: EvidenceStrength;
@@ -269,6 +278,15 @@ export interface IdempotencyRecord {
   requestHash: string;
 }
 
+export interface AgentCapabilityRecord {
+  tokenHash: string;
+  agentId: string;
+  scope: string;
+  revokedAtIso?: string;
+  expiresAtIso?: string;
+  createdAtIso: string;
+}
+
 export interface DefenceClaimResult {
   status:
     | "assigned_accepted"
@@ -281,32 +299,147 @@ export interface DefenceClaimResult {
   caseRecord: CaseRecord;
 }
 
-export function upsertAgent(db: Db, agentId: string, jurorEligible = true): void {
+export function upsertAgent(
+  db: Db,
+  agentId: string,
+  jurorEligible = true,
+  notifyUrl?: string
+): void {
   const now = nowIso();
   db.prepare(
     `
-    INSERT INTO agents (agent_id, juror_eligible, created_at, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(agent_id) DO UPDATE SET juror_eligible = excluded.juror_eligible, updated_at = excluded.updated_at
+    INSERT INTO agents (agent_id, juror_eligible, notify_url, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(agent_id) DO UPDATE SET
+      juror_eligible = excluded.juror_eligible,
+      notify_url = COALESCE(excluded.notify_url, agents.notify_url),
+      updated_at = excluded.updated_at
     `
-  ).run(agentId, jurorEligible ? 1 : 0, now, now);
+  ).run(agentId, jurorEligible ? 1 : 0, notifyUrl ?? null, now, now);
 }
 
 export function getAgent(
   db: Db,
   agentId: string
-): { agentId: string; banned: boolean; jurorEligible: boolean } | null {
+): { agentId: string; banned: boolean; jurorEligible: boolean; notifyUrl?: string } | null {
   const row = db
-    .prepare(`SELECT agent_id, banned, juror_eligible FROM agents WHERE agent_id = ?`)
-    .get(agentId) as { agent_id: string; banned: number; juror_eligible: number } | undefined;
+    .prepare(`SELECT agent_id, banned, juror_eligible, notify_url FROM agents WHERE agent_id = ?`)
+    .get(agentId) as
+    | { agent_id: string; banned: number; juror_eligible: number; notify_url: string | null }
+    | undefined;
   if (!row) {
     return null;
   }
   return {
     agentId: row.agent_id,
     banned: row.banned === 1,
-    jurorEligible: row.juror_eligible === 1
+    jurorEligible: row.juror_eligible === 1,
+    notifyUrl: row.notify_url ?? undefined
   };
+}
+
+export function setAgentBanned(db: Db, input: { agentId: string; banned: boolean }): void {
+  const now = nowIso();
+  db.prepare(`UPDATE agents SET banned = ?, updated_at = ? WHERE agent_id = ?`).run(
+    input.banned ? 1 : 0,
+    now,
+    input.agentId
+  );
+}
+
+export function countActiveAgentCapabilities(db: Db, agentId: string, atIso = nowIso()): number {
+  const row = db
+    .prepare(
+      `
+      SELECT COUNT(*) AS count
+      FROM agent_capabilities
+      WHERE agent_id = ?
+        AND revoked_at IS NULL
+        AND (expires_at IS NULL OR expires_at > ?)
+      `
+    )
+    .get(agentId, atIso) as { count: number } | undefined;
+  return Number(row?.count ?? 0);
+}
+
+export function createAgentCapability(
+  db: Db,
+  input: {
+    tokenHash: string;
+    agentId: string;
+    scope?: string;
+    expiresAtIso?: string;
+  }
+): AgentCapabilityRecord {
+  const createdAtIso = nowIso();
+  db.prepare(
+    `
+    INSERT INTO agent_capabilities (
+      token_hash,
+      agent_id,
+      scope,
+      revoked_at,
+      expires_at,
+      created_at
+    ) VALUES (?, ?, ?, NULL, ?, ?)
+    `
+  ).run(input.tokenHash, input.agentId, input.scope ?? "writes", input.expiresAtIso ?? null, createdAtIso);
+
+  return {
+    tokenHash: input.tokenHash,
+    agentId: input.agentId,
+    scope: input.scope ?? "writes",
+    expiresAtIso: input.expiresAtIso,
+    createdAtIso
+  };
+}
+
+export function getAgentCapabilityByHash(db: Db, tokenHash: string): AgentCapabilityRecord | null {
+  const row = db
+    .prepare(
+      `
+      SELECT token_hash, agent_id, scope, revoked_at, expires_at, created_at
+      FROM agent_capabilities
+      WHERE token_hash = ?
+      `
+    )
+    .get(tokenHash) as
+    | {
+        token_hash: string;
+        agent_id: string;
+        scope: string;
+        revoked_at: string | null;
+        expires_at: string | null;
+        created_at: string;
+      }
+    | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    tokenHash: row.token_hash,
+    agentId: row.agent_id,
+    scope: row.scope,
+    revokedAtIso: row.revoked_at ?? undefined,
+    expiresAtIso: row.expires_at ?? undefined,
+    createdAtIso: row.created_at
+  };
+}
+
+export function revokeAgentCapabilityByHash(
+  db: Db,
+  input: { tokenHash: string; agentId?: string }
+): boolean {
+  const params: Array<string | null> = [nowIso(), input.tokenHash];
+  let sql = `UPDATE agent_capabilities SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`;
+  if (input.agentId) {
+    sql += ` AND agent_id = ?`;
+    params.push(input.agentId);
+  }
+  const result = db.prepare(sql).run(...params);
+  return Number(result.changes ?? 0) > 0;
 }
 
 export function setJurorAvailability(
@@ -344,12 +477,17 @@ export function createCaseDraft(
       defence_agent_id,
       defence_state,
       open_defence,
+      defendant_notify_url,
+      defence_invite_status,
+      defence_invite_attempts,
+      defence_invite_last_attempt_at,
+      defence_invite_last_error,
       case_topic,
       stake_level,
       summary,
       requested_remedy,
       created_at
-    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, 'none', 0, NULL, NULL, ?, ?, ?, ?, ?)
     `
   ).run(
     caseId,
@@ -359,6 +497,7 @@ export function createCaseDraft(
     null,
     payload.defendantAgentId ? "invited" : "none",
     payload.openDefence ? 1 : 0,
+    payload.defendantNotifyUrl ?? null,
     payload.caseTopic ?? "other",
     payload.stakeLevel ?? "medium",
     summary,
@@ -423,6 +562,14 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     defenceWindowDeadlineIso: row.defence_window_deadline
       ? String(row.defence_window_deadline)
       : undefined,
+    defenceInviteStatus: (String(row.defence_invite_status || "none") as DefenceInviteStatus),
+    defenceInviteAttempts: Number(row.defence_invite_attempts ?? 0),
+    defenceInviteLastAttemptAtIso: row.defence_invite_last_attempt_at
+      ? String(row.defence_invite_last_attempt_at)
+      : undefined,
+    defenceInviteLastError: row.defence_invite_last_error
+      ? String(row.defence_invite_last_error)
+      : undefined,
     openDefence: Number(row.open_defence) === 1,
     caseTopic: (String(row.case_topic ?? "other") as CaseTopic),
     stakeLevel: (String(row.stake_level ?? "medium") as StakeLevel),
@@ -444,6 +591,7 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     outcomeDetail: row.outcome_detail_json ? parseJson(String(row.outcome_detail_json)) : undefined,
     replacementCountReady: Number(row.replacement_count_ready ?? 0),
     replacementCountVote: Number(row.replacement_count_vote ?? 0),
+    treasuryTxSig: row.treasury_tx_sig ? String(row.treasury_tx_sig) : undefined,
     prosecutionPrinciplesCited: normalisePrincipleIds(
       maybeJson(row.prosecution_principles_cited_json as string | null, [])
     ),
@@ -464,7 +612,8 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     sealAssetId: row.seal_asset_id ? String(row.seal_asset_id) : undefined,
     sealTxSig: row.seal_tx_sig ? String(row.seal_tx_sig) : undefined,
     sealUri: row.seal_uri ? String(row.seal_uri) : undefined,
-    filingWarning: row.filing_warning ? String(row.filing_warning) : undefined
+    filingWarning: row.filing_warning ? String(row.filing_warning) : undefined,
+    defendantNotifyUrl: row.defendant_notify_url ? String(row.defendant_notify_url) : undefined
   };
 }
 
@@ -483,6 +632,11 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         defence_state,
         defence_assigned_at,
         defence_window_deadline,
+        defendant_notify_url,
+        defence_invite_status,
+        defence_invite_attempts,
+        defence_invite_last_attempt_at,
+        defence_invite_last_error,
         open_defence,
         case_topic,
         stake_level,
@@ -502,6 +656,7 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         outcome_detail_json,
         replacement_count_ready,
         replacement_count_vote,
+        treasury_tx_sig,
         prosecution_principles_cited_json,
         defence_principles_cited_json,
         scheduled_for,
@@ -549,6 +704,11 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         defence_state,
         defence_assigned_at,
         defence_window_deadline,
+        defendant_notify_url,
+        defence_invite_status,
+        defence_invite_attempts,
+        defence_invite_last_attempt_at,
+        defence_invite_last_error,
         open_defence,
         case_topic,
         stake_level,
@@ -568,6 +728,7 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         outcome_detail_json,
         replacement_count_ready,
         replacement_count_vote,
+        treasury_tx_sig,
         prosecution_principles_cited_json,
         defence_principles_cited_json,
         scheduled_for,
@@ -632,7 +793,7 @@ export function countEvidenceForCase(
 export function addEvidence(db: Db, input: Omit<EvidenceRecord, "createdAtIso">): EvidenceRecord {
   const createdAtIso = nowIso();
   db.prepare(
-    `INSERT INTO evidence_items (evidence_id, case_id, submitted_by, kind, body_text, references_json, body_hash, evidence_types_json, evidence_strength, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO evidence_items (evidence_id, case_id, submitted_by, kind, body_text, references_json, attachment_urls_json, body_hash, evidence_types_json, evidence_strength, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.evidenceId,
     input.caseId,
@@ -640,6 +801,7 @@ export function addEvidence(db: Db, input: Omit<EvidenceRecord, "createdAtIso">)
     input.kind,
     input.bodyText,
     canonicalJson(input.references),
+    canonicalJson(input.attachmentUrls),
     input.bodyHash,
     canonicalJson(input.evidenceTypes),
     input.evidenceStrength ?? null,
@@ -651,7 +813,7 @@ export function addEvidence(db: Db, input: Omit<EvidenceRecord, "createdAtIso">)
 export function listEvidenceByCase(db: Db, caseId: string): EvidenceRecord[] {
   const rows = db
     .prepare(
-      `SELECT evidence_id, case_id, submitted_by, kind, body_text, references_json, body_hash, evidence_types_json, evidence_strength, created_at FROM evidence_items WHERE case_id = ? ORDER BY created_at ASC`
+      `SELECT evidence_id, case_id, submitted_by, kind, body_text, references_json, attachment_urls_json, body_hash, evidence_types_json, evidence_strength, created_at FROM evidence_items WHERE case_id = ? ORDER BY created_at ASC`
     )
     .all(caseId) as Array<{
     evidence_id: string;
@@ -660,6 +822,7 @@ export function listEvidenceByCase(db: Db, caseId: string): EvidenceRecord[] {
     kind: string;
     body_text: string;
     references_json: string;
+    attachment_urls_json: string | null;
     body_hash: string;
     evidence_types_json: string | null;
     evidence_strength: EvidenceStrength | null;
@@ -673,6 +836,7 @@ export function listEvidenceByCase(db: Db, caseId: string): EvidenceRecord[] {
     kind: row.kind,
     bodyText: row.body_text,
     references: maybeJson<string[]>(row.references_json, []),
+    attachmentUrls: maybeJson<string[]>(row.attachment_urls_json, []),
     bodyHash: row.body_hash,
     evidenceTypes: maybeJson<EvidenceTypeLabel[]>(row.evidence_types_json, []),
     evidenceStrength: row.evidence_strength ?? undefined,
@@ -821,21 +985,27 @@ export function setCaseFiled(
     warning?: string;
     scheduleDelaySec: number;
     defenceCutoffSec: number;
+    scheduleImmediately?: boolean;
+    inviteStatus?: DefenceInviteStatus;
   }
 ): void {
   const now = nowIso();
-  const scheduleAt = new Date(Date.now() + input.scheduleDelaySec * 1000).toISOString();
+  const scheduleImmediately = input.scheduleImmediately ?? true;
+  const scheduleAt = scheduleImmediately
+    ? new Date(Date.now() + input.scheduleDelaySec * 1000).toISOString()
+    : null;
   const defenceWindowDeadline = new Date(Date.now() + input.defenceCutoffSec * 1000).toISOString();
   db.prepare(
-    `UPDATE cases SET status = 'filed', session_stage = 'pre_session', treasury_tx_sig = ?, filed_at = ?, filing_warning = ?, scheduled_for = ?, countdown_end_at = ?, countdown_total_ms = ?, defence_window_deadline = ?, decided_at = NULL, outcome = NULL, outcome_detail_json = NULL, void_reason_group = NULL, replacement_count_ready = 0, replacement_count_vote = 0, prosecution_principles_cited_json = '[]', defence_principles_cited_json = '[]' WHERE case_id = ?`
+    `UPDATE cases SET status = 'filed', session_stage = 'pre_session', treasury_tx_sig = ?, filed_at = ?, filing_warning = ?, scheduled_for = ?, countdown_end_at = ?, countdown_total_ms = ?, defence_window_deadline = ?, defence_invite_status = COALESCE(?, defence_invite_status), defence_invite_attempts = 0, defence_invite_last_attempt_at = NULL, defence_invite_last_error = NULL, decided_at = NULL, outcome = NULL, outcome_detail_json = NULL, void_reason_group = NULL, replacement_count_ready = 0, replacement_count_vote = 0, prosecution_principles_cited_json = '[]', defence_principles_cited_json = '[]' WHERE case_id = ?`
   ).run(
     input.txSig,
     now,
     input.warning ?? null,
     scheduleAt,
     scheduleAt,
-    input.scheduleDelaySec * 1000,
+    scheduleImmediately ? input.scheduleDelaySec * 1000 : null,
     defenceWindowDeadline,
+    input.inviteStatus ?? null,
     input.caseId
   );
 
@@ -843,7 +1013,7 @@ export function setCaseFiled(
     caseId: input.caseId,
     currentStage: "pre_session",
     stageStartedAtIso: now,
-    stageDeadlineAtIso: scheduleAt,
+    stageDeadlineAtIso: scheduleAt ?? defenceWindowDeadline,
     scheduledSessionStartAtIso: scheduleAt,
     votingHardDeadlineAtIso: null,
     voidReason: null,
@@ -864,6 +1034,7 @@ export function claimDefenceAssignment(
     agentId: string;
     nowIso: string;
     namedExclusiveSec: number;
+    scheduleDelaySec: number;
   }
 ): DefenceClaimResult {
   db.exec("BEGIN IMMEDIATE");
@@ -882,6 +1053,11 @@ export function claimDefenceAssignment(
           defence_state,
           defence_assigned_at,
           defence_window_deadline,
+          defendant_notify_url,
+          defence_invite_status,
+          defence_invite_attempts,
+          defence_invite_last_attempt_at,
+          defence_invite_last_error,
           open_defence,
           case_topic,
           stake_level,
@@ -988,7 +1164,7 @@ export function claimDefenceAssignment(
       .prepare(
         `
         UPDATE cases
-        SET defence_agent_id = ?, defence_state = ?, defence_assigned_at = ?
+        SET defence_agent_id = ?, defence_state = ?, defence_assigned_at = ?, defence_invite_last_error = NULL
         WHERE case_id = ? AND defence_agent_id IS NULL
         `
       )
@@ -998,6 +1174,34 @@ export function claimDefenceAssignment(
       const refreshed = getCaseById(db, input.caseId) ?? caseRecord;
       db.exec("COMMIT");
       return { status: "already_taken", caseRecord: refreshed };
+    }
+
+    // For named-defendant filings, session scheduling starts one hour after defence acceptance.
+    if (!caseRecord.scheduledForIso && caseRecord.status === "filed") {
+      const scheduleAtIso = new Date(
+        new Date(input.nowIso).getTime() + input.scheduleDelaySec * 1000
+      ).toISOString();
+      db.prepare(
+        `
+        UPDATE cases
+        SET scheduled_for = ?, countdown_end_at = ?, countdown_total_ms = ?
+        WHERE case_id = ?
+        `
+      ).run(scheduleAtIso, scheduleAtIso, input.scheduleDelaySec * 1000, input.caseId);
+
+      const runtime = getCaseRuntime(db, input.caseId);
+      if (runtime?.currentStage === "pre_session") {
+        upsertCaseRuntime(db, {
+          caseId: input.caseId,
+          currentStage: runtime.currentStage,
+          stageStartedAtIso: runtime.stageStartedAtIso,
+          stageDeadlineAtIso: scheduleAtIso,
+          scheduledSessionStartAtIso: scheduleAtIso,
+          votingHardDeadlineAtIso: runtime.votingHardDeadlineAtIso ?? null,
+          voidReason: runtime.voidReason ?? null,
+          voidedAtIso: runtime.voidedAtIso ?? null
+        });
+      }
     }
 
     const assigned = getCaseById(db, input.caseId) ?? caseRecord;
@@ -1929,6 +2133,150 @@ export function listAssignedCasesForJuror(db: Db, agentId: string): AssignedCase
   }));
 }
 
+export interface DefenceInviteDispatchTarget {
+  caseId: string;
+  summary: string;
+  prosecutionAgentId: string;
+  defendantAgentId: string;
+  notifyUrl?: string;
+  responseDeadlineAtIso?: string;
+  inviteStatus: DefenceInviteStatus;
+  inviteAttempts: number;
+  inviteLastAttemptAtIso?: string;
+  inviteLastError?: string;
+}
+
+export function getDefenceInviteDispatchTarget(
+  db: Db,
+  caseId: string
+): DefenceInviteDispatchTarget | null {
+  const row = db
+    .prepare(
+      `
+      SELECT
+        c.case_id,
+        c.summary,
+        c.prosecution_agent_id,
+        c.defendant_agent_id,
+        c.defendant_notify_url,
+        c.defence_window_deadline,
+        c.defence_invite_status,
+        c.defence_invite_attempts,
+        c.defence_invite_last_attempt_at,
+        c.defence_invite_last_error,
+        a.notify_url AS agent_notify_url
+      FROM cases c
+      LEFT JOIN agents a ON a.agent_id = c.defendant_agent_id
+      WHERE c.case_id = ?
+      LIMIT 1
+      `
+    )
+    .get(caseId) as
+    | {
+        case_id: string;
+        summary: string;
+        prosecution_agent_id: string;
+        defendant_agent_id: string | null;
+        defendant_notify_url: string | null;
+        defence_window_deadline: string | null;
+        defence_invite_status: DefenceInviteStatus | null;
+        defence_invite_attempts: number | null;
+        defence_invite_last_attempt_at: string | null;
+        defence_invite_last_error: string | null;
+        agent_notify_url: string | null;
+      }
+    | undefined;
+
+  if (!row || !row.defendant_agent_id) {
+    return null;
+  }
+
+  return {
+    caseId: row.case_id,
+    summary: row.summary,
+    prosecutionAgentId: row.prosecution_agent_id,
+    defendantAgentId: row.defendant_agent_id,
+    notifyUrl: row.defendant_notify_url ?? row.agent_notify_url ?? undefined,
+    responseDeadlineAtIso: row.defence_window_deadline ?? undefined,
+    inviteStatus: (row.defence_invite_status ?? "none") as DefenceInviteStatus,
+    inviteAttempts: Number(row.defence_invite_attempts ?? 0),
+    inviteLastAttemptAtIso: row.defence_invite_last_attempt_at ?? undefined,
+    inviteLastError: row.defence_invite_last_error ?? undefined
+  };
+}
+
+export function recordDefenceInviteAttempt(
+  db: Db,
+  input: {
+    caseId: string;
+    status: DefenceInviteStatus;
+    attemptedAtIso: string;
+    error?: string;
+  }
+): void {
+  db.prepare(
+    `
+    UPDATE cases
+    SET
+      defence_invite_status = ?,
+      defence_invite_attempts = defence_invite_attempts + 1,
+      defence_invite_last_attempt_at = ?,
+      defence_invite_last_error = ?
+    WHERE case_id = ?
+    `
+  ).run(input.status, input.attemptedAtIso, input.error ?? null, input.caseId);
+}
+
+export function listDefenceInvitesForAgent(db: Db, agentId: string): DefenceInviteSummary[] {
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        case_id,
+        summary,
+        prosecution_agent_id,
+        defendant_agent_id,
+        filed_at,
+        defence_window_deadline,
+        defence_invite_status,
+        defence_invite_attempts,
+        defence_invite_last_attempt_at,
+        defence_invite_last_error
+      FROM cases
+      WHERE defendant_agent_id = ?
+        AND defence_agent_id IS NULL
+        AND status IN ('filed', 'jury_selected', 'voting')
+      ORDER BY filed_at DESC, created_at DESC
+      `
+    )
+    .all(agentId) as Array<{
+    case_id: string;
+    summary: string;
+    prosecution_agent_id: string;
+    defendant_agent_id: string;
+    filed_at: string | null;
+    defence_window_deadline: string | null;
+    defence_invite_status: DefenceInviteStatus | null;
+    defence_invite_attempts: number | null;
+    defence_invite_last_attempt_at: string | null;
+    defence_invite_last_error: string | null;
+  }>;
+
+  return rows.map((row) => ({
+    caseId: row.case_id,
+    summary: row.summary,
+    prosecutionAgentId: row.prosecution_agent_id,
+    defendantAgentId: row.defendant_agent_id,
+    filedAtIso: row.filed_at ?? undefined,
+    responseDeadlineAtIso: row.defence_window_deadline ?? undefined,
+    inviteStatus: (row.defence_invite_status ?? "none") as DefenceInviteStatus,
+    inviteAttempts: Number(row.defence_invite_attempts ?? 0),
+    inviteLastAttemptAtIso: row.defence_invite_last_attempt_at ?? undefined,
+    inviteLastError: row.defence_invite_last_error ?? undefined,
+    sessionStartsAfterAcceptanceSeconds: 3600
+  }));
+}
+
 function mapUiStatus(caseRecord: CaseRecord): "scheduled" | "active" {
   if (
     ["jury_readiness", "opening_addresses", "evidence", "closing_addresses", "summing_up", "voting"].includes(
@@ -1982,6 +2330,11 @@ export function listOpenDefenceCases(
         defence_state,
         defence_assigned_at,
         defence_window_deadline,
+        defendant_notify_url,
+        defence_invite_status,
+        defence_invite_attempts,
+        defence_invite_last_attempt_at,
+        defence_invite_last_error,
         open_defence,
         case_topic,
         stake_level,
@@ -2359,7 +2712,7 @@ export function getIdempotencyRecord(
 ): IdempotencyRecord | null {
   const row = db
     .prepare(
-      `SELECT response_status, response_json, request_hash FROM idempotency_records WHERE agent_id = ? AND method = ? AND path = ? AND idempotency_key = ? AND expires_at > ? LIMIT 1`
+      `SELECT response_status, response_json, request_hash FROM idempotency_records WHERE agent_id = ? AND method = ? AND path = ? AND idempotency_key = ? AND status = 'complete' AND expires_at > ? LIMIT 1`
     )
     .get(input.agentId, input.method, input.path, input.idempotencyKey, nowIso()) as
     | {
@@ -2378,6 +2731,136 @@ export function getIdempotencyRecord(
     responseJson: maybeJson(row.response_json, {}),
     requestHash: row.request_hash
   };
+}
+
+export type TryClaimIdempotencyResult =
+  | { claimed: true }
+  | { claimed: false; replay: { status: number; payload: unknown } };
+
+export function tryClaimIdempotency(
+  db: Db,
+  input: {
+    agentId: string;
+    method: string;
+    path: string;
+    caseId?: string;
+    idempotencyKey: string;
+    requestHash: string;
+    ttlSec: number;
+  }
+): TryClaimIdempotencyResult {
+  const createdAt = nowIso();
+  const expiresAt = new Date(Date.now() + input.ttlSec * 1000).toISOString();
+
+  try {
+    db.prepare(
+      `
+      INSERT INTO idempotency_records (
+        agent_id,
+        method,
+        path,
+        case_id,
+        idempotency_key,
+        request_hash,
+        response_status,
+        response_json,
+        status,
+        created_at,
+        expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, '{}', 'in_progress', ?, ?)
+    `
+    ).run(
+      input.agentId,
+      input.method,
+      input.path,
+      input.caseId ?? null,
+      input.idempotencyKey,
+      input.requestHash,
+      createdAt,
+      expiresAt
+    );
+    return { claimed: true };
+  } catch (err) {
+    const sqliteErr = err as { code?: string; message?: string };
+    const isUniqueConstraint =
+      sqliteErr.code === "SQLITE_CONSTRAINT_UNIQUE" ||
+      (typeof sqliteErr.message === "string" &&
+        sqliteErr.message.toLowerCase().includes("unique constraint failed"));
+    if (!isUniqueConstraint) {
+      throw err;
+    }
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT request_hash, status, response_status, response_json FROM idempotency_records WHERE agent_id = ? AND method = ? AND path = ? AND idempotency_key = ? AND expires_at > ? LIMIT 1`
+    )
+    .get(input.agentId, input.method, input.path, input.idempotencyKey, nowIso()) as
+    | {
+        request_hash: string;
+        status: string;
+        response_status: number;
+        response_json: string;
+      }
+    | undefined;
+
+  if (!existing) {
+    throw new Error("Idempotency record not found after conflict.");
+  }
+
+  if (existing.request_hash !== input.requestHash) {
+    throw new Error("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD");
+  }
+
+  if (existing.status === "in_progress") {
+    throw new Error("IDEMPOTENCY_IN_PROGRESS");
+  }
+
+  return {
+    claimed: false,
+    replay: {
+      status: Number(existing.response_status),
+      payload: maybeJson(existing.response_json, {})
+    }
+  };
+}
+
+export function completeIdempotencyRecord(
+  db: Db,
+  input: {
+    agentId: string;
+    method: string;
+    path: string;
+    idempotencyKey: string;
+    responseStatus: number;
+    responseJson: unknown;
+  }
+): void {
+  const result = db
+    .prepare(
+      `UPDATE idempotency_records SET status = 'complete', response_status = ?, response_json = ? WHERE agent_id = ? AND method = ? AND path = ? AND idempotency_key = ? AND status = 'in_progress'`
+    )
+    .run(
+      input.responseStatus,
+      canonicalJson(normaliseSerializable(input.responseJson)),
+      input.agentId,
+      input.method,
+      input.path,
+      input.idempotencyKey
+    );
+
+  if (result.changes === 0) {
+    throw new Error("Idempotency record not found or already completed.");
+  }
+}
+
+export function releaseIdempotencyClaim(
+  db: Db,
+  input: { agentId: string; method: string; path: string; idempotencyKey: string }
+): void {
+  db.prepare(
+    `DELETE FROM idempotency_records WHERE agent_id = ? AND method = ? AND path = ? AND idempotency_key = ? AND status = 'in_progress'`
+  ).run(input.agentId, input.method, input.path, input.idempotencyKey);
 }
 
 export function saveIdempotencyRecord(
@@ -2560,6 +3043,30 @@ export interface SealJobRecord {
   status: string;
   requestJson: unknown;
   responseJson: unknown;
+}
+
+export function listQueuedSealJobs(
+  db: Db,
+  options?: { olderThanMinutes?: number }
+): Array<{ jobId: string; caseId: string; createdAtIso: string }> {
+  let sql = `SELECT job_id, case_id, created_at FROM seal_jobs WHERE status = 'queued'`;
+  const params: string[] = [];
+  if (options?.olderThanMinutes != null && options.olderThanMinutes > 0) {
+    const cutoff = new Date(Date.now() - options.olderThanMinutes * 60 * 1000).toISOString();
+    sql += ` AND created_at <= ?`;
+    params.push(cutoff);
+  }
+  sql += ` ORDER BY created_at ASC`;
+  const rows = db.prepare(sql).all(...params) as Array<{
+    job_id: string;
+    case_id: string;
+    created_at: string;
+  }>;
+  return rows.map((r) => ({
+    jobId: r.job_id,
+    caseId: r.case_id,
+    createdAtIso: r.created_at
+  }));
 }
 
 export function getSealJobByJobId(db: Db, jobId: string): SealJobRecord | null {

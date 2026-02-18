@@ -11,12 +11,14 @@ import { selectJuryDeterministically } from "../server/services/jury";
 import { computeDeterministicVerdict } from "../server/services/verdict";
 import { getConfig } from "../server/config";
 import { openDatabase, resetDatabase } from "../server/db/sqlite";
+import { hashCapabilityToken, verifySignedMutation } from "../server/services/auth";
 import { setSecurityHeaders } from "../server/services/http";
 import { createSolanaProvider } from "../server/services/solanaProvider";
 import {
   appendTranscriptEvent,
   claimDefenceAssignment,
   clearAgentCaseActivity,
+  createAgentCapability,
   createCaseDraft,
   getCaseById,
   getCaseRuntime,
@@ -27,6 +29,7 @@ import {
   listOpenDefenceCases,
   logAgentCaseActivity,
   rebuildAllAgentStats,
+  revokeAgentCapabilityByHash,
   saveIdempotencyRecord,
   saveUsedTreasuryTx,
   setCaseFiled,
@@ -37,6 +40,8 @@ import { createDrandClient } from "../server/services/drand";
 import {
   normalisePrincipleIds,
   validateCaseTopic,
+  validateEvidenceAttachmentUrls,
+  validateNotifyUrl,
   validateReasoningSummary,
   validateStakeLevel
 } from "../server/services/validation";
@@ -46,6 +51,8 @@ import {
   formatDurationLabel
 } from "../src/util/countdown";
 import { parseRoute, routeToPath } from "../src/util/router";
+import { loadOpenClawToolRegistry } from "../server/integrations/openclaw/exampleToolRegistry";
+import { OPENCAWT_OPENCLAW_TOOLS } from "../shared/openclawTools";
 
 function withEnv<T>(
   overrides: Record<string, string | undefined>,
@@ -127,6 +134,23 @@ async function testCanonicalHashing() {
   assert.throws(() => canonicalJson({ bad: Number.POSITIVE_INFINITY }), /non-finite/i);
 }
 
+async function testEvidenceAttachmentHashing() {
+  const base = {
+    kind: "link",
+    bodyText: "Attachment hash test body",
+    references: ["E-001"],
+    attachmentUrls: ["https://cdn.example.org/proof.png"],
+    evidenceTypes: ["url"],
+    evidenceStrength: "medium"
+  };
+  const a = await canonicalHashHex(base);
+  const b = await canonicalHashHex({
+    ...base,
+    attachmentUrls: ["https://cdn.example.org/proof-2.png"]
+  });
+  assert.notEqual(a, b);
+}
+
 function testSwarmValidationHelpers() {
   assert.deepEqual(normalisePrincipleIds([1, "P2", "3", "P2"], { field: "principles" }), [1, 2, 3]);
   assert.throws(
@@ -151,6 +175,36 @@ function testSwarmValidationHelpers() {
   assert.equal(validateStakeLevel("high"), "high");
   assert.throws(() => validateCaseTopic("random"), /caseTopic must be one of/);
   assert.throws(() => validateStakeLevel("critical"), /stakeLevel must be one of/);
+
+  assert.deepEqual(
+    validateEvidenceAttachmentUrls([
+      "https://example.org/a.png",
+      "https://media.example.org/path/b.mp4"
+    ]),
+    ["https://example.org/a.png", "https://media.example.org/path/b.mp4"]
+  );
+  assert.throws(
+    () => validateEvidenceAttachmentUrls(["http://example.org/a.png"]),
+    /https/i
+  );
+  assert.throws(
+    () => validateEvidenceAttachmentUrls(["https://localhost/file.png"]),
+    /private network hosts/
+  );
+  assert.throws(
+    () =>
+      validateEvidenceAttachmentUrls(
+        Array.from({ length: 9 }, (_, index) => `https://example.org/${index}.png`)
+      ),
+    /At most 8/
+  );
+
+  assert.equal(
+    validateNotifyUrl("https://agents.example.org/opencawt/invite"),
+    "https://agents.example.org/opencawt/invite"
+  );
+  assert.throws(() => validateNotifyUrl("http://agents.example.org/callback"), /https/i);
+  assert.throws(() => validateNotifyUrl("https://127.0.0.1/callback"), /private network hosts/i);
 }
 
 function testMigrationBackfillDefaults() {
@@ -310,6 +364,118 @@ async function testSignatureVerification() {
     signature: signed.signature
   });
   assert.equal(invalid, false);
+}
+
+async function testCapabilityTokenEnforcement() {
+  const dbPath = "/tmp/opencawt_phase42_capabilities.sqlite";
+  rmSync(dbPath, { force: true });
+  const config = getConfig();
+  config.dbPath = dbPath;
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  const keyPair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  const publicBytes = new Uint8Array(await crypto.subtle.exportKey("raw", keyPair.publicKey));
+  const agentId = encodeBase58(publicBytes);
+  upsertAgent(db, agentId, true);
+
+  const payload = { agentId, jurorEligible: true };
+  const path = "/api/agents/register";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signed = await signPayload({
+    method: "POST",
+    path,
+    timestamp,
+    payload,
+    privateKey: keyPair.privateKey
+  });
+
+  const requestBase = {
+    headers: {
+      "x-agent-id": agentId,
+      "x-timestamp": String(timestamp),
+      "x-payload-hash": signed.payloadHash,
+      "x-signature": signed.signature
+    }
+  } as unknown as import("node:http").IncomingMessage;
+
+  const configNoCapability = { ...config, capabilityKeysEnabled: false };
+  await verifySignedMutation({
+    db,
+    config: configNoCapability,
+    req: requestBase,
+    body: payload,
+    path,
+    method: "POST"
+  });
+
+  const configWithCapability = { ...config, capabilityKeysEnabled: true };
+  await assert.rejects(
+    () =>
+      verifySignedMutation({
+        db,
+        config: configWithCapability,
+        req: requestBase,
+        body: payload,
+        path,
+        method: "POST"
+      }),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "CAPABILITY_REQUIRED"
+  );
+
+  const capabilityToken = "ocap_test_token";
+  createAgentCapability(db, {
+    tokenHash: hashCapabilityToken(capabilityToken),
+    agentId,
+    scope: "writes",
+    expiresAtIso: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+  });
+
+  const requestWithCapability = {
+    headers: {
+      ...requestBase.headers,
+      "x-agent-capability": capabilityToken
+    }
+  } as unknown as import("node:http").IncomingMessage;
+
+  await verifySignedMutation({
+    db,
+    config: configWithCapability,
+    req: requestWithCapability,
+    body: payload,
+    path,
+    method: "POST"
+  });
+
+  assert.ok(
+    revokeAgentCapabilityByHash(db, {
+      agentId,
+      tokenHash: hashCapabilityToken(capabilityToken)
+    })
+  );
+
+  await assert.rejects(
+    () =>
+      verifySignedMutation({
+        db,
+        config: configWithCapability,
+        req: requestWithCapability,
+        body: payload,
+        path,
+        method: "POST"
+      }),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "CAPABILITY_REVOKED"
+  );
+
+  db.close();
 }
 
 async function testDrandSelectionDeterminism() {
@@ -651,6 +817,52 @@ function testCaseRuntimeInitialisation() {
   db.close();
 }
 
+function testNamedDefendantSchedulingAfterAcceptance() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase42_named_schedule_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-prosecution", true);
+  upsertAgent(db, "agent-defendant", true);
+  const draft = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    defendantAgentId: "agent-defendant",
+    defendantNotifyUrl: "https://agent-defendant.example.org/opencawt/invite",
+    openDefence: false,
+    claimSummary: "Named defendant scheduling test.",
+    requestedRemedy: "warn"
+  });
+
+  setCaseFiled(db, {
+    caseId: draft.caseId,
+    txSig: "tx-named-schedule",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 86400,
+    scheduleImmediately: false,
+    inviteStatus: "queued"
+  });
+
+  const filed = getCaseById(db, draft.caseId);
+  assert.equal(filed?.scheduledForIso, undefined);
+  assert.equal(filed?.defenceInviteStatus, "queued");
+  assert.ok(filed?.defenceWindowDeadlineIso);
+
+  const accepted = claimDefenceAssignment(db, {
+    caseId: draft.caseId,
+    agentId: "agent-defendant",
+    nowIso: new Date().toISOString(),
+    namedExclusiveSec: 900,
+    scheduleDelaySec: 3600
+  });
+  assert.equal(accepted.status, "assigned_accepted");
+  const updated = getCaseById(db, draft.caseId);
+  assert.ok(updated?.scheduledForIso);
+
+  db.close();
+}
+
 function testTranscriptSequence() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase4_transcript_test.sqlite";
@@ -771,13 +983,15 @@ function testDefenceClaimRace() {
     caseId: draft.caseId,
     agentId: "agent-def-1",
     nowIso: now,
-    namedExclusiveSec: 900
+    namedExclusiveSec: 900,
+    scheduleDelaySec: 3600
   });
   const second = claimDefenceAssignment(db, {
     caseId: draft.caseId,
     agentId: "agent-def-2",
     nowIso: now,
-    namedExclusiveSec: 900
+    namedExclusiveSec: 900,
+    scheduleDelaySec: 3600
   });
 
   assert.equal(first.status, "assigned_volunteered");
@@ -817,14 +1031,16 @@ function testNamedDefendantExclusivity() {
     caseId: draftA.caseId,
     agentId: "agent-other",
     nowIso: inWindow,
-    namedExclusiveSec: 900
+    namedExclusiveSec: 900,
+    scheduleDelaySec: 3600
   });
   assert.equal(reserved.status, "reserved_for_named_defendant");
   const accepted = claimDefenceAssignment(db, {
     caseId: draftA.caseId,
     agentId: "agent-named",
     nowIso: inWindow,
-    namedExclusiveSec: 900
+    namedExclusiveSec: 900,
+    scheduleDelaySec: 3600
   });
   assert.equal(accepted.status, "assigned_accepted");
 
@@ -848,7 +1064,8 @@ function testNamedDefendantExclusivity() {
     caseId: draftB.caseId,
     agentId: "agent-other",
     nowIso: afterWindow,
-    namedExclusiveSec: 900
+    namedExclusiveSec: 900,
+    scheduleDelaySec: 3600
   });
   assert.equal(volunteer.status, "assigned_volunteered");
 
@@ -1039,6 +1256,43 @@ function testOpenDefenceQuery() {
   db.close();
 }
 
+function testOpenClawToolContractParity() {
+  const registry = loadOpenClawToolRegistry();
+  assert.equal(registry.length, OPENCAWT_OPENCLAW_TOOLS.length, "Registry must include every tool.");
+
+  for (const tool of registry) {
+    assert.ok(tool.endpoint && tool.endpoint !== "/", `Tool ${tool.name} must have a valid endpoint.`);
+    assert.ok(["GET", "POST"].includes(tool.method), `Tool ${tool.name} must have GET or POST method.`);
+  }
+
+  const toolByName = new Map(OPENCAWT_OPENCLAW_TOOLS.map((t) => [t.name, t]));
+  const requiredByTool: Record<string, string[]> = {
+    lodge_dispute_draft: ["prosecutionAgentId", "openDefence", "claimSummary", "requestedRemedy"],
+    lodge_dispute_confirm_and_schedule: ["caseId", "treasuryTxSig"],
+    attach_filing_payment: ["caseId", "treasuryTxSig"],
+    volunteer_defence: ["caseId"],
+    join_jury_pool: ["agentId", "availability"],
+    list_assigned_cases: ["agentId"],
+    submit_stage_message: ["caseId", "side", "stage", "text", "principleCitations", "evidenceCitations"],
+    submit_evidence: ["caseId", "kind", "bodyText"],
+    juror_ready_confirm: ["caseId"],
+    submit_ballot_with_reasoning: ["caseId", "votes", "reasoningSummary", "principlesReliedOn"]
+  };
+
+  for (const [name, required] of Object.entries(requiredByTool)) {
+    const tool = toolByName.get(name);
+    assert.ok(tool, `Tool ${name} must exist.`);
+    const schema = tool.inputSchema as { required?: string[] };
+    assert.ok(Array.isArray(schema.required), `Tool ${name} must have required array.`);
+    for (const field of required) {
+      assert.ok(
+        schema.required!.includes(field),
+        `Tool ${name} must require field ${field}.`
+      );
+    }
+  }
+}
+
 async function testDrandHttpIntegration() {
   const config = getConfig();
   if (config.drandMode !== "http") {
@@ -1055,9 +1309,11 @@ async function run() {
   await testCountdownMaths();
   testRouteParsing();
   await testCanonicalHashing();
+  await testEvidenceAttachmentHashing();
   testSwarmValidationHelpers();
   testMigrationBackfillDefaults();
   await testSignatureVerification();
+  await testCapabilityTokenEnforcement();
   await testDrandSelectionDeterminism();
   await testVerdictDeterminism();
   await testVerdictInconclusiveMapsToVoid();
@@ -1066,6 +1322,7 @@ async function run() {
   await testRpcPayerMismatchGuard();
   testTreasuryReplayPrevention();
   testCaseRuntimeInitialisation();
+  testNamedDefendantSchedulingAfterAcceptance();
   testTranscriptSequence();
   testIdempotencyRecordStorage();
   testDefenceClaimRace();
@@ -1073,6 +1330,7 @@ async function run() {
   await testDefenceCutoffVoiding();
   testVictoryScoreAndLeaderboard();
   testOpenDefenceQuery();
+  testOpenClawToolContractParity();
   await testDrandHttpIntegration();
   if (process.env.RUN_SMOKE_OPENCLAW === "1") {
     execFileSync("node", ["--import", "tsx", "tests/smoke/openclaw-participation.smoke.ts"], {

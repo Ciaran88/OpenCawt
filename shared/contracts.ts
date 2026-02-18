@@ -23,6 +23,7 @@ export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "vot
 
 export type CaseOutcome = "for_prosecution" | "for_defence";
 export type DefenceState = "none" | "invited" | "volunteered" | "accepted";
+export type DefenceInviteStatus = "none" | "queued" | "delivered" | "failed";
 export type CaseTopic =
   | "misinformation"
   | "privacy"
@@ -71,6 +72,7 @@ export interface TimingRules {
   sessionStartsAfterSeconds: number;
   defenceAssignmentCutoffSeconds: number;
   namedDefendantExclusiveSeconds: number;
+  namedDefendantResponseSeconds: number;
   jurorReadinessSeconds: number;
   stageSubmissionSeconds: number;
   jurorVoteSeconds: number;
@@ -93,6 +95,7 @@ export interface EvidenceRecord {
   kind: EvidenceKind;
   bodyText: string;
   references: string[];
+  attachmentUrls: string[];
   bodyHash: string;
   evidenceTypes: EvidenceTypeLabel[];
   evidenceStrength?: EvidenceStrength;
@@ -236,6 +239,7 @@ export interface SignedRequestHeaders {
   "X-Timestamp": string;
   "X-Payload-Hash": string;
   "X-Signature": string;
+  "X-Agent-Capability"?: string;
 }
 
 export interface SignedMutationEnvelope<TPayload> {
@@ -258,6 +262,7 @@ export interface ApiErrorShape {
 export interface RegisterAgentPayload {
   agentId: string;
   jurorEligible?: boolean;
+  notifyUrl?: string;
 }
 
 export interface JoinJuryPoolPayload {
@@ -269,6 +274,7 @@ export interface JoinJuryPoolPayload {
 export interface CreateCaseDraftPayload {
   prosecutionAgentId: string;
   defendantAgentId?: string;
+  defendantNotifyUrl?: string;
   openDefence: boolean;
   claimSummary?: string;
   requestedRemedy: Remedy;
@@ -286,6 +292,7 @@ export interface SubmitEvidencePayload {
   kind: EvidenceKind;
   bodyText: string;
   references: string[];
+  attachmentUrls?: string[];
   evidenceTypes?: EvidenceTypeLabel[];
   evidenceStrength?: EvidenceStrength;
 }
@@ -346,6 +353,26 @@ export interface AssignedCaseSummary {
   votingDeadlineAtIso?: string;
   stageDeadlineAtIso?: string;
   scheduledSessionStartAtIso?: string;
+}
+
+export interface AssignedCasesResponse {
+  agentId: string;
+  cases: AssignedCaseSummary[];
+  defenceInvites?: DefenceInviteSummary[];
+}
+
+export interface DefenceInviteSummary {
+  caseId: string;
+  summary: string;
+  prosecutionAgentId: string;
+  defendantAgentId: string;
+  filedAtIso?: string;
+  responseDeadlineAtIso?: string;
+  inviteStatus: DefenceInviteStatus;
+  inviteAttempts: number;
+  inviteLastAttemptAtIso?: string;
+  inviteLastError?: string;
+  sessionStartsAfterAcceptanceSeconds?: number;
 }
 
 export interface OpenDefenceSearchFilters {
@@ -415,16 +442,18 @@ export interface WorkerSealRequest {
   };
 }
 
-export interface WorkerSealResponse {
-  jobId: string;
-  caseId: string;
-  assetId: string;
-  txSig: string;
-  sealedUri: string;
-  status: "minted" | "failed";
-  errorCode?: string;
-  errorMessage?: string;
-}
+export type WorkerSealResponse =
+  | { jobId: string; caseId: string; status: "minted"; assetId: string; txSig: string; sealedUri: string }
+  | {
+      jobId: string;
+      caseId: string;
+      status: "failed";
+      assetId?: string;
+      txSig?: string;
+      sealedUri?: string;
+      errorCode?: string;
+      errorMessage?: string;
+    };
 
 export interface OpenClawToolDefinition {
   name: string;

@@ -112,20 +112,20 @@ export async function apiGet<T>(baseUrl: string, path: string): Promise<T> {
   return body as T;
 }
 
-export async function signedPost<T>(input: {
+export async function signedPostWithTimestamp<T>(input: {
   baseUrl: string;
   path: string;
   payload: Record<string, unknown>;
   agent: SmokeAgent;
   caseId?: string;
   idempotencyKey?: string;
-}): Promise<T> {
-  const timestamp = nextSignedTimestampSec();
+  timestampSec: number;
+}): Promise<{ body: T; headers: Record<string, string> }> {
   const signed = await signPayload({
     method: "POST",
     path: input.path,
     caseId: input.caseId,
-    timestamp,
+    timestamp: input.timestampSec,
     payload: input.payload,
     privateKey: input.agent.privateKey
   });
@@ -134,7 +134,7 @@ export async function signedPost<T>(input: {
     Accept: "application/json",
     "Content-Type": "application/json",
     "X-Agent-Id": input.agent.agentId,
-    "X-Timestamp": String(timestamp),
+    "X-Timestamp": String(input.timestampSec),
     "X-Payload-Hash": signed.payloadHash,
     "X-Signature": signed.signature
   };
@@ -154,7 +154,23 @@ export async function signedPost<T>(input: {
     const message = error ? `${error.code}: ${error.message}` : JSON.stringify(body);
     throw new Error(`POST ${input.path} failed (${response.status}): ${message}`);
   }
-  return body as T;
+  return { body: body as T, headers };
+}
+
+export async function signedPost<T>(input: {
+  baseUrl: string;
+  path: string;
+  payload: Record<string, unknown>;
+  agent: SmokeAgent;
+  caseId?: string;
+  idempotencyKey?: string;
+}): Promise<T> {
+  const timestamp = nextSignedTimestampSec();
+  const { body } = await signedPostWithTimestamp<T>({
+    ...input,
+    timestampSec: timestamp
+  });
+  return body;
 }
 
 export async function expectErrorCode(input: {

@@ -27,6 +27,32 @@ async function testWorkerStub() {
 
   try {
     await wait(600);
+
+    const noToken = await fetch("http://127.0.0.1:8798/mint", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jobId: "smoke-stub-job",
+        caseId: "OC-SMOKE-STUB",
+        verdictHash: "hash-smoke",
+        verdictUri: "https://example.invalid/decision/smoke",
+        metadata: { title: "Smoke", summary: "Stub smoke", closedAtIso: new Date().toISOString() }
+      })
+    });
+    assert.equal(noToken.status, 401);
+
+    const invalidJson = await fetch("http://127.0.0.1:8798/mint", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Worker-Token": "smoke-worker-token"
+      },
+      body: "{invalid"
+    });
+    assert.equal(invalidJson.status, 400);
+    const invalidBody = (await invalidJson.json()) as { error?: string };
+    assert.equal(invalidBody.error, "invalid_json");
+
     const response = await fetch("http://127.0.0.1:8798/mint", {
       method: "POST",
       headers: {

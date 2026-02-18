@@ -8,6 +8,8 @@ import {
 
 const apiBase =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://127.0.0.1:8787";
+const capabilityEnv = (import.meta.env.VITE_AGENT_CAPABILITY as string | undefined)?.trim();
+const capabilityStorageKey = "opencawt:agent-capability";
 
 export class ApiClientError extends Error {
   code: string;
@@ -88,6 +90,17 @@ function defaultIdempotencyKey(): string {
   return `idem_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function resolveAgentCapabilityToken(): string | undefined {
+  const fromStorage = window.localStorage.getItem(capabilityStorageKey)?.trim();
+  if (fromStorage) {
+    return fromStorage;
+  }
+  if (capabilityEnv) {
+    return capabilityEnv;
+  }
+  return undefined;
+}
+
 export async function signedPost<T>(
   path: string,
   payload: unknown,
@@ -136,6 +149,7 @@ export async function signedPost<T>(
   }
 
   const idempotencyKey = options?.idempotencyKey ?? defaultIdempotencyKey();
+  const capabilityToken = resolveAgentCapabilityToken();
 
   const response = await fetch(`${apiBase}${path}`, {
     method: "POST",
@@ -145,7 +159,8 @@ export async function signedPost<T>(
       "X-Agent-Id": agentId,
       "X-Timestamp": String(timestamp),
       "X-Payload-Hash": payloadHash,
-      "X-Signature": signature
+      "X-Signature": signature,
+      ...(capabilityToken ? { "X-Agent-Capability": capabilityToken } : {})
     },
     body: JSON.stringify(payload)
   });
@@ -168,4 +183,13 @@ export async function registerCurrentAgent(): Promise<{ agentId: string; status:
 
 export function getApiBaseUrl(): string {
   return apiBase;
+}
+
+export function setAgentCapabilityToken(token: string): void {
+  const value = token.trim();
+  if (!value) {
+    window.localStorage.removeItem(capabilityStorageKey);
+    return;
+  }
+  window.localStorage.setItem(capabilityStorageKey, value);
 }

@@ -44,6 +44,9 @@ export const BALLOT_VOTE_LABELS: BallotVoteLabel[] = [
   "for_defence",
   "mixed"
 ];
+const MAX_EVIDENCE_ATTACHMENT_URLS = 8;
+const MAX_EVIDENCE_ATTACHMENT_URL_LENGTH = 2048;
+const MAX_NOTIFY_URL_LENGTH = 2048;
 
 export function countSentences(text: string): number {
   const cleaned = text.trim();
@@ -188,5 +191,149 @@ export function validateEvidenceTypes(value: unknown): EvidenceTypeLabel[] {
       out.push(label);
     }
   }
+  return out;
+}
+
+function parseIpv4Octets(hostname: string): number[] | null {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) {
+    return null;
+  }
+  const octets: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) {
+      return null;
+    }
+    const value = Number(part);
+    if (value < 0 || value > 255) {
+      return null;
+    }
+    octets.push(value);
+  }
+  return octets;
+}
+
+function isBlockedHost(hostname: string): boolean {
+  const value = hostname.trim().toLowerCase().replace(/\.+$/, "");
+  if (!value) {
+    return true;
+  }
+
+  if (value === "localhost" || value.endsWith(".localhost") || value === "::1") {
+    return true;
+  }
+
+  const octets = parseIpv4Octets(value);
+  if (!octets) {
+    return false;
+  }
+  if (octets[0] === 10) {
+    return true;
+  }
+  if (octets[0] === 127) {
+    return true;
+  }
+  if (octets[0] === 192 && octets[1] === 168) {
+    return true;
+  }
+  return octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31;
+}
+
+function validateHttpsUrl(
+  value: string,
+  inputLabel: string,
+  errorCodes: {
+    invalid: string;
+    schemeInvalid: string;
+    hostBlocked: string;
+  },
+  maxLength: number
+): string {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > maxLength) {
+    throw badRequest(
+      errorCodes.invalid,
+      `${inputLabel} must be 1 to ${maxLength} characters.`
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw badRequest(errorCodes.invalid, `${inputLabel} must be a valid absolute URL.`);
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw badRequest(errorCodes.schemeInvalid, `${inputLabel} must use https.`);
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    throw badRequest(
+      errorCodes.hostBlocked,
+      `${inputLabel} cannot target localhost or private network hosts.`
+    );
+  }
+  return parsed.toString();
+}
+
+export function validateNotifyUrl(value: unknown, field = "notifyUrl"): string | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw badRequest("NOTIFY_URL_INVALID", `${field} must be a URL string.`);
+  }
+  return validateHttpsUrl(
+    value,
+    field,
+    {
+      invalid: "NOTIFY_URL_INVALID",
+      schemeInvalid: "NOTIFY_URL_SCHEME_INVALID",
+      hostBlocked: "NOTIFY_URL_HOST_BLOCKED"
+    },
+    MAX_NOTIFY_URL_LENGTH
+  );
+}
+
+export function validateEvidenceAttachmentUrls(value: unknown): string[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw badRequest(
+      "EVIDENCE_ATTACHMENT_URLS_INVALID",
+      "attachmentUrls must be an array of absolute URLs."
+    );
+  }
+
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") {
+      throw badRequest(
+        "EVIDENCE_ATTACHMENT_URLS_INVALID",
+        "attachmentUrls must contain URL strings."
+      );
+    }
+    const normalised = validateHttpsUrl(
+      item,
+      "attachmentUrls",
+      {
+        invalid: "EVIDENCE_ATTACHMENT_URLS_INVALID",
+        schemeInvalid: "EVIDENCE_ATTACHMENT_URL_SCHEME_INVALID",
+        hostBlocked: "EVIDENCE_ATTACHMENT_URL_HOST_BLOCKED"
+      },
+      MAX_EVIDENCE_ATTACHMENT_URL_LENGTH
+    );
+    if (!out.includes(normalised)) {
+      out.push(normalised);
+      if (out.length > MAX_EVIDENCE_ATTACHMENT_URLS) {
+        throw badRequest(
+          "EVIDENCE_ATTACHMENT_LIMIT_REACHED",
+          `At most ${MAX_EVIDENCE_ATTACHMENT_URLS} attachment URLs are allowed per evidence item.`
+        );
+      }
+    }
+  }
+
   return out;
 }

@@ -120,6 +120,23 @@ async function main() {
     const caseId = draft.caseId;
     assert.ok(caseId, "Expected case id from draft response.");
 
+    await expectErrorCode({
+      expectedCode: "EVIDENCE_MEDIA_STAGE_REQUIRED",
+      run: async () =>
+        signedPost({
+          baseUrl,
+          path: `/api/cases/${encodeURIComponent(caseId)}/evidence`,
+          payload: {
+            kind: "link",
+            bodyText: "Draft evidence with media URL should be rejected.",
+            references: [],
+            attachmentUrls: ["https://media.example.org/draft.png"]
+          },
+          agent: prosecution,
+          caseId
+        })
+    });
+
     const file = await signedPost<FileResponse>({
       baseUrl,
       path: `/api/cases/${encodeURIComponent(caseId)}/file`,
@@ -172,6 +189,25 @@ async function main() {
     const stageSequence: Array<"opening_addresses" | "evidence" | "closing_addresses" | "summing_up"> =
       ["opening_addresses", "evidence", "closing_addresses", "summing_up"];
     for (const stage of stageSequence) {
+      if (stage === "evidence") {
+        await signedPost({
+          baseUrl,
+          path: `/api/cases/${encodeURIComponent(caseId)}/evidence`,
+          payload: {
+            kind: "link",
+            bodyText: "Evidence round media URLs for smoke verification.",
+            references: ["https://reference.example.org/source"],
+            attachmentUrls: [
+              "https://media.example.org/proof-image.png",
+              "https://news.example.org/story"
+            ]
+          },
+          agent: prosecution,
+          caseId,
+          idempotencyKey: `evidence:${caseId}:pros`
+        });
+      }
+
       await signedPost({
         baseUrl,
         path: `/api/cases/${encodeURIComponent(caseId)}/stage-message`,
@@ -231,7 +267,8 @@ async function main() {
                 citations: []
               }
             ],
-            reasoningSummary: "Too short."
+            reasoningSummary: "Too short.",
+            principlesReliedOn: ["P2"]
           },
           agent: selectedJurorAgents[0],
           caseId
@@ -243,22 +280,23 @@ async function main() {
       await signedPost({
         baseUrl,
         path: `/api/cases/${encodeURIComponent(caseId)}/ballots`,
-        payload: {
-          votes: [
-            {
-              claimId: `${caseId}-c1`,
+          payload: {
+            votes: [
+              {
+                claimId: `${caseId}-c1`,
               finding: index < 8 ? "proven" : "not_proven",
               severity: 2,
               recommendedRemedy: "warn",
               rationale: "Smoke ballot rationale.",
               citations: []
-            }
-          ],
-          reasoningSummary:
-            "The submitted record supports this finding. The remedy is proportionate to the identified scope."
-        },
-        agent: juror,
-        caseId,
+              }
+            ],
+            reasoningSummary:
+              "The submitted record supports this finding. The remedy is proportionate to the identified scope.",
+            principlesReliedOn: ["P2", "P8"]
+          },
+          agent: juror,
+          caseId,
         idempotencyKey: `ballot:${caseId}:${juror.agentId}`
       });
     }
@@ -274,6 +312,7 @@ async function main() {
     assert.ok(Array.isArray(assigned.cases), "Expected assigned case response shape.");
 
     const started = Date.now();
+    let finalStatus: string | undefined;
     while (Date.now() - started < 90_000) {
       const decision = await apiGet<{ status?: string } | null>(
         baseUrl,
@@ -282,14 +321,33 @@ async function main() {
       if (!decision) {
         throw new Error("Case disappeared during smoke.");
       }
-      const status = (decision as any).status;
+      const status = (decision as { status?: string }).status;
       if (status === "closed" || status === "sealed" || status === "void") {
+        finalStatus = status;
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 900));
     }
+    assert.ok(finalStatus, "Expected case to reach closed, sealed, or void.");
 
-    const transcript = await apiGet<{ events: Array<{ seqNo: number }> }>(
+    if (finalStatus === "sealed") {
+      const sealedCase = await apiGet<{
+        sealInfo?: { assetId?: string; txSig?: string; sealedUri?: string };
+      }>(baseUrl, `/api/cases/${encodeURIComponent(caseId)}`);
+      assert.ok(sealedCase?.sealInfo?.assetId, "Expected sealAssetId on sealed case.");
+      assert.ok(sealedCase?.sealInfo?.txSig, "Expected sealTxSig on sealed case.");
+      assert.ok(sealedCase?.sealInfo?.sealedUri, "Expected sealUri on sealed case.");
+    } else if (finalStatus === "void") {
+      process.stdout.write("Case ended void (e.g. inconclusive verdict); skipping seal assertions.\n");
+    }
+
+    const transcript = await apiGet<{
+      events: Array<{
+        seqNo: number;
+        eventType?: string;
+        payload?: { attachmentUrls?: string[] };
+      }>;
+    }>(
       baseUrl,
       `/api/cases/${encodeURIComponent(caseId)}/transcript?after_seq=0&limit=500`
     );
@@ -300,6 +358,24 @@ async function main() {
         "Transcript sequence must be strictly increasing."
       );
     }
+    if (finalStatus === "sealed") {
+      const hasCaseClosed = transcript.events.some((e) => e.eventType === "case_closed");
+      assert.ok(hasCaseClosed, "Expected transcript to include case_closed event.");
+      const hasCaseSealed = transcript.events.some((e) => e.eventType === "case_sealed");
+      assert.ok(hasCaseSealed, "Expected transcript to include case_sealed event.");
+    } else if (finalStatus === "void") {
+      const hasCaseVoided = transcript.events.some((e) => e.eventType === "case_voided");
+      assert.ok(hasCaseVoided, "Expected transcript to include case_voided event for void case.");
+    } else {
+      const hasCaseClosed = transcript.events.some((e) => e.eventType === "case_closed");
+      assert.ok(hasCaseClosed, "Expected transcript to include case_closed event.");
+    }
+    const attachmentEvent = transcript.events.find(
+      (event) =>
+        Array.isArray(event.payload?.attachmentUrls) &&
+        event.payload?.attachmentUrls?.includes("https://media.example.org/proof-image.png")
+    );
+    assert.ok(attachmentEvent, "Expected transcript event payload to include attachment URLs.");
 
     process.stdout.write("OpenClaw participation smoke passed\n");
   } finally {
@@ -311,4 +387,3 @@ main().catch((error) => {
   process.stderr.write(`${String(error)}\n`);
   process.exitCode = 1;
 });
-

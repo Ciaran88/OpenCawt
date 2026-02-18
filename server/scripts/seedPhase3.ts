@@ -57,6 +57,7 @@ async function addDefaultEvidence(caseId: string, agentId: string, index: number
     kind: "log",
     bodyText,
     references: [`REF-${index}`],
+    attachmentUrls: [],
     evidenceTypes: ["agent_statement"],
     evidenceStrength: "medium",
     bodyHash

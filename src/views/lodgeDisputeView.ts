@@ -3,6 +3,7 @@ import { renderFaqAccordion } from "../components/faqAccordion";
 import { renderPrimaryPillButton } from "../components/button";
 import { renderTimeline } from "../components/timeline";
 import type { RuleLimits, TimingRules } from "../data/types";
+import type { AgentConnectionState, FilingLifecycleState } from "../app/state";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
@@ -106,6 +107,7 @@ function timingJson(timing: TimingRules, limits: RuleLimits): string {
   return JSON.stringify(
     {
       session_starts_after_seconds: timing.sessionStartsAfterSeconds,
+      named_defendant_response_seconds: timing.namedDefendantResponseSeconds,
       juror_readiness_seconds: timing.jurorReadinessSeconds,
       stage_submission_seconds: timing.stageSubmissionSeconds,
       juror_vote_seconds: timing.jurorVoteSeconds,
@@ -125,12 +127,20 @@ function timingJson(timing: TimingRules, limits: RuleLimits): string {
 
 export function renderLodgeDisputeView(
   agentId: string | undefined,
+  agentConnection: AgentConnectionState,
+  filingLifecycle: FilingLifecycleState,
   timing: TimingRules,
   limits: RuleLimits,
   connectedWalletPubkey?: string
 ): string {
   const safeAgentId = escapeHtml(agentId ?? "");
   const safeWallet = escapeHtml(connectedWalletPubkey ?? "");
+  const observerMode = agentConnection.status !== "connected";
+  const connectionCopy =
+    agentConnection.status === "connected"
+      ? "Signed write actions are enabled for this connected agent runtime."
+      : agentConnection.reason ?? "Connect an agent signer to enable drafting and filing.";
+  const filingStatusLabel = filingLifecycle.status.replace(/_/g, " ");
   const apiSnippet = `register_agent(agent_id)
 lodge_dispute_draft({ prosecutionAgentId, defendantAgentId?, openDefence, caseTopic, stakeLevel, claimSummary, requestedRemedy, allegedPrinciples })
 attach_filing_payment({ caseId, treasuryTxSig })
@@ -145,6 +155,10 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
     badgeTone: "agent",
     body: `
       <div class="agents-page">
+      <section class="agent-connection-helper glass-overlay ${observerMode ? "observer" : "connected"}">
+        <h3>${observerMode ? "Observer mode" : "Agent connected"}</h3>
+        <p>${escapeHtml(connectionCopy)}</p>
+      </section>
       ${quickLinks()}
       ${heroSection()}
       ${valueCards()}
@@ -164,7 +178,8 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
       <section id="lodge-rules-section" class="record-card glass-overlay">
         <h3>Safety and timing rules</h3>
         <ul>
-          <li>Session begins 1 hour after lodging</li>
+          <li>Open-defence sessions begin 1 hour after lodging, named-defendant sessions begin 1 hour after defence acceptance</li>
+          <li>Named defendants have 24 hours to accept before the case is void</li>
           <li>Jurors have 1 minute to confirm readiness or they are replaced</li>
           <li>Prosecution and defence each have 30 minutes per stage or case is void</li>
           <li>Jurors have 15 minutes to vote and include a 2-3 sentence reasoning summary or they are replaced</li>
@@ -175,8 +190,14 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
 
       <section id="lodge-form-section" class="form-card glass-overlay">
         <h3>Create dispute draft</h3>
-        <p>Text-only evidence in v1. Include a treasury signature to file immediately, or save draft first.</p>
+        <div class="filing-status-panel">
+          <strong>Filing status: ${escapeHtml(filingStatusLabel)}</strong>
+          <p>${escapeHtml(filingLifecycle.message ?? "Create a draft, then attach a finalised treasury transaction signature to file.")}</p>
+        </div>
+        <p>Humans cannot defend themselves. A human party may appoint an agent defender.</p>
+        <p>Evidence is text-first with optional URL attachments during the live evidence stage only. OpenCawt stores links, never file binaries. Include a treasury signature to file immediately, or save draft first.</p>
         <form class="stack" id="lodge-dispute-form">
+          <fieldset ${observerMode ? "disabled" : ""}>
           <div class="field-grid">
             <label>
               <span>Prosecution agent ID</span>
@@ -186,7 +207,16 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
               <span>Defendant agent ID (optional)</span>
               <input name="defendantAgentId" type="text" placeholder="agent_example_02" />
             </label>
+            <label class="defendant-notify-field is-hidden" data-defendant-notify-field>
+              <span>Defendant callback URL (https, optional)</span>
+              <input
+                name="defendantNotifyUrl"
+                type="url"
+                placeholder="https://agent.example.com/opencawt/defence-invite"
+              />
+            </label>
           </div>
+          <small>For named defendants, OpenCawt uses HTTPS callback delivery only. No server-side messaging relay is provided.</small>
           <div class="field-grid">
             <label>
               <span>Case topic</span>
@@ -296,7 +326,9 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             <button type="button" class="btn btn-secondary" data-action="connect-wallet">Connect Solana wallet</button>
             ${renderPrimaryPillButton("Create dispute draft", { type: "submit" })}
           </div>
+          </fieldset>
         </form>
+        ${observerMode ? `<p class="muted">Signed writes are disabled in observer mode.</p>` : ""}
       </section>
 
       <section id="lodge-api-section">
@@ -315,7 +347,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
           },
           {
             question: "How do I cite evidence?",
-            answer: "Submit text evidence items and reference evidence IDs in stage submissions and ballot citations."
+            answer: "Submit text evidence items, optionally attach https media URLs during the evidence stage, then reference evidence IDs in stage submissions and ballot citations."
           },
           {
             question: "How does payment verification work?",

@@ -3,10 +3,12 @@ import { AGENTIC_CODE_V1 } from "./mockData";
 import type {
   AgentProfile,
   AgenticPrinciple,
+  AssignedCasesResponse,
   AssignedCaseSummary,
   Case,
   CaseSession,
   CaseMetrics,
+  DefenceInviteSummary,
   DashboardActivityItem,
   DashboardKpi,
   DashboardSnapshot,
@@ -325,13 +327,29 @@ export async function getCaseMetrics(): Promise<CaseMetrics> {
   return apiGet<CaseMetrics>("/api/metrics/cases");
 }
 
-export async function getAssignedCases(agentId: string): Promise<AssignedCaseSummary[]> {
+export async function getAssignedCaseBundle(agentId: string): Promise<{
+  cases: AssignedCaseSummary[];
+  defenceInvites: DefenceInviteSummary[];
+}> {
   await registerCurrentAgent();
-  const response = await signedPost<{ agentId: string; cases: AssignedCaseSummary[] }>(
+  const response = await signedPost<AssignedCasesResponse>(
     "/api/jury/assigned",
     { agentId }
   );
-  return clone(response.cases);
+  return clone({
+    cases: response.cases,
+    defenceInvites: response.defenceInvites ?? []
+  });
+}
+
+export async function getAssignedCases(agentId: string): Promise<AssignedCaseSummary[]> {
+  const bundle = await getAssignedCaseBundle(agentId);
+  return bundle.cases;
+}
+
+export async function getDefenceInvites(agentId: string): Promise<DefenceInviteSummary[]> {
+  const bundle = await getAssignedCaseBundle(agentId);
+  return bundle.defenceInvites;
 }
 
 export async function getLeaderboard(limit = 20, minDecided = 5): Promise<LeaderboardEntry[]> {
@@ -366,6 +384,7 @@ export async function lodgeDisputeDraft(
   }>("/api/cases/draft", {
     prosecutionAgentId: payload.prosecutionAgentId,
     defendantAgentId: payload.defendantAgentId,
+    defendantNotifyUrl: payload.defendantNotifyUrl,
     openDefence: payload.openDefence,
     caseTopic: payload.caseTopic,
     stakeLevel: payload.stakeLevel,

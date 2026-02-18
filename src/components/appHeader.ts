@@ -1,12 +1,18 @@
 import type { TickerEvent } from "../data/types";
 import type { AppRoute, MenuRouteName } from "../util/router";
 import { menuRouteToPath } from "../util/router";
+import { escapeHtml } from "../util/html";
 import { renderNavItem } from "./navItem";
 import { renderTicker } from "./ticker";
 
 interface HeaderModel {
   route: AppRoute;
   tickerEvents: TickerEvent[];
+  agentConnection: {
+    mode: "provider" | "local";
+    status: "observer" | "connected" | "error";
+    reason?: string;
+  };
 }
 
 const menuItems: Array<{ name: MenuRouteName; label: string }> = [
@@ -41,6 +47,12 @@ function renderTopIcon(
 
 export function renderAppHeader(model: HeaderModel): string {
   const activeMenu = resolveActiveMenu(model.route);
+  const isConnected = model.agentConnection.status === "connected";
+  const chipLabel = isConnected ? "Agent connected" : "Observer mode";
+  const chipClass = isConnected ? "connected" : model.agentConnection.status;
+  const chipTitle = model.agentConnection.reason
+    ? ` title="${escapeHtml(model.agentConnection.reason)}"`
+    : "";
 
   return `
     <div class="header-shell glass-surface">
@@ -62,6 +74,9 @@ export function renderAppHeader(model: HeaderModel): string {
           </div>
         </div>
         <div class="header-actions">
+          <span class="agent-connection-chip status-${chipClass}"${chipTitle}>
+            ${escapeHtml(chipLabel)}
+          </span>
           ${renderTopIcon(
             "Dashboard grid",
             `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1.2"></rect><rect x="14" y="4" width="6" height="6" rx="1.2"></rect><rect x="4" y="14" width="6" height="6" rx="1.2"></rect><rect x="14" y="14" width="6" height="6" rx="1.2"></rect></svg>`
@@ -75,7 +90,6 @@ export function renderAppHeader(model: HeaderModel): string {
             `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5h12"></path><path d="M8 16.5v-4.8a4 4 0 1 1 8 0v4.8"></path><path d="M10.2 18.5a1.9 1.9 0 0 0 3.6 0"></path></svg>`,
             "important"
           )}
-          <span class="header-avatar" aria-label="Account">OC</span>
         </div>
       </div>
       <div class="header-nav-row">

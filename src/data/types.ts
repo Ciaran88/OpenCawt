@@ -1,6 +1,7 @@
 export type CaseStatus = "scheduled" | "active" | "closed" | "sealed";
 export type CaseOutcome = "for_prosecution" | "for_defence" | "void";
 export type DefenceState = "none" | "invited" | "volunteered" | "accepted";
+export type DefenceInviteStatus = "none" | "queued" | "delivered" | "failed";
 export type CaseTopic =
   | "misinformation"
   | "privacy"
@@ -41,6 +42,7 @@ export interface TimingRules {
   sessionStartsAfterSeconds: number;
   defenceAssignmentCutoffSeconds: number;
   namedDefendantExclusiveSeconds: number;
+  namedDefendantResponseSeconds: number;
   jurorReadinessSeconds: number;
   stageSubmissionSeconds: number;
   jurorVoteSeconds: number;
@@ -87,6 +89,7 @@ export interface EvidenceItem {
   kind: "log" | "transcript" | "code" | "link" | "attestation" | "other";
   summary: string;
   references: string[];
+  attachmentUrls?: string[];
   evidenceTypes?: EvidenceTypeLabel[];
   evidenceStrength?: EvidenceStrength;
 }
@@ -116,6 +119,12 @@ export interface SealInfo {
   sealedUri: string;
 }
 
+export interface FilingProof {
+  treasuryTxSig?: string;
+  payerWallet?: string;
+  amountLamports?: number;
+}
+
 export interface PartySubmissionPack {
   openingAddress: Submission;
   evidence: EvidenceItem[];
@@ -135,6 +144,10 @@ export interface Case {
   defenceState?: DefenceState;
   defenceAssignedAtIso?: string;
   defenceWindowDeadlineIso?: string;
+  defenceInviteStatus?: DefenceInviteStatus;
+  defenceInviteAttempts?: number;
+  defenceInviteLastAttemptAtIso?: string;
+  defenceInviteLastError?: string;
   openDefence: boolean;
   caseTopic?: CaseTopic;
   stakeLevel?: StakeLevel;
@@ -146,6 +159,8 @@ export interface Case {
   replacementCountVote?: number;
   prosecutionPrinciplesCited?: number[];
   defencePrinciplesCited?: number[];
+  filingProof?: FilingProof;
+  sealInfo?: SealInfo;
   scheduledForIso?: string;
   countdownTotalMs?: number;
   countdownEndAtIso?: string;
@@ -175,6 +190,7 @@ export interface Decision {
   }>;
   selectedEvidence: EvidenceItem[];
   verdictSummary: string;
+  filingProof?: FilingProof;
   sealInfo: SealInfo;
 }
 
@@ -188,6 +204,7 @@ export interface ScheduleResponse {
 export interface LodgeDisputeDraftPayload {
   prosecutionAgentId: string;
   defendantAgentId?: string;
+  defendantNotifyUrl?: string;
   openDefence: boolean;
   caseTopic?: CaseTopic;
   stakeLevel?: StakeLevel;
@@ -212,6 +229,7 @@ export interface SubmitEvidencePayload {
   kind: EvidenceItem["kind"];
   bodyText: string;
   references: string[];
+  attachmentUrls?: string[];
   evidenceTypes?: EvidenceTypeLabel[];
   evidenceStrength?: EvidenceStrength;
 }
@@ -223,6 +241,7 @@ export interface SubmitEvidenceResult {
   kind: EvidenceItem["kind"];
   bodyText: string;
   references: string[];
+  attachmentUrls?: string[];
   bodyHash: string;
   createdAtIso: string;
 }
@@ -309,6 +328,26 @@ export interface AssignedCaseSummary {
   votingDeadlineAtIso?: string;
   stageDeadlineAtIso?: string;
   scheduledSessionStartAtIso?: string;
+}
+
+export interface AssignedCasesResponse {
+  agentId: string;
+  cases: AssignedCaseSummary[];
+  defenceInvites?: DefenceInviteSummary[];
+}
+
+export interface DefenceInviteSummary {
+  caseId: string;
+  summary: string;
+  prosecutionAgentId: string;
+  defendantAgentId: string;
+  filedAtIso?: string;
+  responseDeadlineAtIso?: string;
+  inviteStatus: DefenceInviteStatus;
+  inviteAttempts: number;
+  inviteLastAttemptAtIso?: string;
+  inviteLastError?: string;
+  sessionStartsAfterAcceptanceSeconds?: number;
 }
 
 export interface OpenDefenceSearchFilters {

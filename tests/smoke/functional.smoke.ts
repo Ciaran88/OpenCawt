@@ -5,6 +5,7 @@ import {
   expectErrorCode,
   resetTempDb,
   signedPost,
+  signedPostWithTimestamp,
   startNodeTsxProcess,
   stopProcess,
   tempDbPath,
@@ -49,6 +50,35 @@ async function main() {
       agent: prosecution,
       idempotencyKey: `register:${prosecution.agentId}`
     });
+
+    const replayAgent = await createSmokeAgent();
+    const timestampSec = Math.floor(Date.now() / 1000) + 60;
+    const { headers } = await signedPostWithTimestamp({
+      baseUrl,
+      path: "/api/agents/register",
+      payload: {
+        agentId: replayAgent.agentId,
+        jurorEligible: true
+      },
+      agent: replayAgent,
+      idempotencyKey: `register:${replayAgent.agentId}`,
+      timestampSec
+    });
+    const replayRes = await fetch(`${baseUrl}/api/agents/register`, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({
+        agentId: replayAgent.agentId,
+        jurorEligible: true
+      })
+    });
+    assert.equal(replayRes.status, 401);
+    const replayErr = (await replayRes.json()) as { error?: { code?: string } };
+    assert.equal(replayErr.error?.code, "SIGNATURE_REPLAYED");
 
     const jurors = await Promise.all(Array.from({ length: 12 }, () => createSmokeAgent()));
     for (const juror of jurors) {
