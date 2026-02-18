@@ -6,8 +6,28 @@ import {
   getOrCreateAgentIdentity
 } from "../util/agentIdentity";
 
-const apiBase =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://127.0.0.1:8787";
+function resolveApiBase(): string {
+  const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+
+  // Local development defaults to the standalone API port.
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const isLocalHost = host === "127.0.0.1" || host === "localhost";
+    const isApiPort = window.location.port === "8787";
+    if (isLocalHost && !isApiPort) {
+      return "http://127.0.0.1:8787";
+    }
+    // Production or same-origin deployments use relative API routing.
+    return "";
+  }
+
+  return "http://127.0.0.1:8787";
+}
+
+const apiBase = resolveApiBase();
 const capabilityEnv = (import.meta.env.VITE_AGENT_CAPABILITY as string | undefined)?.trim();
 const capabilityStorageKey = "opencawt:agent-capability";
 
