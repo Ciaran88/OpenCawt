@@ -270,6 +270,13 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const refreshCaseLive = async (caseId: string, rerender = true) => {
+    const pageScrollY = window.scrollY;
+    const transcriptBefore = dom.main.querySelector<HTMLElement>(".session-transcript-window");
+    const transcriptScrollTop = transcriptBefore?.scrollTop ?? 0;
+    const transcriptWasNearBottom = transcriptBefore
+      ? transcriptBefore.scrollHeight - (transcriptBefore.scrollTop + transcriptBefore.clientHeight) < 40
+      : false;
+
     const [session, transcript] = await Promise.all([
       getCaseSession(caseId),
       getCaseTranscript(caseId)
@@ -278,6 +285,13 @@ export function mountApp(root: HTMLElement): void {
     state.transcripts[caseId] = transcript;
     if (rerender && state.route.name === "case" && state.route.id === caseId) {
       await renderRoute();
+      window.scrollTo({ top: pageScrollY, left: 0, behavior: "auto" });
+      const transcriptAfter = dom.main.querySelector<HTMLElement>(".session-transcript-window");
+      if (transcriptAfter) {
+        transcriptAfter.scrollTop = transcriptWasNearBottom
+          ? transcriptAfter.scrollHeight
+          : transcriptScrollTop;
+      }
     }
   };
 
