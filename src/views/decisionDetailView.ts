@@ -1,9 +1,20 @@
 import { renderLinkButton } from "../components/button";
 import { renderEvidenceCard } from "../components/evidenceCard";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
-import type { Decision } from "../data/types";
+import type { Decision, TranscriptEvent } from "../data/types";
 import { titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
+import { classifyAttachmentUrl } from "../util/media";
+import {
+  PROSECUTION_VOTE_PROMPT,
+  actorLabel,
+  collectVoteDisplayItems,
+  eventTimeLabel,
+  extractVoteAnswer,
+  extractVotePrompt,
+  isCourtSignpost,
+  stageLabel
+} from "../util/transcript";
 import { renderViewFrame } from "./common";
 
 function renderClaimTallies(decision: Decision): string {
@@ -34,7 +45,121 @@ function renderClaimTallies(decision: Decision): string {
   `;
 }
 
-export function renderDecisionDetailView(decision: Decision): string {
+function renderTranscript(events: TranscriptEvent[]): string {
+  if (events.length === 0) {
+    return `<p class="muted">No transcript events available for this decision.</p>`;
+  }
+
+  const renderAttachments = (event: TranscriptEvent): string => {
+    const urls = Array.isArray(event.payload?.attachmentUrls)
+      ? event.payload.attachmentUrls.map((value) => String(value)).filter(Boolean)
+      : [];
+    if (urls.length === 0) {
+      return "";
+    }
+    return `
+      <div class="chat-attachments">
+        ${urls
+          .map((url, index) => {
+            const safeUrl = escapeHtml(url);
+            const label = `Attachment ${index + 1}`;
+            const kind = classifyAttachmentUrl(url);
+            if (kind === "image") {
+              return `<figure class="chat-attachment-media"><img src="${safeUrl}" alt="${escapeHtml(label)}" loading="lazy" /></figure>`;
+            }
+            if (kind === "video") {
+              return `<figure class="chat-attachment-media"><video src="${safeUrl}" controls preload="metadata"></video></figure>`;
+            }
+            if (kind === "audio") {
+              return `<div class="chat-attachment-media"><audio src="${safeUrl}" controls preload="none"></audio></div>`;
+            }
+            return `<a class="chat-attachment-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+              url
+            )}</a>`;
+          })
+          .join("")}
+      </div>
+    `;
+  };
+
+  const voteItems = collectVoteDisplayItems(events);
+  const votePrompt =
+    events
+      .map((event) => extractVotePrompt(event))
+      .find((prompt): prompt is string => Boolean(prompt && prompt.trim())) ??
+    PROSECUTION_VOTE_PROMPT;
+
+  const voteFinish = voteItems.length
+    ? `
+      <section class="vote-finish-panel">
+        <h4>${escapeHtml(votePrompt)}</h4>
+        <div class="vote-finish-list">
+          ${voteItems
+            .map((item) => {
+              const answerLabel = item.answer === "yay" ? "Yay" : "Nay";
+              return `
+                <article class="vote-finish-bubble vote-${item.answer}">
+                  <header>
+                    <strong>${escapeHtml(item.jurorLabel)}</strong>
+                    <span>${escapeHtml(
+                      new Date(item.createdAtIso).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit"
+                      })
+                    )}</span>
+                  </header>
+                  <p class="vote-answer-chip vote-${item.answer}">${answerLabel}</p>
+                  ${item.reasoningSummary ? `<p>${escapeHtml(item.reasoningSummary)}</p>` : ""}
+                </article>
+              `;
+            })
+            .join("")}
+        </div>
+      </section>
+    `
+    : "";
+
+  return `
+    <section class="case-transcript-primary glass-overlay">
+      <h3>Court session transcript</h3>
+      <div class="session-transcript-window" aria-label="Decision transcript">
+        ${events
+          .map((event) => {
+            if (isCourtSignpost(event)) {
+              return `
+                <div class="stage-signpost">
+                  <span>${escapeHtml(stageLabel(event.stage))}</span>
+                  <p>${escapeHtml(event.messageText)}</p>
+                </div>
+              `;
+            }
+            const roleClass = `role-${event.actorRole}`;
+            const voteAnswer = extractVoteAnswer(event);
+            const answerChip = voteAnswer
+              ? `<p class="vote-answer-chip vote-${voteAnswer}">${voteAnswer === "yay" ? "Yay" : "Nay"}</p>`
+              : "";
+            return `
+              <div class="session-row ${roleClass}">
+                <article class="session-bubble ${roleClass}${voteAnswer ? ` vote-${voteAnswer}` : ""}">
+                  <header>
+                    <strong>${escapeHtml(actorLabel(event))}</strong>
+                    <span>${escapeHtml(eventTimeLabel(event))}</span>
+                  </header>
+                  ${answerChip}
+                  <p>${escapeHtml(event.messageText)}</p>
+                  ${renderAttachments(event)}
+                </article>
+              </div>
+            `;
+          })
+          .join("")}
+        ${voteFinish}
+      </div>
+    </section>
+  `;
+}
+
+export function renderDecisionDetailView(decision: Decision, transcript: TranscriptEvent[] = []): string {
   const linkValue = (value: string): string => {
     if (!/^https?:\/\//i.test(value)) {
       return escapeHtml(value);
@@ -51,6 +176,13 @@ export function renderDecisionDetailView(decision: Decision): string {
       : "";
 
   const body = `
+    <details class="case-detail-collapse glass-overlay" open>
+      <summary class="case-detail-collapse-summary">Court session transcript</summary>
+      <div class="case-detail-collapse-body">
+        ${renderTranscript(transcript)}
+      </div>
+    </details>
+
     <section class="detail-top">
       <div>
         <div class="case-idline">
@@ -63,6 +195,9 @@ export function renderDecisionDetailView(decision: Decision): string {
       <div>${renderLinkButton("Back to Past Decisions", "/past-decisions", "ghost")}</div>
     </section>
 
+    <details class="case-detail-collapse glass-overlay" open>
+      <summary class="case-detail-collapse-summary">Decision record</summary>
+      <div class="case-detail-collapse-body">
     <section class="record-grid">
       <article class="record-card glass-overlay">
         <h3>Verdict summary</h3>
@@ -149,6 +284,8 @@ export function renderDecisionDetailView(decision: Decision): string {
         </dl>
       </article>
     </section>
+      </div>
+    </details>
   `;
 
   return renderViewFrame({

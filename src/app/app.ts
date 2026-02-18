@@ -625,7 +625,15 @@ export function mountApp(root: HTMLElement): void {
       if (token !== routeToken) {
         return;
       }
-      setMainContent(decision ? renderDecisionDetailView(decision) : renderMissingDecisionView());
+      if (!decision) {
+        setMainContent(renderMissingDecisionView());
+      } else {
+        const transcript = await getCaseTranscript(decision.caseId);
+        if (token !== routeToken) {
+          return;
+        }
+        setMainContent(renderDecisionDetailView(decision, transcript));
+      }
     }
 
     patchCountdownRings(dom.main, state.nowMs);

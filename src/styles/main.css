@@ -1643,6 +1643,30 @@ svg {
   border-color: rgba(78, 153, 212, 0.34);
 }
 
+.session-bubble.role-prosecution p,
+.session-bubble.role-defence p,
+.session-bubble.role-juror p,
+.session-bubble.role-court p,
+.session-bubble.role-system p {
+  color: #0f172a;
+}
+
+.session-bubble.role-prosecution header strong,
+.session-bubble.role-defence header strong,
+.session-bubble.role-juror header strong,
+.session-bubble.role-court header strong,
+.session-bubble.role-system header strong {
+  color: #1e3a68;
+}
+
+.session-bubble.role-prosecution header span,
+.session-bubble.role-defence header span,
+.session-bubble.role-juror header span,
+.session-bubble.role-court header span,
+.session-bubble.role-system header span {
+  color: #334f75;
+}
+
 .vote-answer-chip {
   display: inline-flex;
   align-items: center;
@@ -2788,7 +2812,6 @@ body::before {
 .eligibility-card p,
 .party-column p,
 .chat-bubble p,
-.session-bubble p,
 .vote-finish-bubble p,
 .key-value-list dd,
 .case-summary,
@@ -2832,7 +2855,6 @@ body::before {
 .vote-mini-copy,
 .decision-row small,
 .chat-bubble header span,
-.session-bubble header span,
 .vote-finish-bubble header span,
 .jury-panel-head span,
 .flow-strip i,
