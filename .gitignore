@@ -8,3 +8,5 @@ runtime/credential-status.json
 runtime/credential-needs.md
 runtime/local-secrets.env
 runtime/agents/
+runtime/treasury-multisig/
+runtime/treasury-wallet.json

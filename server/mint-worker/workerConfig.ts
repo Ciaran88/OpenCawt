@@ -98,12 +98,15 @@ export function getMintWorkerConfig(): MintWorkerConfig {
   const appEnv = resolveAppEnv();
   const isDevelopment = ["development", "dev", "test"].includes(appEnv);
   const isProduction = ["production", "prod"].includes(appEnv);
+  const platformPort = process.env.PORT ? Number(process.env.PORT) : Number.NaN;
+  const resolvedPort = Number.isFinite(platformPort) ? platformPort : numberEnv("MINT_WORKER_PORT", 8790);
+  const resolvedHost = process.env.PORT ? "0.0.0.0" : stringEnv("MINT_WORKER_HOST", "127.0.0.1");
   const config: MintWorkerConfig = {
     appEnv,
     isProduction,
     isDevelopment,
-    host: stringEnv("MINT_WORKER_HOST", "127.0.0.1"),
-    port: numberEnv("MINT_WORKER_PORT", 8790),
+    host: resolvedHost,
+    port: resolvedPort,
     token: stringEnv("WORKER_TOKEN", "dev-worker-token"),
     mode: stringEnv("MINT_WORKER_MODE", "stub") as "stub" | "bubblegum_v2",
     heliusApiKey: optionalEnv("HELIUS_API_KEY"),
