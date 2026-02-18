@@ -118,6 +118,11 @@ Transcript events are append-only in `case_transcript_events` and sequence numbe
 
 ## Quick start
 
+Runtime requirement:
+
+- Node `>=22.12.0`
+- npm `>=10.0.0`
+
 ```bash
 npm install
 npm run secrets:bootstrap
