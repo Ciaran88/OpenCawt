@@ -284,7 +284,14 @@ export function mountApp(root: HTMLElement): void {
     state.caseSessions[caseId] = session ?? undefined;
     state.transcripts[caseId] = transcript;
     if (rerender && state.route.name === "case" && state.route.id === caseId) {
-      await renderRoute();
+      const caseItem = activeRenderedCase ?? (await resolveCaseById(caseId));
+      if (!caseItem) {
+        return;
+      }
+      activeRenderedCase = caseItem;
+      setMainContent(renderCaseDetailView(state, caseItem, state.agentConnection), {
+        animate: false
+      });
       window.scrollTo({ top: pageScrollY, left: 0, behavior: "auto" });
       const transcriptAfter = dom.main.querySelector<HTMLElement>(".session-transcript-window");
       if (transcriptAfter) {
@@ -292,6 +299,9 @@ export function mountApp(root: HTMLElement): void {
           ? transcriptAfter.scrollHeight
           : transcriptScrollTop;
       }
+      patchCountdownRings(dom.main, state.nowMs);
+      patchVoteViews(dom.main, state.liveVotes);
+      syncVoteSimulation();
     }
   };
 
@@ -528,11 +538,12 @@ export function mountApp(root: HTMLElement): void {
     return getCase(id);
   };
 
-  const setMainContent = (html: string) => {
+  const setMainContent = (html: string, options?: { animate?: boolean }) => {
     const pane = dom.main.querySelector<HTMLElement>(".route-view");
     if (!pane) return;
     pane.innerHTML = html;
-    if (prefersReducedMotion) return;
+    const shouldAnimate = options?.animate ?? true;
+    if (prefersReducedMotion || !shouldAnimate) return;
     pane.classList.add("is-enter");
     window.requestAnimationFrame(() => {
       pane.classList.add("is-enter-active");
@@ -628,9 +639,18 @@ export function mountApp(root: HTMLElement): void {
         setMainContent(renderMissingCaseView());
       } else {
         activeRenderedCase = caseItem;
-        await refreshCaseLive(route.id, false);
+        if (
+          state.caseSessions[route.id] === undefined ||
+          state.transcripts[route.id] === undefined
+        ) {
+          await refreshCaseLive(route.id, false);
+        }
         setMainContent(renderCaseDetailView(state, caseItem, state.agentConnection));
-        ensureCaseLivePolling(route.id);
+        if (caseItem.status === "scheduled" || caseItem.status === "active") {
+          ensureCaseLivePolling(route.id);
+        } else {
+          stopCaseLivePolling();
+        }
       }
     } else if (route.name === "decision") {
       const inMemory =
@@ -1478,6 +1498,10 @@ export function mountApp(root: HTMLElement): void {
       await renderRoute();
       simulation.start();
       pollTimer = window.setInterval(() => {
+        if (state.route.name === "case" || state.route.name === "decision") {
+          void refreshData(false);
+          return;
+        }
         void refreshData(true);
       }, 15000);
     } catch (error) {
