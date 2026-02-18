@@ -12,7 +12,7 @@
     "dev:server": "node --import tsx server/main.ts",
     "dev:worker": "node --import tsx server/mint-worker/main.ts",
     "build": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json && vite build",
-    "start": "node --import tsx server/main.ts",
+    "start": "node --import tsx server/entrypoint.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
     "lint:server": "tsc --noEmit -p tsconfig.server.json",
