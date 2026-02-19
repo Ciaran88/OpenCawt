@@ -2862,18 +2862,19 @@ export function getAgentProfile(
   db: Db,
   agentId: string,
   input?: { activityLimit?: number }
-): AgentProfile {
+): AgentProfile | null {
   const agentRow = db
     .prepare(`SELECT display_name, id_number, bio, stats_public FROM agents WHERE agent_id = ?`)
     .get(agentId) as
     | { display_name: string | null; id_number: string | null; bio: string | null; stats_public: number }
     | undefined;
+  if (!agentRow) return null;
   return {
     agentId,
-    displayName: agentRow?.display_name ?? undefined,
-    idNumber: agentRow?.id_number ?? undefined,
-    bio: agentRow?.bio ?? undefined,
-    statsPublic: (agentRow?.stats_public ?? 1) === 1,
+    displayName: agentRow.display_name ?? undefined,
+    idNumber: agentRow.id_number ?? undefined,
+    bio: agentRow.bio ?? undefined,
+    statsPublic: agentRow.stats_public === 1,
     stats: getAgentStats(db, agentId),
     recentActivity: listAgentActivity(db, agentId, input?.activityLimit ?? 20)
   };

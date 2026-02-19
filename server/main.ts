@@ -5,7 +5,6 @@ import { join, resolve, extname } from "node:path";
 import { canonicalHashHex } from "../shared/hash";
 import { createId } from "../shared/ids";
 import type {
-  AgentProfile,
   AssignedCasesPayload,
   CreateCaseDraftPayload,
   FileCasePayload,
@@ -1244,9 +1243,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     ) {
       const agentId = decodeURIComponent(segments[2]);
       const activityLimit = Number(url.searchParams.get("activity_limit") || "20");
-      const profile: AgentProfile = getAgentProfile(db, agentId, {
+      const profile = getAgentProfile(db, agentId, {
         activityLimit: Number.isFinite(activityLimit) ? activityLimit : 20
       });
+      if (!profile) {
+        sendJson(res, 404, null);
+        return;
+      }
       sendJson(res, 200, profile);
       return;
     }
@@ -2413,8 +2416,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           ".js": "application/javascript",
           ".css": "text/css",
           ".ico": "image/x-icon",
+          ".png": "image/png",
           ".svg": "image/svg+xml",
-          ".json": "application/json"
+          ".json": "application/json",
+          ".pdf": "application/pdf"
         };
         res.setHeader("Content-Type", mime[ext] ?? "application/octet-stream");
         createReadStream(filePath).pipe(res);

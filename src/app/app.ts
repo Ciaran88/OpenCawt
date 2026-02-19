@@ -1516,12 +1516,12 @@ export function mountApp(root: HTMLElement): void {
                 id="agent-search-input"
                 name="agentId"
                 type="search"
-                placeholder="Type agent ID or display name"
+                placeholder="Type agent ID or display name…"
                 autocomplete="off"
                 style="width:100%"
               />
             </label>
-            <div id="agent-search-suggestions" class="agent-search-suggestions" role="listbox" aria-label="Suggested agents"></div>
+            <div id="agent-search-suggestions" class="agent-search-suggestions" role="listbox" aria-label="Suggested agents" style="display:none"></div>
             <div id="agent-search-error" style="display:none" class="muted" role="alert"></div>
             <div class="form-actions" style="justify-content:space-between;gap:var(--space-2)">
               <button class="btn btn-ghost" type="button" data-action="modal-close">Cancel</button>
@@ -1533,9 +1533,19 @@ export function mountApp(root: HTMLElement): void {
       renderOverlay();
       window.setTimeout(() => {
         const searchInput = document.getElementById("agent-search-input") as HTMLInputElement | null;
+        const searchForm = document.getElementById("agent-search-form");
         searchInput?.focus();
 
         let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const showError = (msg: string) => {
+          const err = document.getElementById("agent-search-error");
+          if (err) { err.textContent = msg; err.style.display = "block"; }
+        };
+        const hideError = () => {
+          const err = document.getElementById("agent-search-error");
+          if (err) { err.textContent = ""; err.style.display = "none"; }
+        };
 
         const renderSuggestions = (agents: Array<{ agentId: string; displayName?: string }>) => {
           const el = document.getElementById("agent-search-suggestions");
@@ -1548,10 +1558,10 @@ export function mountApp(root: HTMLElement): void {
           el.innerHTML = agents
             .map(
               (a) =>
-                `<button type="button" class="agent-search-suggestion" data-agent-id="${escapeHtml(a.agentId)}" role="option" tabindex="-1">${escapeHtml(a.displayName || a.agentId)}</button>`
+                `<button type="button" class="agent-search-suggestion" data-agent-id="${escapeHtml(a.agentId)}" role="option" tabindex="-1">${escapeHtml(a.displayName ? `${a.displayName} — ${a.agentId.slice(0, 10)}…` : a.agentId)}</button>`
             )
             .join("");
-          el.style.display = "block";
+          el.style.display = "flex";
           agents.forEach((a, i) => {
             const btn = el.children[i] as HTMLButtonElement;
             btn?.addEventListener("click", () => {
@@ -1568,45 +1578,41 @@ export function mountApp(root: HTMLElement): void {
         };
 
         searchInput?.addEventListener("input", () => {
-          const err = document.getElementById("agent-search-error");
-          if (err) {
-            err.style.display = "none";
-            err.textContent = "";
-          }
+          hideError();
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(doSearch, 200);
         });
 
+        // Show top agents immediately on open
         doSearch();
-      }, 80);
 
-      const searchForm = document.getElementById("agent-search-form");
-      if (searchForm) {
-        searchForm.addEventListener("submit", async (evt) => {
+        searchForm?.addEventListener("submit", async (evt) => {
           evt.preventDefault();
-          const input = document.getElementById("agent-search-input") as HTMLInputElement | null;
-          const raw = input?.value.trim() ?? "";
+          hideError();
+          const raw = searchInput?.value.trim() ?? "";
           if (!raw) {
-            const err = document.getElementById("agent-search-error");
-            if (err) {
-              err.textContent = "Enter an agent ID or display name.";
-              err.style.display = "block";
-            }
+            showError("Enter an agent ID or display name.");
             return;
           }
-          let agentId = raw;
-          const suggestions = await searchAgents(raw, 10);
+          // Try to resolve display name → agentId via search
+          const suggestions = await searchAgents(raw, 20);
           const match = suggestions.find(
-            (a) => a.agentId === raw || (a.displayName && a.displayName.toLowerCase() === raw.toLowerCase())
+            (a) =>
+              a.agentId === raw ||
+              (a.displayName && a.displayName.toLowerCase() === raw.toLowerCase())
           );
           if (match) {
-            agentId = match.agentId;
+            state.ui.modal = null;
+            renderOverlay();
+            navigate({ name: "agent", id: match.agentId });
+            return;
           }
+          // Treat the raw value as a literal agent ID and let the profile page handle 404
           state.ui.modal = null;
           renderOverlay();
-          navigate({ name: "agent", id: agentId });
+          navigate({ name: "agent", id: raw });
         });
-      }
+      }, 80);
       return;
     }
 

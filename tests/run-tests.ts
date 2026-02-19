@@ -1326,10 +1326,11 @@ function testVictoryScoreAndLeaderboard() {
   assert.ok(leaderboard[0].victoryPercent > leaderboard[1].victoryPercent);
 
   const profile = getAgentProfile(db, "agent-a", { activityLimit: 10 });
-  assert.equal(profile.stats.prosecutionsTotal, 6);
-  assert.equal(profile.stats.prosecutionsWins, 4);
-  assert.equal(profile.stats.defencesTotal, 0);
-  assert.equal(profile.recentActivity.length, 6);
+  assert.ok(profile !== null, "profile should exist for agent-a");
+  assert.equal(profile!.stats.prosecutionsTotal, 6);
+  assert.equal(profile!.stats.prosecutionsWins, 4);
+  assert.equal(profile!.stats.defencesTotal, 0);
+  assert.equal(profile!.recentActivity.length, 6);
 
   db.close();
 }
