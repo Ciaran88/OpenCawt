@@ -19,6 +19,7 @@ import type {
   JurySelectionProof,
   LeaderboardEntry,
   LearningVoidReasonGroup,
+  MlSignals,
   OpenDefenceCaseSummary,
   OpenDefenceSearchFilters,
   Remedy,
@@ -3417,3 +3418,234 @@ export function getSealJobByJobId(db: Db, jobId: string): SealJobRecord | null {
     responseJson: row.response_json ? maybeJson(row.response_json, {}) : null
   };
 }
+
+// ── ML feature store ──────────────────────────────────────────────────────────
+
+/** Upsert a per-juror ML feature row. Called at ballot submission time. */
+export function upsertMlJurorFeatures(
+  db: Db,
+  input: {
+    caseId: string;
+    jurorId: string;
+    vote: string | null;
+    rationale: string;
+    replaced: boolean;
+    replacementReason?: string | null;
+    signals: MlSignals | null;
+  }
+): void {
+  const s = input.signals ?? {};
+  db.prepare(
+    `
+    INSERT INTO ml_juror_features (
+      case_id, juror_id, vote, rationale,
+      principle_importance, decisive_principle_index, confidence,
+      uncertainty_type, severity, harm_domains, primary_basis,
+      evidence_quality, missing_evidence_type,
+      recommended_remedy, proportionality,
+      decisive_evidence_id, process_flags,
+      replaced, replacement_reason,
+      capture_version, created_at
+    ) VALUES (
+      ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?,
+      ?, ?,
+      ?, ?,
+      ?, ?,
+      'v1', ?
+    )
+    ON CONFLICT(case_id, juror_id) DO UPDATE SET
+      vote                   = excluded.vote,
+      rationale              = excluded.rationale,
+      principle_importance   = excluded.principle_importance,
+      decisive_principle_index = excluded.decisive_principle_index,
+      confidence             = excluded.confidence,
+      uncertainty_type       = excluded.uncertainty_type,
+      severity               = excluded.severity,
+      harm_domains           = excluded.harm_domains,
+      primary_basis          = excluded.primary_basis,
+      evidence_quality       = excluded.evidence_quality,
+      missing_evidence_type  = excluded.missing_evidence_type,
+      recommended_remedy     = excluded.recommended_remedy,
+      proportionality        = excluded.proportionality,
+      decisive_evidence_id   = excluded.decisive_evidence_id,
+      process_flags          = excluded.process_flags,
+      replaced               = excluded.replaced,
+      replacement_reason     = excluded.replacement_reason
+    `
+  ).run(
+    input.caseId,
+    input.jurorId,
+    input.vote ?? null,
+    input.rationale,
+    s.principleImportance ? canonicalJson(s.principleImportance) : null,
+    s.decisivePrincipleIndex ?? null,
+    s.mlConfidence ?? null,
+    s.uncertaintyType ?? null,
+    s.severity ?? null,
+    s.harmDomains ? canonicalJson(s.harmDomains) : null,
+    s.primaryBasis ?? null,
+    s.evidenceQuality ?? null,
+    s.missingEvidenceType ?? null,
+    s.recommendedRemedy ?? null,
+    s.proportionality ?? null,
+    s.decisiveEvidenceId ?? null,
+    s.processFlags ? canonicalJson(s.processFlags) : null,
+    input.replaced ? 1 : 0,
+    input.replacementReason ?? null,
+    nowIso()
+  );
+}
+
+/** Upsert a per-case ML feature row. Called when a case closes or is voided. */
+export function upsertMlCaseFeatures(
+  db: Db,
+  input: {
+    caseId: string;
+    agenticCodeVersion: string;
+    outcome: string | null;
+    voidReasonGroup: string | null;
+    scheduledAt: string | null;
+    startedAt: string | null;
+    endedAt: string | null;
+    caseTopicTags?: string[] | null;
+  }
+): void {
+  db.prepare(
+    `
+    INSERT INTO ml_case_features (
+      case_id, agentic_code_version, outcome, void_reason_group,
+      scheduled_at, started_at, ended_at,
+      case_topic_tags, capture_version, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'v1', ?)
+    ON CONFLICT(case_id) DO UPDATE SET
+      agentic_code_version = excluded.agentic_code_version,
+      outcome              = excluded.outcome,
+      void_reason_group    = excluded.void_reason_group,
+      scheduled_at         = excluded.scheduled_at,
+      started_at           = excluded.started_at,
+      ended_at             = excluded.ended_at,
+      case_topic_tags      = excluded.case_topic_tags
+    `
+  ).run(
+    input.caseId,
+    input.agenticCodeVersion,
+    input.outcome ?? null,
+    input.voidReasonGroup ?? null,
+    input.scheduledAt ?? null,
+    input.startedAt ?? null,
+    input.endedAt ?? null,
+    input.caseTopicTags ? canonicalJson(input.caseTopicTags) : null,
+    nowIso()
+  );
+}
+
+/** Flat export row returned by listMlExport. */
+export interface MlExportRow {
+  caseId: string;
+  scheduledAt: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  outcome: string | null;
+  voidReasonGroup: string | null;
+  agenticCodeVersion: string;
+  caseTopicTags: string[] | null;
+  jurorId: string;
+  vote: string | null;
+  rationale: string;
+  principleImportance: number[] | null;
+  decisivePrincipleIndex: number | null;
+  confidence: number | null;
+  uncertaintyType: string | null;
+  severity: number | null;
+  harmDomains: string[] | null;
+  primaryBasis: string | null;
+  evidenceQuality: number | null;
+  missingEvidenceType: string | null;
+  recommendedRemedy: string | null;
+  proportionality: string | null;
+  decisiveEvidenceId: string | null;
+  processFlags: string[] | null;
+  replaced: boolean;
+  replacementReason: string | null;
+  captureVersion: string;
+  createdAt: string;
+}
+
+/** Returns all ml_juror_features rows joined with ml_case_features for export. */
+export function listMlExport(db: Db, input?: { limit?: number; offset?: number }): MlExportRow[] {
+  const limit = Math.min(input?.limit ?? 1000, 5000);
+  const offset = input?.offset ?? 0;
+
+  const rows = db.prepare(
+    `
+    SELECT
+      j.case_id,
+      c.scheduled_at,
+      c.started_at,
+      c.ended_at,
+      c.outcome,
+      c.void_reason_group,
+      COALESCE(c.agentic_code_version, 'v1') AS agentic_code_version,
+      c.case_topic_tags,
+      j.juror_id,
+      j.vote,
+      j.rationale,
+      j.principle_importance,
+      j.decisive_principle_index,
+      j.confidence,
+      j.uncertainty_type,
+      j.severity,
+      j.harm_domains,
+      j.primary_basis,
+      j.evidence_quality,
+      j.missing_evidence_type,
+      j.recommended_remedy,
+      j.proportionality,
+      j.decisive_evidence_id,
+      j.process_flags,
+      j.replaced,
+      j.replacement_reason,
+      j.capture_version,
+      j.created_at
+    FROM ml_juror_features j
+    LEFT JOIN ml_case_features c ON c.case_id = j.case_id
+    ORDER BY j.case_id ASC, j.juror_id ASC
+    LIMIT ? OFFSET ?
+    `
+  ).all(limit, offset) as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    caseId: String(r.case_id),
+    scheduledAt: r.scheduled_at ? String(r.scheduled_at) : null,
+    startedAt: r.started_at ? String(r.started_at) : null,
+    endedAt: r.ended_at ? String(r.ended_at) : null,
+    outcome: r.outcome ? String(r.outcome) : null,
+    voidReasonGroup: r.void_reason_group ? String(r.void_reason_group) : null,
+    agenticCodeVersion: String(r.agentic_code_version ?? "v1"),
+    caseTopicTags: r.case_topic_tags ? maybeJson<string[]>(r.case_topic_tags as string, []) : null,
+    jurorId: String(r.juror_id),
+    vote: r.vote ? String(r.vote) : null,
+    rationale: String(r.rationale ?? ""),
+    principleImportance: r.principle_importance ? maybeJson<number[]>(r.principle_importance as string, []) : null,
+    decisivePrincipleIndex: r.decisive_principle_index != null ? Number(r.decisive_principle_index) : null,
+    confidence: r.confidence != null ? Number(r.confidence) : null,
+    uncertaintyType: r.uncertainty_type ? String(r.uncertainty_type) : null,
+    severity: r.severity != null ? Number(r.severity) : null,
+    harmDomains: r.harm_domains ? maybeJson<string[]>(r.harm_domains as string, []) : null,
+    primaryBasis: r.primary_basis ? String(r.primary_basis) : null,
+    evidenceQuality: r.evidence_quality != null ? Number(r.evidence_quality) : null,
+    missingEvidenceType: r.missing_evidence_type ? String(r.missing_evidence_type) : null,
+    recommendedRemedy: r.recommended_remedy ? String(r.recommended_remedy) : null,
+    proportionality: r.proportionality ? String(r.proportionality) : null,
+    decisiveEvidenceId: r.decisive_evidence_id ? String(r.decisive_evidence_id) : null,
+    processFlags: r.process_flags ? maybeJson<string[]>(r.process_flags as string, []) : null,
+    replaced: r.replaced === 1,
+    replacementReason: r.replacement_reason ? String(r.replacement_reason) : null,
+    captureVersion: String(r.capture_version ?? "v1"),
+    createdAt: String(r.created_at)
+  }));
+}
+// ─────────────────────────────────────────────────────────────────────────────

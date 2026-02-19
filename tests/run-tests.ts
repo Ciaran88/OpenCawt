@@ -61,6 +61,7 @@ import { parseRoute, routeToPath } from "../src/util/router";
 import { loadOpenClawToolRegistry } from "../server/integrations/openclaw/exampleToolRegistry";
 import { OPENCAWT_OPENCLAW_TOOLS } from "../shared/openclawTools";
 import { PROSECUTION_VOTE_PROMPT, mapVoteToAnswer } from "../shared/transcriptVoting";
+import { validateMlSignals, MlValidationError } from "../server/ml/validateMlSignals";
 
 function withEnv<T>(
   overrides: Record<string, string | undefined>,
@@ -1446,6 +1447,97 @@ async function testDrandHttpIntegration() {
   assert.ok(result.chainInfo);
 }
 
+function testMlSignalValidation() {
+  // null/undefined inputs return null
+  assert.equal(validateMlSignals(null), null);
+  assert.equal(validateMlSignals(undefined), null);
+  assert.equal(validateMlSignals("bad"), null);
+
+  // empty object returns empty MlSignals
+  const empty = validateMlSignals({});
+  assert.ok(empty !== null);
+  assert.deepEqual(empty, {});
+
+  // valid principleImportance (length 12, each 0-3)
+  const valid12 = Array.from({ length: 12 }, (_, i) => i % 4);
+  const r1 = validateMlSignals({ principleImportance: valid12 });
+  assert.ok(r1 !== null);
+  assert.deepEqual(r1!.principleImportance, valid12);
+
+  // wrong length principleImportance throws
+  assert.throws(
+    () => validateMlSignals({ principleImportance: [1, 2, 3] }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "principleImportance"
+  );
+
+  // out-of-range value throws
+  assert.throws(
+    () => validateMlSignals({ principleImportance: Array.from({ length: 12 }, (_, i) => i === 0 ? 5 : 0) }),
+    (e: unknown) => e instanceof MlValidationError
+  );
+
+  // valid decisivePrincipleIndex 0-11
+  const r2 = validateMlSignals({ decisivePrincipleIndex: 11 });
+  assert.equal(r2!.decisivePrincipleIndex, 11);
+
+  // out of range throws
+  assert.throws(
+    () => validateMlSignals({ decisivePrincipleIndex: 12 }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "decisivePrincipleIndex"
+  );
+
+  // valid enum fields
+  const r3 = validateMlSignals({ uncertaintyType: "CONFLICTING_EVIDENCE", primaryBasis: "INTENT" });
+  assert.equal(r3!.uncertaintyType, "CONFLICTING_EVIDENCE");
+  assert.equal(r3!.primaryBasis, "INTENT");
+
+  // invalid enum throws
+  assert.throws(
+    () => validateMlSignals({ uncertaintyType: "NOT_A_REAL_TYPE" }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "uncertaintyType"
+  );
+
+  // valid harmDomains array
+  const r4 = validateMlSignals({ harmDomains: ["SAFETY", "FINANCIAL"] });
+  assert.deepEqual(r4!.harmDomains, ["SAFETY", "FINANCIAL"]);
+
+  // invalid harmDomain member throws
+  assert.throws(
+    () => validateMlSignals({ harmDomains: ["SAFETY", "BOGUS"] }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "harmDomains"
+  );
+
+  // ordinal 0-3 fields
+  const r5 = validateMlSignals({ mlConfidence: 3, severity: 0, evidenceQuality: 2 });
+  assert.equal(r5!.mlConfidence, 3);
+  assert.equal(r5!.severity, 0);
+  assert.equal(r5!.evidenceQuality, 2);
+
+  assert.throws(
+    () => validateMlSignals({ severity: 4 }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "severity"
+  );
+
+  // valid processFlags
+  const r6 = validateMlSignals({ processFlags: ["TIMEOUT", "SUSPECTED_COLLUSION"] });
+  assert.deepEqual(r6!.processFlags, ["TIMEOUT", "SUSPECTED_COLLUSION"]);
+
+  // invalid process flag throws
+  assert.throws(
+    () => validateMlSignals({ processFlags: ["TIMEOUT", "INVALID_FLAG"] }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "processFlags"
+  );
+
+  // valid recommendedRemedy and proportionality
+  const r7 = validateMlSignals({ recommendedRemedy: "WARNING", proportionality: "PROPORTIONATE" });
+  assert.equal(r7!.recommendedRemedy, "WARNING");
+  assert.equal(r7!.proportionality, "PROPORTIONATE");
+
+  // decisiveEvidenceId must be string
+  const r8 = validateMlSignals({ decisiveEvidenceId: "P-1" });
+  assert.equal(r8!.decisiveEvidenceId, "P-1");
+}
+
 async function run() {
   await testCountdownMaths();
   testRouteParsing();
@@ -1477,6 +1569,7 @@ async function run() {
   testVictoryScoreAndLeaderboard();
   testOpenDefenceQuery();
   testOpenClawToolContractParity();
+  testMlSignalValidation();
   await testDrandHttpIntegration();
   if (process.env.RUN_SMOKE_OPENCLAW === "1") {
     execFileSync("node", ["--import", "tsx", "tests/smoke/openclaw-participation.smoke.ts"], {

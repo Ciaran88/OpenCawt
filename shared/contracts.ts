@@ -54,6 +54,92 @@ export type EvidenceTypeLabel =
 export type EvidenceStrength = "weak" | "medium" | "strong";
 export type BallotConfidence = "low" | "medium" | "high";
 
+// ── ML ethics signal types ────────────────────────────────────────────────────
+// These types are collected per juror per case for future offline analysis.
+// They are optional additions to the ballot payload and have no effect on
+// case outcomes or the dispute protocol.
+
+export type MlUncertaintyType =
+  | "INSUFFICIENT_EVIDENCE"
+  | "CONFLICTING_EVIDENCE"
+  | "UNCLEAR_HARM"
+  | "UNCLEAR_INTENT"
+  | "AMBIGUOUS_PRINCIPLE_MAPPING"
+  | "PROCEDURAL_IRREGULARITY"
+  | "OTHER";
+
+export type MlHarmDomain =
+  | "INFORMATIONAL"
+  | "REPUTATIONAL"
+  | "FINANCIAL"
+  | "SAFETY"
+  | "AUTONOMY_CONSENT"
+  | "FAIRNESS_EQUITY"
+  | "PROCEDURAL_INTEGRITY";
+
+export type MlPrimaryBasis =
+  | "INTENT"
+  | "FORESEEABLE_CONSEQUENCES"
+  | "ACTUAL_OUTCOMES"
+  | "RULE_PROCEDURE_BREACH"
+  | "PATTERN_HISTORY";
+
+export type MlMissingEvidenceType =
+  | "LOGS"
+  | "PRIMARY_SOURCE"
+  | "TIMELINE"
+  | "THIRD_PARTY_CORROBORATION"
+  | "COUNTERFACTUAL"
+  | "EXPERT_JUDGEMENT"
+  | "OTHER";
+
+export type MlRecommendedRemedy =
+  | "NO_ACTION"
+  | "GUIDANCE_ONLY"
+  | "WARNING"
+  | "RESTRICTION_BAN"
+  | "RESTITUTION"
+  | "ESCALATE_HUMAN_REVIEW";
+
+export type MlProportionality =
+  | "TOO_LENIENT"
+  | "PROPORTIONATE"
+  | "TOO_HARSH"
+  | "NOT_SURE";
+
+export type MlProcessFlag =
+  | "TIMEOUT"
+  | "MISSING_STAGE_CONTENT"
+  | "OFF_TOPIC_ARGUMENT"
+  | "INADEQUATE_CITATIONS"
+  | "SUSPECTED_COLLUSION"
+  | "IDENTITY_UNCERTAINTY"
+  | "OTHER";
+
+/** Optional ML ethics signals submitted alongside a juror ballot. */
+export interface MlSignals {
+  /** Length-12 integer vector; 0 = not used, 1 = minor, 2 = important, 3 = decisive. */
+  principleImportance?: number[];
+  /** Index 0–11 of the single most decisive principle, or null. */
+  decisivePrincipleIndex?: number | null;
+  /** Juror confidence: 0 = low, 1 = medium, 2 = high, 3 = very high. */
+  mlConfidence?: number | null;
+  uncertaintyType?: MlUncertaintyType | null;
+  /** 0 = trivial, 1 = mild, 2 = material, 3 = severe. */
+  severity?: number | null;
+  harmDomains?: MlHarmDomain[] | null;
+  primaryBasis?: MlPrimaryBasis | null;
+  /** 0 = poor, 1 = mixed, 2 = strong, 3 = conclusive. */
+  evidenceQuality?: number | null;
+  missingEvidenceType?: MlMissingEvidenceType | null;
+  recommendedRemedy?: MlRecommendedRemedy | null;
+  proportionality?: MlProportionality | null;
+  /** Reference to a specific evidence package, e.g. "P-1" or "D-2". */
+  decisiveEvidenceId?: string | null;
+  processFlags?: MlProcessFlag[] | null;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export type CaseVoidReason =
   | "missing_defence_assignment"
   | "missing_opening_submission"
@@ -325,6 +411,8 @@ export interface SubmitBallotPayload {
   principlesReliedOn: Array<string | number>;
   confidence?: BallotConfidence;
   vote?: BallotVoteLabel;
+  /** Optional ML ethics signals. Ignored for case outcomes; stored for offline analysis. */
+  mlSignals?: MlSignals;
 }
 
 export interface JurorReadinessPayload {

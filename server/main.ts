@@ -73,8 +73,12 @@ import {
   storeVerdict,
   type CaseRecord,
   upsertAgent,
+  upsertMlCaseFeatures,
+  upsertMlJurorFeatures,
+  listMlExport,
   upsertSubmission
 } from "./db/repository";
+import { MlValidationError, validateMlSignals } from "./ml/validateMlSignals";
 import { openDatabase } from "./db/sqlite";
 import {
   assertSystemKey,
@@ -543,6 +547,17 @@ async function closeCasePipeline(caseId: string): Promise<{
       });
 
       const voidedCase = ensureCaseExists(caseId);
+      try {
+        upsertMlCaseFeatures(db, {
+          caseId,
+          agenticCodeVersion: "agentic-code-v1.0.0",
+          outcome: "void",
+          voidReasonGroup: voidedCase.voidReasonGroup ?? null,
+          scheduledAt: voidedCase.scheduledForIso ?? null,
+          startedAt: voidedCase.filedAtIso ?? null,
+          endedAt: voidedCase.voidedAtIso ?? closeTime
+        });
+      } catch { /* non-fatal */ }
       syncCaseReputation(db, voidedCase);
       return {
         caseId,
@@ -569,6 +584,17 @@ async function closeCasePipeline(caseId: string): Promise<{
     });
 
     const closedCase = ensureCaseExists(caseId);
+    try {
+      upsertMlCaseFeatures(db, {
+        caseId,
+        agenticCodeVersion: "agentic-code-v1.0.0",
+        outcome: closedCase.outcome ?? verdict.overallOutcome ?? null,
+        voidReasonGroup: null,
+        scheduledAt: closedCase.scheduledForIso ?? null,
+        startedAt: closedCase.filedAtIso ?? null,
+        endedAt: closedCase.closedAtIso ?? closeTime
+      });
+    } catch { /* non-fatal */ }
     syncCaseReputation(db, closedCase);
     const runtimeAfter = getCaseRuntime(db, caseId);
 
@@ -2015,6 +2041,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             }
           }
 
+          // Validate optional ML ethics signals. Errors here are bad-request.
+          let mlSignals = null;
+          try {
+            mlSignals = validateMlSignals(body.mlSignals);
+          } catch (err) {
+            if (err instanceof MlValidationError) {
+              throw badRequest("ML_SIGNAL_INVALID", err.message, { field: err.field });
+            }
+            throw err;
+          }
+
           const ballotHash = await canonicalHashHex({
             ...body,
             reasoningSummary,
@@ -2052,6 +2089,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           const voteLabel = mapAnswerToVoteLabel(voteAnswer);
 
           markJurorVoted(db, caseId, verified.agentId);
+
+          // Write ML juror feature row (fire-and-forget; never blocks the response)
+          try {
+            upsertMlJurorFeatures(db, {
+              caseId,
+              jurorId: verified.agentId,
+              vote: ballot.vote ?? null,
+              rationale: ballot.reasoningSummary,
+              replaced: false,
+              replacementReason: null,
+              signals: mlSignals
+            });
+          } catch {
+            // Non-fatal — ML write failure must never break the ballot response
+          }
 
           appendTranscriptEvent(db, {
             caseId,
@@ -2402,6 +2454,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             : "unknown"
       });
       sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/internal/ml/export") {
+      assertSystemKey(req, config);
+      const limit = Math.min(Number(url.searchParams.get("limit") || "1000"), 5000);
+      const offset = Number(url.searchParams.get("offset") || "0");
+      const rows = listMlExport(db, { limit, offset });
+      sendJson(res, 200, { count: rows.length, offset, rows });
       return;
     }
 

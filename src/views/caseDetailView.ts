@@ -563,6 +563,131 @@ export function renderCaseDetailView(
                   <option value="for_defence">For defence</option>
                 </select>
               </label>
+              ${!observerMode ? `
+              <details class="ml-advanced-drawer">
+                <summary class="ml-advanced-summary">Advanced signal capture</summary>
+                <div class="ml-advanced-body stack">
+                  <p class="muted" style="font-size:0.78rem">Optional ethics signals for offline analysis. All fields default to null and do not affect the verdict.</p>
+                  <fieldset class="ml-principle-grid" style="border:none;padding:0;margin:0">
+                    <legend style="font-size:0.78rem;color:var(--ink-muted);margin-bottom:var(--space-1)">Principle importance (0 not used · 1 minor · 2 important · 3 decisive)</legend>
+                    <div class="ml-pi-row">
+                      ${[1,2,3,4,5,6,7,8,9,10,11,12].map((n) =>
+                        `<label class="ml-pi-cell"><span class="ml-pi-label">P${n}</span><input type="number" name="ml_pi_${n}" min="0" max="3" value="" placeholder="–" class="ml-pi-input" /></label>`
+                      ).join("")}
+                    </div>
+                  </fieldset>
+                  <label><span>Most decisive principle (optional, 1–12)</span>
+                    <input type="number" name="ml_decisive_principle" min="1" max="12" placeholder="–" />
+                  </label>
+                  <label><span>Juror confidence</span>
+                    <select name="ml_confidence">
+                      <option value="">Not set</option>
+                      <option value="0">0 – Low</option>
+                      <option value="1">1 – Medium</option>
+                      <option value="2">2 – High</option>
+                      <option value="3">3 – Very high</option>
+                    </select>
+                  </label>
+                  <label><span>Uncertainty type</span>
+                    <select name="ml_uncertainty_type">
+                      <option value="">Not set</option>
+                      <option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option>
+                      <option value="CONFLICTING_EVIDENCE">Conflicting evidence</option>
+                      <option value="UNCLEAR_HARM">Unclear harm</option>
+                      <option value="UNCLEAR_INTENT">Unclear intent</option>
+                      <option value="AMBIGUOUS_PRINCIPLE_MAPPING">Ambiguous principle mapping</option>
+                      <option value="PROCEDURAL_IRREGULARITY">Procedural irregularity</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </label>
+                  <label><span>Severity (0 trivial · 1 mild · 2 material · 3 severe)</span>
+                    <select name="ml_severity">
+                      <option value="">Not set</option>
+                      <option value="0">0 – Trivial</option>
+                      <option value="1">1 – Mild</option>
+                      <option value="2">2 – Material</option>
+                      <option value="3">3 – Severe</option>
+                    </select>
+                  </label>
+                  <label><span>Harm domains (hold Ctrl/Cmd to select multiple)</span>
+                    <select name="ml_harm_domains" multiple size="4">
+                      <option value="INFORMATIONAL">Informational</option>
+                      <option value="REPUTATIONAL">Reputational</option>
+                      <option value="FINANCIAL">Financial</option>
+                      <option value="SAFETY">Safety</option>
+                      <option value="AUTONOMY_CONSENT">Autonomy / consent</option>
+                      <option value="FAIRNESS_EQUITY">Fairness / equity</option>
+                      <option value="PROCEDURAL_INTEGRITY">Procedural integrity</option>
+                    </select>
+                  </label>
+                  <label><span>Primary basis</span>
+                    <select name="ml_primary_basis">
+                      <option value="">Not set</option>
+                      <option value="INTENT">Intent</option>
+                      <option value="FORESEEABLE_CONSEQUENCES">Foreseeable consequences</option>
+                      <option value="ACTUAL_OUTCOMES">Actual outcomes</option>
+                      <option value="RULE_PROCEDURE_BREACH">Rule / procedure breach</option>
+                      <option value="PATTERN_HISTORY">Pattern / history</option>
+                    </select>
+                  </label>
+                  <label><span>Evidence quality (0 poor · 1 mixed · 2 strong · 3 conclusive)</span>
+                    <select name="ml_evidence_quality">
+                      <option value="">Not set</option>
+                      <option value="0">0 – Poor</option>
+                      <option value="1">1 – Mixed</option>
+                      <option value="2">2 – Strong</option>
+                      <option value="3">3 – Conclusive</option>
+                    </select>
+                  </label>
+                  <label><span>Missing evidence type</span>
+                    <select name="ml_missing_evidence_type">
+                      <option value="">Not set</option>
+                      <option value="LOGS">Logs</option>
+                      <option value="PRIMARY_SOURCE">Primary source</option>
+                      <option value="TIMELINE">Timeline</option>
+                      <option value="THIRD_PARTY_CORROBORATION">Third-party corroboration</option>
+                      <option value="COUNTERFACTUAL">Counterfactual</option>
+                      <option value="EXPERT_JUDGEMENT">Expert judgement</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </label>
+                  <label><span>Recommended remedy</span>
+                    <select name="ml_recommended_remedy">
+                      <option value="">Not set</option>
+                      <option value="NO_ACTION">No action</option>
+                      <option value="GUIDANCE_ONLY">Guidance only</option>
+                      <option value="WARNING">Warning</option>
+                      <option value="RESTRICTION_BAN">Restriction / ban</option>
+                      <option value="RESTITUTION">Restitution</option>
+                      <option value="ESCALATE_HUMAN_REVIEW">Escalate to human review</option>
+                    </select>
+                  </label>
+                  <label><span>Proportionality</span>
+                    <select name="ml_proportionality">
+                      <option value="">Not set</option>
+                      <option value="TOO_LENIENT">Too lenient</option>
+                      <option value="PROPORTIONATE">Proportionate</option>
+                      <option value="TOO_HARSH">Too harsh</option>
+                      <option value="NOT_SURE">Not sure</option>
+                    </select>
+                  </label>
+                  <label><span>Decisive evidence ID (optional, e.g. P-1 or D-2)</span>
+                    <input type="text" name="ml_decisive_evidence_id" placeholder="e.g. P-1" maxlength="40" />
+                  </label>
+                  <label><span>Process flags (hold Ctrl/Cmd to select multiple)</span>
+                    <select name="ml_process_flags" multiple size="4">
+                      <option value="TIMEOUT">Timeout</option>
+                      <option value="MISSING_STAGE_CONTENT">Missing stage content</option>
+                      <option value="OFF_TOPIC_ARGUMENT">Off-topic argument</option>
+                      <option value="INADEQUATE_CITATIONS">Inadequate citations</option>
+                      <option value="SUSPECTED_COLLUSION">Suspected collusion</option>
+                      <option value="IDENTITY_UNCERTAINTY">Identity uncertainty</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+              ` : ""}
               ${renderPrimaryPillButton("Submit ballot", { type: "submit" })}
               </fieldset>
             </form>

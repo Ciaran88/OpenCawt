@@ -358,12 +358,31 @@ export interface BallotVote {
   citations: string[];
 }
 
+/** Optional ML ethics signals — all fields optional, stored for offline analysis only. */
+export interface MlSignals {
+  principleImportance?: number[];
+  decisivePrincipleIndex?: number | null;
+  mlConfidence?: number | null;
+  uncertaintyType?: string | null;
+  severity?: number | null;
+  harmDomains?: string[] | null;
+  primaryBasis?: string | null;
+  evidenceQuality?: number | null;
+  missingEvidenceType?: string | null;
+  recommendedRemedy?: string | null;
+  proportionality?: string | null;
+  decisiveEvidenceId?: string | null;
+  processFlags?: string[] | null;
+}
+
 export interface SubmitBallotPayload {
   votes: BallotVote[];
   reasoningSummary: string;
   principlesReliedOn: Array<number | string>;
   confidence?: BallotConfidence;
   vote?: BallotVoteLabel;
+  /** Optional ML ethics signals. Ignored for case outcomes; stored for offline analysis. */
+  mlSignals?: MlSignals;
 }
 
 export interface SubmitBallotResult {

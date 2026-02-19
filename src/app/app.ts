@@ -45,6 +45,7 @@ import type {
   Case,
   JoinJuryPoolPayload,
   LodgeDisputeDraftPayload,
+  MlSignals,
   OpenDefenceSearchFilters,
   SubmitBallotPayload,
   SubmitEvidencePayload,
@@ -1308,6 +1309,42 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    // Collect optional ML ethics signals from the Advanced drawer (agent-only, all optional)
+    const mlSignals: MlSignals = {};
+    const piValues = [1,2,3,4,5,6,7,8,9,10,11,12].map((n) => {
+      const raw = String(formData.get(`ml_pi_${n}`) ?? "").trim();
+      return raw === "" ? null : Number(raw);
+    });
+    if (piValues.some((v) => v !== null)) {
+      mlSignals.principleImportance = piValues.map((v) => (v === null ? 0 : v));
+    }
+    const dpRaw = String(formData.get("ml_decisive_principle") ?? "").trim();
+    if (dpRaw !== "") mlSignals.decisivePrincipleIndex = Number(dpRaw) - 1; // UI is 1-12, API is 0-11
+    const mlConf = String(formData.get("ml_confidence") ?? "").trim();
+    if (mlConf !== "") mlSignals.mlConfidence = Number(mlConf);
+    const uncertaintyType = String(formData.get("ml_uncertainty_type") ?? "").trim();
+    if (uncertaintyType) mlSignals.uncertaintyType = uncertaintyType;
+    const mlSeverity = String(formData.get("ml_severity") ?? "").trim();
+    if (mlSeverity !== "") mlSignals.severity = Number(mlSeverity);
+    const harmDomains = formData.getAll("ml_harm_domains").map(String).filter(Boolean);
+    if (harmDomains.length > 0) mlSignals.harmDomains = harmDomains;
+    const primaryBasis = String(formData.get("ml_primary_basis") ?? "").trim();
+    if (primaryBasis) mlSignals.primaryBasis = primaryBasis;
+    const evQuality = String(formData.get("ml_evidence_quality") ?? "").trim();
+    if (evQuality !== "") mlSignals.evidenceQuality = Number(evQuality);
+    const missingEv = String(formData.get("ml_missing_evidence_type") ?? "").trim();
+    if (missingEv) mlSignals.missingEvidenceType = missingEv;
+    const remedy = String(formData.get("ml_recommended_remedy") ?? "").trim();
+    if (remedy) mlSignals.recommendedRemedy = remedy;
+    const prop = String(formData.get("ml_proportionality") ?? "").trim();
+    if (prop) mlSignals.proportionality = prop;
+    const decisiveEv = String(formData.get("ml_decisive_evidence_id") ?? "").trim();
+    if (decisiveEv) mlSignals.decisiveEvidenceId = decisiveEv;
+    const processFlags = formData.getAll("ml_process_flags").map(String).filter(Boolean);
+    if (processFlags.length > 0) mlSignals.processFlags = processFlags;
+
+    const hasMlSignals = Object.keys(mlSignals).length > 0;
+
     const payload: SubmitBallotPayload = {
       reasoningSummary,
       principlesReliedOn,
@@ -1322,7 +1359,8 @@ export function mountApp(root: HTMLElement): void {
           rationale: reasoningSummary,
           citations: []
         }
-      ]
+      ],
+      ...(hasMlSignals ? { mlSignals } : {})
     };
 
     try {
