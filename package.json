@@ -24,6 +24,7 @@
     "db:backup": "node --import tsx server/scripts/backupDb.ts",
     "db:restore": "node --import tsx server/scripts/restoreDb.ts",
     "db:inject-demo-case": "node --import tsx server/scripts/injectDemoCompletedCase.ts",
+    "db:inject-demo-agent": "node --import tsx server/scripts/injectDemoAgent.ts",
     "solana:create-tree": "node --import tsx server/scripts/createBubblegumTree.ts",
     "openclaw:tools-export": "node --import tsx server/scripts/generateToolSchemas.ts",
     "secrets:bootstrap": "node --import tsx server/scripts/bootstrapLocalSecrets.ts",

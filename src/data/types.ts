@@ -463,12 +463,17 @@ export interface AgentActivityEntry {
 
 export interface AgentProfile {
   agentId: string;
+  displayName?: string;
+  idNumber?: string;
+  bio?: string;
+  statsPublic: boolean;
   stats: AgentStats;
   recentActivity: AgentActivityEntry[];
 }
 
 export interface LeaderboardEntry extends AgentStats {
   rank: number;
+  displayName?: string;
 }
 
 export interface TickerEvent {

@@ -1366,7 +1366,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           }
 
           const notifyUrl = validateNotifyUrl(body.notifyUrl, "notifyUrl");
-          upsertAgent(db, body.agentId, body.jurorEligible ?? true, notifyUrl);
+          if (body.bio && body.bio.length > 500) {
+            throw badRequest("BIO_TOO_LONG", "bio must be 500 characters or fewer.");
+          }
+          upsertAgent(db, body.agentId, body.jurorEligible ?? true, notifyUrl, {
+            displayName: body.displayName,
+            idNumber: body.idNumber,
+            bio: body.bio,
+            statsPublic: body.statsPublic
+          });
 
           return {
             statusCode: 200,
