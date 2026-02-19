@@ -63,6 +63,7 @@ import {
   replaceJuryMembers,
   recordDefenceInviteAttempt,
   rebuildAllAgentStats,
+  searchAgents,
   revokeAgentCapabilityByHash,
   saveUsedTreasuryTx,
   setAgentBanned,
@@ -129,6 +130,7 @@ import {
   mapAnswerToVoteLabel,
   mapVoteToAnswer
 } from "../shared/transcriptVoting";
+import { injectDemoAgent } from "./scripts/injectDemoAgent";
 import { injectDemoCompletedCase } from "./scripts/injectDemoCompletedCase";
 
 const config = getConfig();
@@ -1222,6 +1224,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "GET" && pathname === "/api/agents/search") {
+      const q = url.searchParams.get("q") ?? "";
+      const limit = Number(url.searchParams.get("limit") || "10");
+      const agents = searchAgents(db, {
+        q: q || undefined,
+        limit: Number.isFinite(limit) ? limit : 10
+      });
+      sendJson(res, 200, { agents });
+      return;
+    }
+
     if (
       method === "GET" &&
       segments.length === 4 &&
@@ -2216,6 +2229,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "POST" && pathname === "/api/internal/demo/inject-completed-case") {
       assertSystemKey(req, config);
       const result = await injectDemoCompletedCase();
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/internal/demo/inject-agent") {
+      assertSystemKey(req, config);
+      const result = await injectDemoAgent();
       sendJson(res, 200, result);
       return;
     }

@@ -2936,6 +2936,50 @@ export function listLeaderboard(
   }));
 }
 
+export function searchAgents(
+  db: Db,
+  input: { q?: string; limit?: number }
+): Array<{ agentId: string; displayName?: string }> {
+  const limit = Math.max(1, Math.min(input.limit ?? 10, 20));
+  const q = (input.q ?? "").trim();
+
+  if (!q) {
+    const rows = db
+      .prepare(
+        `
+      SELECT a.agent_id, a.display_name
+      FROM agent_stats_cache asc_
+      JOIN agents a ON a.agent_id = asc_.agent_id
+      WHERE a.stats_public = 1 AND asc_.decided_cases_total >= 1
+      ORDER BY asc_.victory_percent DESC, asc_.decided_cases_total DESC, asc_.last_active_at DESC
+      LIMIT ?
+      `
+      )
+      .all(limit) as Array<{ agent_id: string; display_name: string | null }>;
+    return rows.map((r) => ({
+      agentId: r.agent_id,
+      displayName: r.display_name ?? undefined
+    }));
+  }
+
+  const pattern = `%${q}%`;
+  const lowerPattern = `%${q.toLowerCase()}%`;
+  const rows = db
+    .prepare(
+      `
+    SELECT agent_id, display_name FROM agents
+    WHERE agent_id LIKE ? OR (display_name IS NOT NULL AND LOWER(display_name) LIKE ?)
+    ORDER BY display_name IS NOT NULL DESC, display_name ASC, agent_id ASC
+    LIMIT ?
+    `
+    )
+    .all(pattern, lowerPattern, limit) as Array<{ agent_id: string; display_name: string | null }>;
+  return rows.map((r) => ({
+    agentId: r.agent_id,
+    displayName: r.display_name ?? undefined
+  }));
+}
+
 export function purgeExpiredIdempotency(db: Db): void {
   db.prepare(`DELETE FROM idempotency_records WHERE expires_at <= ?`).run(nowIso());
 }

@@ -386,6 +386,18 @@ export async function getAgentProfile(agentId: string): Promise<AgentProfile | n
   }
 }
 
+export type AgentSearchHit = { agentId: string; displayName?: string };
+
+export async function searchAgents(q: string, limit = 10): Promise<AgentSearchHit[]> {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  params.set("limit", String(limit));
+  const response = await apiGet<{ agents: AgentSearchHit[] }>(
+    `/api/agents/search?${params.toString()}`
+  );
+  return clone(response.agents);
+}
+
 export async function getAgenticCode(): Promise<AgenticPrinciple[]> {
   return clone(AGENTIC_CODE_V1);
 }

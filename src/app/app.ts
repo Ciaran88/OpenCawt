@@ -23,6 +23,7 @@ import {
   getAgentProfile,
   getPastDecisions,
   getLeaderboard,
+  searchAgents,
   getOpenDefenceCases,
   getRuleLimits,
   getSchedule,
@@ -1480,22 +1481,47 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "open-whitepaper-modal") {
+      state.ui.modal = {
+        title: "Download Whitepaper",
+        html: `
+          <p>Download the OpenCawt whitepaper to learn more about the protocol.</p>
+          <a href="/OpenCawt_Whitepaper.pdf" download="OpenCawt_Whitepaper.pdf" class="btn btn-primary">Download PDF</a>
+        `
+      };
+      renderOverlay();
+      return;
+    }
+
+    if (action === "open-docs-modal") {
+      state.ui.modal = {
+        title: "Download Documentation",
+        html: `
+          <p>Download the OpenCawt documentation to learn how to integrate and use the protocol.</p>
+          <a href="/OpenCawt_Documentation.pdf" download="OpenCawt_Documentation.pdf" class="btn btn-primary">Download PDF</a>
+        `
+      };
+      renderOverlay();
+      return;
+    }
+
     if (action === "open-agent-search") {
       state.ui.modal = {
         title: "Search agents",
         html: `
           <form id="agent-search-form" class="stack" style="gap:var(--space-3)">
-            <label class="search-field" aria-label="Agent ID">
-              <span class="segmented-label">Agent ID</span>
+            <label class="search-field" aria-label="Agent ID or display name">
+              <span class="segmented-label">Agent ID or display name</span>
               <input
                 id="agent-search-input"
                 name="agentId"
                 type="search"
-                placeholder="Paste or type an agent ID"
+                placeholder="Type agent ID or display name"
                 autocomplete="off"
                 style="width:100%"
               />
             </label>
+            <div id="agent-search-suggestions" class="agent-search-suggestions" role="listbox" aria-label="Suggested agents"></div>
             <div id="agent-search-error" style="display:none" class="muted" role="alert"></div>
             <div class="form-actions" style="justify-content:space-between;gap:var(--space-2)">
               <button class="btn btn-ghost" type="button" data-action="modal-close">Cancel</button>
@@ -1506,22 +1532,75 @@ export function mountApp(root: HTMLElement): void {
       };
       renderOverlay();
       window.setTimeout(() => {
-        document.getElementById("agent-search-input")?.focus();
+        const searchInput = document.getElementById("agent-search-input") as HTMLInputElement | null;
+        searchInput?.focus();
+
+        let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const renderSuggestions = (agents: Array<{ agentId: string; displayName?: string }>) => {
+          const el = document.getElementById("agent-search-suggestions");
+          if (!el) return;
+          if (agents.length === 0) {
+            el.innerHTML = "";
+            el.style.display = "none";
+            return;
+          }
+          el.innerHTML = agents
+            .map(
+              (a) =>
+                `<button type="button" class="agent-search-suggestion" data-agent-id="${escapeHtml(a.agentId)}" role="option" tabindex="-1">${escapeHtml(a.displayName || a.agentId)}</button>`
+            )
+            .join("");
+          el.style.display = "block";
+          agents.forEach((a, i) => {
+            const btn = el.children[i] as HTMLButtonElement;
+            btn?.addEventListener("click", () => {
+              state.ui.modal = null;
+              renderOverlay();
+              navigate({ name: "agent", id: a.agentId });
+            });
+          });
+        };
+
+        const doSearch = () => {
+          const q = searchInput?.value.trim() ?? "";
+          void searchAgents(q, 10).then(renderSuggestions);
+        };
+
+        searchInput?.addEventListener("input", () => {
+          const err = document.getElementById("agent-search-error");
+          if (err) {
+            err.style.display = "none";
+            err.textContent = "";
+          }
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(doSearch, 200);
+        });
+
+        doSearch();
       }, 80);
 
       const searchForm = document.getElementById("agent-search-form");
       if (searchForm) {
-        searchForm.addEventListener("submit", (evt) => {
+        searchForm.addEventListener("submit", async (evt) => {
           evt.preventDefault();
           const input = document.getElementById("agent-search-input") as HTMLInputElement | null;
-          const agentId = input?.value.trim() ?? "";
-          if (!agentId) {
+          const raw = input?.value.trim() ?? "";
+          if (!raw) {
             const err = document.getElementById("agent-search-error");
             if (err) {
-              err.textContent = "Enter a valid agent ID.";
+              err.textContent = "Enter an agent ID or display name.";
               err.style.display = "block";
             }
             return;
+          }
+          let agentId = raw;
+          const suggestions = await searchAgents(raw, 10);
+          const match = suggestions.find(
+            (a) => a.agentId === raw || (a.displayName && a.displayName.toLowerCase() === raw.toLowerCase())
+          );
+          if (match) {
+            agentId = match.agentId;
           }
           state.ui.modal = null;
           renderOverlay();
