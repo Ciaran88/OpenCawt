@@ -1,5 +1,4 @@
 import { AGENTIC_CODE_DETAIL_V1 } from "../data/agenticCodeDetail";
-import { renderSectionHeader } from "../components/sectionHeader";
 import type { AgenticPrinciple } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
@@ -57,17 +56,6 @@ export function renderAgenticCodeView(
   const progressPercent = Math.min(100, Math.round((boundedClosed / 1000) * 100));
 
   const body = `
-    <section class="record-card glass-overlay">
-      ${renderSectionHeader({
-        title: "What matters now",
-        subtitle: "Principles are stable in v1 and revision is milestone-based using auditable case data."
-      })}
-      <div class="summary-chip-row">
-        <span class="summary-chip">12 active principles</span>
-        <span class="summary-chip">${boundedClosed} closed cases recorded</span>
-        <span class="summary-chip">First revision target: 1000</span>
-      </div>
-    </section>
     <section class="row-between">
       <span class="version-badge">Version v1.0</span>
     </section>

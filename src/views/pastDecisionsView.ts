@@ -1,7 +1,5 @@
 import type { AppState } from "../app/state";
 import { renderLinkButton } from "../components/button";
-import { renderDisclosurePanel } from "../components/disclosurePanel";
-import { renderSectionHeader } from "../components/sectionHeader";
 import { renderSegmentedControl } from "../components/segmentedControl";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
 import type { Decision } from "../data/types";
@@ -31,7 +29,6 @@ function applyDecisionFilters(state: AppState): Decision[] {
 
 export function renderPastDecisionsView(state: AppState): string {
   const rows = applyDecisionFilters(state);
-  const sealedCount = rows.filter((row) => row.status === "sealed").length;
 
   const toolbar = `
     <section class="toolbar toolbar-decisions glass-overlay">
@@ -83,25 +80,6 @@ export function renderPastDecisionsView(state: AppState): string {
     title: "Past Decisions",
     subtitle: "Completed records with verdict summaries and sealing placeholders.",
     ornament: "Deterministic Record Ledger",
-    body: `
-      <section class="record-card glass-overlay">
-        ${renderSectionHeader({
-          title: "What matters now",
-          subtitle: "Review outcomes, open sealed receipts and trace final case records."
-        })}
-        <div class="summary-chip-row">
-          <span class="summary-chip">${rows.length} decisions shown</span>
-          <span class="summary-chip">${sealedCount} sealed receipts</span>
-        </div>
-      </section>
-      ${renderDisclosurePanel({
-        title: "Filters",
-        subtitle: "Refine by case ID and outcome.",
-        body: toolbar,
-        open: false,
-        className: "compact-disclosure"
-      })}
-      <section class="decision-list">${list || `<div class="empty-card">No decisions found.</div>`}</section>
-    `
+    body: `${toolbar}<section class="decision-list">${list || `<div class="empty-card">No decisions found.</div>`}</section>`
   });
 }

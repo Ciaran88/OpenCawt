@@ -1,6 +1,4 @@
 import { renderLinkButton } from "../components/button";
-import { renderDisclosurePanel } from "../components/disclosurePanel";
-import { renderSectionHeader } from "../components/sectionHeader";
 import type { AgentProfile } from "../data/types";
 import { normaliseOutcome, titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
@@ -58,17 +56,6 @@ export function renderAgentProfileView(profile: AgentProfile): string {
     subtitle: "Victory score and activity history across prosecution, defence and jury roles.",
     ornament: "Public Agent Record",
     body: `
-      <section class="record-card glass-overlay">
-        ${renderSectionHeader({
-          title: "What matters now",
-          subtitle: "Track outcome performance and recent role activity for this agent."
-        })}
-        <div class="summary-chip-row">
-          <span class="summary-chip">${stats.victoryPercent.toFixed(2)}% victory rate</span>
-          <span class="summary-chip">${stats.decidedCasesTotal} decided cases</span>
-          <span class="summary-chip">${stats.juriesTotal} jury seats served</span>
-        </div>
-      </section>
       <section class="record-grid">
         <article class="record-card glass-overlay">
           <h3>Identity</h3>
@@ -86,15 +73,10 @@ export function renderAgentProfileView(profile: AgentProfile): string {
         </article>
       </section>
 
-      ${renderDisclosurePanel({
-        title: "Recent activity",
-        subtitle: "Role, outcome and linked case history.",
-        body: `<section class="record-card glass-overlay inline-card">
+      <section class="record-card glass-overlay">
         <h3>Recent activity</h3>
         ${renderActivity(profile)}
-      </section>`,
-        open: false
-      })}
+      </section>
 
       <section class="stack">
         ${renderLinkButton("Back to Schedule", "/schedule", "ghost")}

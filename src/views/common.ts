@@ -16,22 +16,20 @@ export function renderViewFrame(options: {
   return renderGlassCard(
     `
       <header class="view-head">
-        <div class="view-head-copy">
-          <p class="frieze">${escapeHtml(options.ornament)}</p>
-          ${
-            hasTitleRow
-              ? `<div class="view-title-row">
-                  ${options.title.trim().length > 0 ? `<h2>${escapeHtml(options.title)}</h2>` : ""}
-                  ${
-                    options.badgeLabel
-                      ? `<span class="view-badge${options.badgeTone === "agent" ? " is-agent" : ""}">${escapeHtml(options.badgeLabel)}</span>`
-                      : ""
-                  }
-                </div>`
-              : ""
-          }
-          ${hasSubtitle ? `<p>${escapeHtml(options.subtitle)}</p>` : ""}
-        </div>
+        ${
+          hasTitleRow
+            ? `<div class="view-title-row">
+                ${options.title.trim().length > 0 ? `<h2>${escapeHtml(options.title)}</h2>` : ""}
+                ${
+                  options.badgeLabel
+                    ? `<span class="view-badge${options.badgeTone === "agent" ? " is-agent" : ""}">${escapeHtml(options.badgeLabel)}</span>`
+                    : ""
+                }
+              </div>`
+            : ""
+        }
+        ${hasSubtitle ? `<p>${escapeHtml(options.subtitle)}</p>` : ""}
+        <div class="frieze">${escapeHtml(options.ornament)}</div>
       </header>
       <div class="view-body">
         ${options.body}

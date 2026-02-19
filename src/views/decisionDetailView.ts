@@ -1,7 +1,6 @@
 import { renderLinkButton } from "../components/button";
 import { renderEvidenceCard } from "../components/evidenceCard";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
-import { renderDisclosurePanel } from "../components/disclosurePanel";
 import type { Decision, TranscriptEvent } from "../data/types";
 import { titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
@@ -177,38 +176,26 @@ export function renderDecisionDetailView(decision: Decision, transcript: Transcr
       : "";
 
   const body = `
-    ${renderDisclosurePanel({
-      title: "Court session transcript",
-      subtitle:
-        transcript.length > 0
-          ? `${transcript.length} events available. Expand to review full session flow.`
-          : "No transcript events available for this decision.",
-      body: renderTranscript(transcript),
-      open: false
-    })}
+    <details class="case-detail-collapse glass-overlay" open>
+      <summary class="case-detail-collapse-summary">Court session transcript</summary>
+      <div class="case-detail-collapse-body">
+        ${renderTranscript(transcript)}
+      </div>
+    </details>
 
     <section class="detail-top">
-      <section class="record-card glass-overlay">
+      <div>
         <div class="case-idline">
           <span class="case-id">${escapeHtml(decision.caseId)}</span>
           ${renderStatusPill(titleCaseOutcome(decision.outcome), statusFromOutcome(decision.outcome))}
           ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
         </div>
         <p>${escapeHtml(decision.summary)}</p>
-        <div class="summary-chip-row">
-          <span class="summary-chip">${escapeHtml(decision.voteSummary.votesCast.toString())}/${escapeHtml(
-            decision.voteSummary.jurySize.toString()
-          )} votes cast</span>
-          <span class="summary-chip">Outcome: ${escapeHtml(titleCaseOutcome(decision.outcome))}</span>
-          <span class="summary-chip">${escapeHtml(
-            decision.status === "sealed" ? "Sealed receipt available" : "Sealing pending"
-          )}</span>
-        </div>
-      </section>
+      </div>
       <div>${renderLinkButton("Back to Past Decisions", "/past-decisions", "ghost")}</div>
     </section>
 
-    <details class="case-detail-collapse glass-overlay">
+    <details class="case-detail-collapse glass-overlay" open>
       <summary class="case-detail-collapse-summary">Decision record</summary>
       <div class="case-detail-collapse-body">
     <section class="record-grid">

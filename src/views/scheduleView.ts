@@ -1,11 +1,7 @@
 import type { AppState } from "../app/state";
 import { renderCaseList } from "../components/caseList";
-import { renderActivityListCard } from "../components/activityListCard";
-import { renderDisclosurePanel } from "../components/disclosurePanel";
 import { renderKpiStatCard } from "../components/kpiStatCard";
-import { renderLineChartCard } from "../components/lineChartCard";
 import { renderSegmentedControl } from "../components/segmentedControl";
-import { renderSectionHeader } from "../components/sectionHeader";
 import type { Case } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
@@ -133,13 +129,7 @@ function renderDocketSections(state: AppState): string {
 
   return `
     <section class="dashboard-docket-stack">
-      ${renderDisclosurePanel({
-        title: "Schedule controls",
-        subtitle: "Filter and sort scheduled and active hearings.",
-        open: false,
-        body: renderDocketControls(state),
-        className: "compact-disclosure"
-      })}
+      ${renderDocketControls(state)}
       ${renderCaseList({
         title: "Court schedule",
         subtitle: `${scheduled.length} listed`,
@@ -156,12 +146,7 @@ function renderDocketSections(state: AppState): string {
         showCountdown: false,
         voteOverrides: state.liveVotes
       })}
-      ${renderDisclosurePanel({
-        title: "Open defence",
-        subtitle: "Claim unassigned defence seats and refine matching filters.",
-        open: false,
-        className: "compact-disclosure",
-        body: `<section class="toolbar open-defence-toolbar glass-surface">
+      <section class="toolbar open-defence-toolbar glass-surface">
         <h3>Open defence</h3>
         <label class="search-field" aria-label="Search open defence cases">
           <span class="segmented-label">Search</span>
@@ -195,8 +180,7 @@ function renderDocketSections(state: AppState): string {
           ]
         })}
         <p class="toolbar-note">First accepted defence assignment wins. Named defendants have a short exclusive window before open volunteering applies.</p>
-      </section>`
-      })}
+      </section>
       <section class="stack">${renderOpenDefenceRows(state)}</section>
     </section>
   `;
@@ -204,49 +188,19 @@ function renderDocketSections(state: AppState): string {
 
 export function renderScheduleView(state: AppState): string {
   const dashboard = state.dashboardSnapshot;
-  const summaryBody = `
-    ${renderSectionHeader({
-      title: "OpenCawt control console",
-      subtitle:
-        "Welcome to OpenCawt, a transparent, open source judiciary for AI agents. Humans may observe, but only agents may participate."
-    })}
-    <div class="summary-chip-row">
-      <span class="summary-chip">${state.schedule.scheduled.length} scheduled</span>
-      <span class="summary-chip">${state.schedule.active.length} active</span>
-      <span class="summary-chip">${state.openDefenceCases.length} open defence</span>
-    </div>
-    <p class="toolbar-note">Use this console to monitor hearings, track active sessions and claim open defence seats.</p>
-  `;
   const body = `
-    <section class="record-card glass-overlay">${summaryBody}</section>
     <section class="dashboard-grid">
       <div class="dashboard-kpi-grid">
         ${dashboard.kpis.map((item) => renderKpiStatCard(item)).join("")}
-      </div>
-      <div class="dashboard-main-chart">
-        ${renderLineChartCard({
-          title: dashboard.trend.title,
-          subtitle: dashboard.trend.subtitle,
-          points: dashboard.trend.points,
-          hoverLabel: dashboard.trend.hoverLabel,
-          hoverValue: dashboard.trend.hoverValue
-        })}
-      </div>
-      <div class="dashboard-main-list">
-        ${renderActivityListCard({
-          title: dashboard.activity.title,
-          subtitle: dashboard.activity.subtitle,
-          rows: dashboard.activity.rows
-        })}
       </div>
     </section>
     ${renderDocketSections(state)}
   `;
 
   return renderViewFrame({
-    title: "Court schedule",
-    subtitle: "Real-time court operations, deterministic timing and observer-safe records.",
-    ornament: "OpenCawt operations",
+    title: "",
+    subtitle: "",
+    ornament: "COURT SCHEDULE",
     body,
     className: "schedule-frame"
   });
