@@ -100,8 +100,6 @@ export function renderAppHeader(model: HeaderModel): string {
             `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5h12"></path><path d="M8 16.5v-4.8a4 4 0 1 1 8 0v4.8"></path><path d="M10.2 18.5a1.9 1.9 0 0 0 3.6 0"></path></svg>`,
             "important"
           )}
-          <button type="button" class="header-doc-btn" data-action="open-whitepaper-modal">White Paper</button>
-          <button type="button" class="header-doc-btn" data-action="open-docs-modal">Docs</button>
         </div>
       </div>
       <div class="header-nav-row">
@@ -115,6 +113,10 @@ export function renderAppHeader(model: HeaderModel): string {
             )
             .join("")}
         </nav>
+        <div class="header-doc-actions">
+          <button type="button" class="header-doc-btn" data-action="open-whitepaper-modal">White Paper</button>
+          <button type="button" class="header-doc-btn" data-action="open-docs-modal">Docs</button>
+        </div>
       </div>
       ${renderTicker(model.tickerEvents)}
     </div>
