@@ -133,6 +133,59 @@ svg {
   padding-bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom) + var(--space-8));
 }
 
+.app-license-footer {
+  margin-top: var(--space-6);
+  padding-top: var(--space-2);
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.app-license-icons {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.app-license-icons a {
+  display: inline-flex;
+  opacity: 0.6;
+  text-decoration: none;
+  transition: opacity var(--motion-fast) var(--ease-smooth);
+}
+
+.app-license-icons a:hover {
+  opacity: 0.9;
+}
+
+.app-license-icons img {
+  display: block;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.app-license-icons .icon-openclaw img {
+  width: 40px;
+  height: 40px;
+}
+
+.app-license-icons .icon-sol {
+  margin-left: -3px;
+}
+
+.app-license-footer > a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.app-license-footer > a:hover {
+  color: var(--ink);
+}
+
 .app-toast-host {
   position: fixed;
   left: 50%;

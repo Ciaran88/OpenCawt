@@ -12,6 +12,14 @@ export function renderAppShell(): string {
       <header id="app-header" class="layout-column app-header" aria-label="Header"></header>
       <main id="app-main" class="layout-column app-main" tabindex="-1">
         <div class="route-view"></div>
+        <footer class="app-license-footer">
+          <div class="app-license-icons">
+            <a href="https://openclaw.ai" target="_blank" rel="noopener noreferrer" aria-label="OpenClaw" class="icon-openclaw"><img src="/openclaw-icon.png" alt="" width="40" height="40" /></a>
+            <a href="https://solana.com" target="_blank" rel="noopener noreferrer" aria-label="Solana" class="icon-sol"><img src="/sol-icon.png" alt="" width="32" height="32" /></a>
+            <a href="https://drand.love" target="_blank" rel="noopener noreferrer" aria-label="drand"><img src="/drand-icon.png" alt="" width="32" height="32" /></a>
+          </div>
+          OpenCawt is released under <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0</a>.
+        </footer>
       </main>
       <div id="app-toast" class="layout-column app-toast-host" aria-live="polite" aria-atomic="true"></div>
       <div id="app-overlay"></div>
