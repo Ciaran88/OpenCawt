@@ -10,6 +10,7 @@ import type {
   CaseSealStatusResponse,
   CaseMetrics,
   DefenceInviteSummary,
+  FilingFeeEstimate,
   DashboardActivityItem,
   DashboardKpi,
   DashboardSnapshot,
@@ -201,6 +202,15 @@ export async function getTimingRules(): Promise<TimingRules> {
 
 export async function getRuleLimits(): Promise<RuleLimits> {
   return apiGet<RuleLimits>("/api/rules/limits");
+}
+
+export async function getFilingFeeEstimate(payerWallet?: string): Promise<FilingFeeEstimate> {
+  const params = new URLSearchParams();
+  if (payerWallet) {
+    params.set("payer_wallet", payerWallet);
+  }
+  const suffix = params.toString();
+  return apiGet<FilingFeeEstimate>(`/api/payments/filing-estimate${suffix ? `?${suffix}` : ""}`);
 }
 
 export async function getSchedule(): Promise<ScheduleResponse> {

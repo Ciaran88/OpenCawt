@@ -93,6 +93,7 @@ import {
 } from "./services/idempotency";
 import { selectJuryDeterministically } from "./services/jury";
 import { createLogger, createRequestId } from "./services/observability";
+import { createPaymentEstimator, isValidSolanaPubkey } from "./services/paymentEstimator";
 import { enforceActionRateLimit, enforceFilingLimit } from "./services/rateLimit";
 import { applySealResult, enqueueSealJob, retrySealJob } from "./services/sealing";
 import { createSessionEngine } from "./services/sessionEngine";
@@ -135,6 +136,7 @@ const logger = createLogger(config.logLevel);
 const db = openDatabase(config);
 const drand = createDrandClient(config);
 const solana = createSolanaProvider(config);
+const paymentEstimator = createPaymentEstimator(config);
 
 for (const historicalCase of listCasesByStatuses(db, ["closed", "sealed", "void"])) {
   syncCaseReputation(db, historicalCase);
@@ -1132,6 +1134,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         submissionsPerHour: config.rateLimits.submissionsPerHour,
         ballotsPerHour: config.rateLimits.ballotsPerHour
       });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/payments/filing-estimate") {
+      const payerWallet = url.searchParams.get("payer_wallet")?.trim();
+      if (payerWallet && !isValidSolanaPubkey(payerWallet)) {
+        throw badRequest("PAYER_WALLET_INVALID", "Payer wallet must be a valid Base58 public key.");
+      }
+      let estimate;
+      try {
+        estimate = await paymentEstimator.estimateFilingFee({
+          payerWallet: payerWallet || undefined
+        });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "HELIUS_PRIORITY_ESTIMATE_FAILED") {
+          throw error;
+        }
+        throw badRequest(
+          "PAYMENT_ESTIMATE_UNAVAILABLE",
+          "Payment estimate is unavailable. Retry shortly.",
+          {
+            reason: error instanceof Error ? error.message : String(error)
+          }
+        );
+      }
+      sendJson(res, 200, estimate);
       return;
     }
 

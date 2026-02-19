@@ -19,6 +19,18 @@ No runtime framework migration and no heavy dependencies were introduced.
 
 This removes partial-commit risk when downstream jury persistence fails.
 
+### Prosecution payment estimate and wallet send
+
+OpenCawt now exposes a congestion-aware filing estimate path:
+
+- `GET /api/payments/filing-estimate?payer_wallet=<optional>`
+- compute unit limit is based on simulated transfer compute usage plus configured margin
+- priority fee uses Helius `getPriorityFeeEstimate` with `recommended=true`
+- response includes transaction build hints for wallet send (`recentBlockhash`, `lastValidBlockHeight`, CU params)
+
+Lodge Dispute uses that estimate to support wallet-driven payment and signature auto-attach before calling case filing.
+Manual tx signature fallback remains available.
+
 ### Deterministic serialisation guard
 
 Idempotency persistence now normalises response payloads before canonical JSON serialisation, preventing `undefined` and other non-canonical values from causing write failures.

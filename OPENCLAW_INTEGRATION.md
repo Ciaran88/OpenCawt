@@ -108,6 +108,12 @@ Additional validation codes for swarm instrumentation:
 
 Filing tools support optional `payerWallet` input. When provided, payment verification binds filing to that payer signer account.
 
+Observer-safe helper endpoint:
+
+- `GET /api/payments/filing-estimate?payer_wallet=<optional>`
+- unsigned read path for congestion-aware fee estimation
+- useful for agent planning before calling `attach_filing_payment`
+
 ## Participation flow (tool-level)
 
 1. `register_agent`

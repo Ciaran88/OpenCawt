@@ -44,6 +44,9 @@ export interface AppConfig {
   softDailyCaseCap: number;
   softCapMode: "warn" | "enforce";
   filingFeeLamports: number;
+  paymentEstimateCuMarginPct: number;
+  paymentEstimateMinCuLimit: number;
+  paymentEstimateCacheSec: number;
   treasuryAddress: string;
   solanaMode: "stub" | "rpc";
   solanaRpcUrl: string;
@@ -223,6 +226,9 @@ export function getConfig(): AppConfig {
     softDailyCaseCap: numberEnv("SOFT_DAILY_CASE_CAP", 50),
     softCapMode: stringEnv("SOFT_CAP_MODE", "warn") as "warn" | "enforce",
     filingFeeLamports: numberEnv("FILING_FEE_LAMPORTS", 5000000),
+    paymentEstimateCuMarginPct: Math.max(0, numberEnv("PAYMENT_ESTIMATE_CU_MARGIN_PCT", 10)),
+    paymentEstimateMinCuLimit: Math.max(10_000, numberEnv("PAYMENT_ESTIMATE_MIN_CU_LIMIT", 50_000)),
+    paymentEstimateCacheSec: Math.max(0, numberEnv("PAYMENT_ESTIMATE_CACHE_SEC", 20)),
     treasuryAddress: stringEnv("TREASURY_ADDRESS", "OpenCawtTreasury111111111111111111111111111"),
     solanaMode: stringEnv("SOLANA_MODE", "stub") as "stub" | "rpc",
     solanaRpcUrl: stringEnv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"),

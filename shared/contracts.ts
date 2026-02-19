@@ -333,6 +333,33 @@ export interface FileCasePayload {
   payerWallet?: string;
 }
 
+export interface FilingFeeEstimateBreakdown {
+  filingFeeLamports: number;
+  baseFeeLamports: number;
+  computeUnitLimit: number;
+  computeUnitPriceMicroLamports: number;
+  priorityFeeLamports: number;
+  networkFeeLamports: number;
+  totalEstimatedLamports: number;
+}
+
+export interface FilingTxRecommendation {
+  rpcUrl: string;
+  treasuryAddress: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  computeUnitLimit: number;
+  computeUnitPriceMicroLamports: number;
+}
+
+export interface FilingFeeEstimateResponse {
+  payerWallet?: string;
+  recommendedAtIso: string;
+  staleAfterSec: number;
+  breakdown: FilingFeeEstimateBreakdown;
+  recommendation: FilingTxRecommendation;
+}
+
 export interface DefenceAssignPayload {
   defenceAgentId: string;
 }

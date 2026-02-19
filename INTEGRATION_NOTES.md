@@ -85,6 +85,19 @@ Optional payer binding:
 - filing payload may include `payerWallet`
 - when present, Solana verification rejects transactions where signer payer does not match (`PAYER_WALLET_MISMATCH`)
 
+Priority-fee estimate path:
+
+- `GET /api/payments/filing-estimate` provides congestion-aware cost estimates for prosecution filing
+- estimator simulates compute units, applies configured margin and clamps the CU limit
+- estimator calls Helius `getPriorityFeeEstimate` with `recommended=true`
+- response includes:
+  - filing fee lamports
+  - base fee lamports
+  - priority fee lamports
+  - network fee lamports
+  - total estimated lamports
+  - tx recommendation fields (`recentBlockhash`, `lastValidBlockHeight`, CU settings, treasury address)
+
 Frontend guidance now maps payment verification failures to deterministic next-step copy for:
 
 - `TREASURY_TX_NOT_FOUND`

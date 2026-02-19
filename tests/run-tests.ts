@@ -15,6 +15,12 @@ import { hashCapabilityToken, verifySignedMutation } from "../server/services/au
 import { setSecurityHeaders } from "../server/services/http";
 import { createSolanaProvider } from "../server/services/solanaProvider";
 import {
+  clampComputeUnitLimit,
+  createPaymentEstimator,
+  isValidSolanaPubkey,
+  priorityFeeLamports
+} from "../server/services/paymentEstimator";
+import {
   appendTranscriptEvent,
   claimDefenceAssignment,
   clearAgentCaseActivity,
@@ -682,6 +688,47 @@ async function testVerdictInconclusiveMapsToVoid() {
   assert.equal(result.inconclusive, true);
   assert.equal(result.overallOutcome, null);
   assert.equal(result.bundle.overall.outcome, undefined);
+}
+
+function testPaymentEstimatorMaths() {
+  assert.equal(clampComputeUnitLimit(100_000, 50_000, 10), 110_000);
+  assert.equal(clampComputeUnitLimit(10_000, 50_000, 10), 50_000);
+  assert.equal(clampComputeUnitLimit(2_000_000, 50_000, 10), 1_400_000);
+  assert.equal(priorityFeeLamports(400_000, 2_500), 1000);
+  assert.equal(priorityFeeLamports(50_000, 1_001), 51);
+}
+
+async function testPaymentEstimatorStubShape() {
+  await withEnv(
+    {
+      APP_ENV: "development",
+      SOLANA_MODE: "stub",
+      TREASURY_ADDRESS: "OpenCawtTreasury111111111111111111111111111",
+      FILING_FEE_LAMPORTS: "5000000",
+      PAYMENT_ESTIMATE_CU_MARGIN_PCT: "10",
+      PAYMENT_ESTIMATE_MIN_CU_LIMIT: "50000",
+      PAYMENT_ESTIMATE_CACHE_SEC: "20"
+    },
+    async () => {
+      const config = getConfig();
+      const estimator = createPaymentEstimator(config);
+      const estimate = await estimator.estimateFilingFee();
+      assert.ok(estimate.recommendedAtIso);
+      assert.ok(estimate.breakdown.filingFeeLamports > 0);
+      assert.ok(estimate.breakdown.computeUnitLimit >= config.paymentEstimateMinCuLimit);
+      assert.ok(estimate.breakdown.computeUnitPriceMicroLamports > 0);
+      assert.equal(estimate.recommendation.treasuryAddress, config.treasuryAddress);
+      assert.equal(estimate.recommendation.rpcUrl, config.heliusRpcUrl);
+    }
+  );
+}
+
+function testPayerWalletValidation() {
+  assert.equal(
+    isValidSolanaPubkey("6q6n9y8aYV2B7QhKf8qQYxLoY6dX2eS3p4uZbN2kL8Xa"),
+    true
+  );
+  assert.equal(isValidSolanaPubkey("invalid-wallet"), false);
 }
 
 function testConfigFailFastGuards() {
@@ -1412,6 +1459,9 @@ async function run() {
   await testDrandSelectionDeterminism();
   await testVerdictDeterminism();
   await testVerdictInconclusiveMapsToVoid();
+  testPaymentEstimatorMaths();
+  await testPaymentEstimatorStubShape();
+  testPayerWalletValidation();
   testConfigFailFastGuards();
   testSecurityHeadersPresence();
   await testRpcPayerMismatchGuard();

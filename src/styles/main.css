@@ -4305,6 +4305,22 @@ body {
   line-height: 1.4;
 }
 
+.row-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row-inline-space-between {
+  justify-content: space-between;
+}
+
+.record-card h4 {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #dfe9f9;
+}
+
 .form-card fieldset {
   border: 0;
   padding: 0;

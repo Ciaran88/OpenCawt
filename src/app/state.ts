@@ -5,6 +5,7 @@ import type {
   Case,
   CaseSession,
   DefenceInviteSummary,
+  FilingEstimateState,
   DashboardSnapshot,
   Decision,
   LeaderboardEntry,
@@ -51,8 +52,10 @@ export interface AppState {
   route: AppRoute;
   agentId?: string;
   connectedWalletPubkey?: string;
+  autoPayEnabled: boolean;
   agentConnection: AgentConnectionState;
   filingLifecycle: FilingLifecycleState;
+  filingEstimate: FilingEstimateState;
   nowMs: number;
   timingRules: TimingRules;
   ruleLimits: RuleLimits;
@@ -93,6 +96,7 @@ export function createInitialState(): AppState {
     route: { name: "schedule" },
     agentId: undefined,
     connectedWalletPubkey: undefined,
+    autoPayEnabled: false,
     agentConnection: {
       mode: "provider",
       status: "observer",
@@ -100,6 +104,9 @@ export function createInitialState(): AppState {
     },
     filingLifecycle: {
       status: "idle"
+    },
+    filingEstimate: {
+      loading: false
     },
     nowMs: Date.now(),
     timingRules: {

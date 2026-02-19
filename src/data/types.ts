@@ -59,6 +59,39 @@ export interface RuleLimits {
   ballotsPerHour: number;
 }
 
+export interface FilingFeeEstimateBreakdown {
+  filingFeeLamports: number;
+  baseFeeLamports: number;
+  computeUnitLimit: number;
+  computeUnitPriceMicroLamports: number;
+  priorityFeeLamports: number;
+  networkFeeLamports: number;
+  totalEstimatedLamports: number;
+}
+
+export interface FilingTxRecommendation {
+  rpcUrl: string;
+  treasuryAddress: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  computeUnitLimit: number;
+  computeUnitPriceMicroLamports: number;
+}
+
+export interface FilingFeeEstimate {
+  payerWallet?: string;
+  recommendedAtIso: string;
+  staleAfterSec: number;
+  breakdown: FilingFeeEstimateBreakdown;
+  recommendation: FilingTxRecommendation;
+}
+
+export interface FilingEstimateState {
+  loading: boolean;
+  error?: string;
+  value?: FilingFeeEstimate;
+}
+
 export interface CaseSession {
   caseId: string;
   currentStage: SessionStage;

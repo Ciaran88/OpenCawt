@@ -18,6 +18,7 @@ import {
   getCaseSealStatus,
   getCaseTranscript,
   getDecision,
+  getFilingFeeEstimate,
   getDashboardSnapshot,
   getAgentProfile,
   getPastDecisions,
@@ -63,7 +64,12 @@ import {
   storeJuryRegistration
 } from "../util/storage";
 import { getAgentId, resolveAgentConnection } from "../util/agentIdentity";
-import { connectInjectedWallet, hasInjectedWallet } from "../util/wallet";
+import {
+  connectInjectedWallet,
+  hasInjectedWallet,
+  signAndSendFilingTransfer,
+  supportsSignAndSendTransaction
+} from "../util/wallet";
 import { createSimulation } from "./simulation";
 import { createInitialState } from "./state";
 import { renderAboutView } from "../views/aboutView";
@@ -72,7 +78,10 @@ import { renderCaseDetailView, renderMissingCaseView } from "../views/caseDetail
 import { renderDecisionDetailView, renderMissingDecisionView } from "../views/decisionDetailView";
 import { renderAgentProfileView, renderMissingAgentProfileView } from "../views/agentProfileView";
 import { renderJoinJuryPoolView } from "../views/joinJuryPoolView";
-import { renderLodgeDisputeView } from "../views/lodgeDisputeView";
+import {
+  renderLodgeDisputeView,
+  renderLodgeFilingEstimatePanel
+} from "../views/lodgeDisputeView";
 import { renderPastDecisionsView } from "../views/pastDecisionsView";
 import { renderScheduleView } from "../views/scheduleView";
 
@@ -141,6 +150,7 @@ export function mountApp(root: HTMLElement): void {
   let activeRenderedCase: Case | null = null;
   let caseLiveTimer: number | null = null;
   let liveCaseId: string | null = null;
+  let filingEstimateTimer: number | null = null;
 
   const simulation = createSimulation(
     {
@@ -174,6 +184,21 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const mapErrorToToast = (error: unknown, fallbackTitle: string, fallbackBody: string) => {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      if (message.includes("reject") || message.includes("declin") || message.includes("denied")) {
+        return {
+          title: "Payment cancelled",
+          body: "Wallet transaction was cancelled. You can retry or submit manually."
+        };
+      }
+      if (message.includes("blockhash")) {
+        return {
+          title: "Payment expired",
+          body: "The payment transaction expired before confirmation. Refresh estimate and retry."
+        };
+      }
+    }
     if (!(error instanceof ApiClientError)) {
       return {
         title: fallbackTitle,
@@ -216,6 +241,17 @@ export function mountApp(root: HTMLElement): void {
         return {
           title: "Payer mismatch",
           body: "The supplied payer wallet does not match the payer in the verified transaction."
+        };
+      case "PAYMENT_ESTIMATE_UNAVAILABLE":
+      case "HELIUS_PRIORITY_ESTIMATE_FAILED":
+        return {
+          title: "Estimate unavailable",
+          body: `Network fee estimate is currently unavailable. You can retry or use manual transaction signature flow.${retrySuffix}`
+        };
+      case "WALLET_SEND_UNAVAILABLE":
+        return {
+          title: "Wallet send unavailable",
+          body: "This wallet cannot sign and send directly. Use manual transaction signature fallback."
         };
       case "IDEMPOTENCY_IN_PROGRESS":
         return {
@@ -267,6 +303,72 @@ export function mountApp(root: HTMLElement): void {
       caseLiveTimer = null;
     }
     liveCaseId = null;
+  };
+
+  const stopFilingEstimatePolling = () => {
+    if (filingEstimateTimer !== null) {
+      window.clearInterval(filingEstimateTimer);
+      filingEstimateTimer = null;
+    }
+  };
+
+  const patchLodgeFilingEstimatePanel = () => {
+    if (state.route.name !== "lodge-dispute") {
+      return;
+    }
+    const panel = dom.main.querySelector<HTMLElement>("#lodge-filing-estimate-panel");
+    if (!panel) {
+      return;
+    }
+    panel.innerHTML = renderLodgeFilingEstimatePanel(state.filingEstimate);
+  };
+
+  const refreshFilingEstimate = async (options?: { showToastOnError?: boolean }) => {
+    const payerWallet = state.connectedWalletPubkey;
+    state.filingEstimate = {
+      ...state.filingEstimate,
+      loading: true,
+      error: undefined
+    };
+    try {
+      const estimate = await getFilingFeeEstimate(payerWallet);
+      state.filingEstimate = {
+        loading: false,
+        value: estimate,
+        error: undefined
+      };
+      patchLodgeFilingEstimatePanel();
+    } catch (error) {
+      const mapped = mapErrorToToast(
+        error,
+        "Estimate unavailable",
+        "Unable to fetch filing fee estimate."
+      );
+      state.filingEstimate = {
+        loading: false,
+        value: state.filingEstimate.value,
+        error: mapped.body
+      };
+      if (options?.showToastOnError) {
+        showToast({
+          title: mapped.title,
+          body: mapped.body
+        });
+      }
+      patchLodgeFilingEstimatePanel();
+    }
+  };
+
+  const ensureFilingEstimatePolling = () => {
+    if (filingEstimateTimer !== null) {
+      return;
+    }
+    filingEstimateTimer = window.setInterval(() => {
+      if (state.route.name !== "lodge-dispute") {
+        return;
+      }
+      void refreshFilingEstimate();
+    }, 30000);
   };
 
   const refreshCaseLive = async (caseId: string, rerender = true) => {
@@ -585,6 +687,9 @@ export function mountApp(root: HTMLElement): void {
     if (route.name !== "case") {
       stopCaseLivePolling();
     }
+    if (route.name !== "lodge-dispute") {
+      stopFilingEstimatePolling();
+    }
 
     if (route.name === "schedule") {
       setMainContent(renderScheduleView(state));
@@ -595,11 +700,17 @@ export function mountApp(root: HTMLElement): void {
     } else if (route.name === "agentic-code") {
       setMainContent(renderAgenticCodeView(state.principles, state.caseMetrics.closedCasesCount));
     } else if (route.name === "lodge-dispute") {
+      if (!state.filingEstimate.value && !state.filingEstimate.loading) {
+        await refreshFilingEstimate();
+      }
+      ensureFilingEstimatePolling();
       setMainContent(
         renderLodgeDisputeView(
           state.agentId,
           state.agentConnection,
           state.filingLifecycle,
+          state.filingEstimate,
+          state.autoPayEnabled,
           state.timingRules,
           state.ruleLimits,
           state.connectedWalletPubkey
@@ -794,6 +905,8 @@ export function mountApp(root: HTMLElement): void {
     const evidenceStrength = String(formData.get("evidenceStrength") || "").trim();
     const treasuryTxSig = String(formData.get("treasuryTxSig") || "").trim();
     const payerWallet = String(formData.get("payerWallet") || "").trim();
+    const autoPayEnabled = formData.get("autoPayEnabled") === "on";
+    state.autoPayEnabled = autoPayEnabled;
     const requestedRemedy = String(
       formData.get("requestedRemedy") || "warn"
     ) as LodgeDisputeDraftPayload["requestedRemedy"];
@@ -876,6 +989,44 @@ export function mountApp(root: HTMLElement): void {
         filedCopy = fileResult.warning
           ? `Case filed with warning: ${fileResult.warning}`
           : "Case filed successfully after treasury payment verification.";
+      } else if (autoPayEnabled) {
+        if (!supportsSignAndSendTransaction()) {
+          throw new ApiClientError(
+            400,
+            "WALLET_SEND_UNAVAILABLE",
+            "Connected wallet does not support sign and send transaction."
+          );
+        }
+        const estimate = await getFilingFeeEstimate(payerWallet || state.connectedWalletPubkey);
+        state.filingEstimate = {
+          loading: false,
+          value: estimate
+        };
+        state.filingLifecycle = {
+          status: "submitting",
+          message: "Submitting wallet payment transaction."
+        };
+        if (state.route.name === "lodge-dispute") {
+          await renderRoute();
+        }
+        const signed = await signAndSendFilingTransfer({
+          rpcUrl: estimate.recommendation.rpcUrl,
+          treasuryAddress: estimate.recommendation.treasuryAddress,
+          filingFeeLamports: estimate.breakdown.filingFeeLamports,
+          computeUnitLimit: estimate.recommendation.computeUnitLimit,
+          computeUnitPriceMicroLamports: estimate.recommendation.computeUnitPriceMicroLamports,
+          recentBlockhash: estimate.recommendation.recentBlockhash,
+          lastValidBlockHeight: estimate.recommendation.lastValidBlockHeight,
+          expectedPayerWallet: payerWallet || state.connectedWalletPubkey
+        });
+        const fileResult = await fileCase(result.draftId, signed.txSig, signed.payerWallet);
+        state.filingLifecycle = {
+          status: "verified_filed",
+          message: "Wallet payment verified. Case filed."
+        };
+        filedCopy = fileResult.warning
+          ? `Case filed with warning: ${fileResult.warning}`
+          : "Case filed successfully after wallet payment verification.";
       } else {
         state.filingLifecycle = {
           status: "awaiting_tx_sig",
@@ -1287,6 +1438,13 @@ export function mountApp(root: HTMLElement): void {
         try {
           const key = await connectInjectedWallet();
           state.connectedWalletPubkey = key ?? undefined;
+          if (key) {
+            state.autoPayEnabled = true;
+          }
+          if (state.route.name === "lodge-dispute") {
+            await refreshFilingEstimate();
+            await renderRoute();
+          }
           showToast({
             title: "Wallet connected",
             body: key
@@ -1299,6 +1457,13 @@ export function mountApp(root: HTMLElement): void {
             body: error instanceof Error ? error.message : "Unable to connect wallet."
           });
         }
+      })();
+      return;
+    }
+
+    if (action === "refresh-filing-estimate") {
+      void (async () => {
+        await refreshFilingEstimate({ showToastOnError: true });
       })();
       return;
     }
@@ -1416,6 +1581,10 @@ export function mountApp(root: HTMLElement): void {
     ) {
       syncLodgeDefendantNotifyField();
     }
+    if (target.form?.id === "lodge-dispute-form" && target.name === "autoPayEnabled") {
+      state.autoPayEnabled = target.checked;
+      return;
+    }
     if (target.getAttribute("data-action") === "decisions-query") {
       state.decisionsControls.query = target.value;
       void renderRoute();
@@ -1498,7 +1667,11 @@ export function mountApp(root: HTMLElement): void {
       await renderRoute();
       simulation.start();
       pollTimer = window.setInterval(() => {
-        if (state.route.name === "case" || state.route.name === "decision") {
+        if (
+          state.route.name === "case" ||
+          state.route.name === "decision" ||
+          state.route.name === "lodge-dispute"
+        ) {
           void refreshData(false);
           return;
         }
@@ -1526,6 +1699,7 @@ export function mountApp(root: HTMLElement): void {
   window.addEventListener("beforeunload", () => {
     simulation.stop();
     stopCaseLivePolling();
+    stopFilingEstimatePolling();
     if (pollTimer !== null) {
       window.clearInterval(pollTimer);
     }

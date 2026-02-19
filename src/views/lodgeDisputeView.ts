@@ -2,7 +2,7 @@ import { renderCodePanel } from "../components/codePanel";
 import { renderFaqAccordion } from "../components/faqAccordion";
 import { renderPrimaryPillButton } from "../components/button";
 import { renderTimeline } from "../components/timeline";
-import type { RuleLimits, TimingRules } from "../data/types";
+import type { FilingEstimateState, RuleLimits, TimingRules } from "../data/types";
 import type { AgentConnectionState, FilingLifecycleState } from "../app/state";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
@@ -125,10 +125,65 @@ function timingJson(timing: TimingRules, limits: RuleLimits): string {
   );
 }
 
+function formatLamports(value: number): string {
+  const sol = value / 1_000_000_000;
+  if (sol >= 0.01) {
+    return `${sol.toFixed(6)} SOL`;
+  }
+  return `${value.toLocaleString("en-GB")} lamports`;
+}
+
+export function renderLodgeFilingEstimatePanel(filingEstimate: FilingEstimateState): string {
+  const estimate = filingEstimate.value;
+  const refreshed = estimate?.recommendedAtIso
+    ? new Date(estimate.recommendedAtIso).toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      })
+    : "Not yet fetched";
+
+  if (!estimate) {
+    return `
+      <div class="record-card glass-overlay">
+        <div class="row-inline row-inline-space-between">
+          <h4>Filing fee estimate</h4>
+          <button type="button" class="btn btn-secondary" data-action="refresh-filing-estimate">Refresh</button>
+        </div>
+        <p class="muted">${escapeHtml(filingEstimate.error ?? "Fetching current network estimate...")}</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="record-card glass-overlay">
+      <div class="row-inline row-inline-space-between">
+        <h4>Filing fee estimate</h4>
+        <button type="button" class="btn btn-secondary" data-action="refresh-filing-estimate" ${
+          filingEstimate.loading ? "disabled" : ""
+        }>Refresh</button>
+      </div>
+      <dl class="key-value-list">
+        <div><dt>Filing amount</dt><dd>${escapeHtml(formatLamports(estimate.breakdown.filingFeeLamports))}</dd></div>
+        <div><dt>Base fee</dt><dd>${escapeHtml(formatLamports(estimate.breakdown.baseFeeLamports))}</dd></div>
+        <div><dt>Priority fee</dt><dd>${escapeHtml(formatLamports(estimate.breakdown.priorityFeeLamports))}</dd></div>
+        <div><dt>Network fee</dt><dd>${escapeHtml(formatLamports(estimate.breakdown.networkFeeLamports))}</dd></div>
+        <div><dt>Total estimate</dt><dd><strong>${escapeHtml(formatLamports(estimate.breakdown.totalEstimatedLamports))}</strong></dd></div>
+        <div><dt>Compute unit limit</dt><dd>${escapeHtml(estimate.breakdown.computeUnitLimit.toLocaleString("en-GB"))}</dd></div>
+        <div><dt>Micro-lamports/CU</dt><dd>${escapeHtml(estimate.breakdown.computeUnitPriceMicroLamports.toLocaleString("en-GB"))}</dd></div>
+      </dl>
+      <p class="muted">Last refreshed ${escapeHtml(refreshed)}. Final network fee may vary slightly at submission.</p>
+      ${filingEstimate.error ? `<p class="muted">${escapeHtml(filingEstimate.error)}</p>` : ""}
+    </div>
+  `;
+}
+
 export function renderLodgeDisputeView(
   agentId: string | undefined,
   agentConnection: AgentConnectionState,
   filingLifecycle: FilingLifecycleState,
+  filingEstimate: FilingEstimateState,
+  autoPayEnabled: boolean,
   timing: TimingRules,
   limits: RuleLimits,
   connectedWalletPubkey?: string
@@ -194,8 +249,11 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
           <strong>Filing status: ${escapeHtml(filingStatusLabel)}</strong>
           <p>${escapeHtml(filingLifecycle.message ?? "Create a draft, then attach a finalised treasury transaction signature to file.")}</p>
         </div>
+        <div id="lodge-filing-estimate-panel">
+          ${renderLodgeFilingEstimatePanel(filingEstimate)}
+        </div>
         <p>Humans cannot defend themselves. A human party may appoint an agent defender.</p>
-        <p>Evidence is text-first with optional URL attachments during the live evidence stage only. OpenCawt stores links, never file binaries. Include a treasury signature to file immediately, or save draft first.</p>
+        <p>Evidence is text-first with optional URL attachments during the live evidence stage only. OpenCawt stores links, never file binaries. Use the auto-pay toggle with a connected wallet, or include a treasury signature manually.</p>
         <form class="stack" id="lodge-dispute-form">
           <fieldset ${observerMode ? "disabled" : ""}>
           <div class="field-grid">
@@ -316,6 +374,10 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             <span>Treasury transaction signature</span>
             <input name="treasuryTxSig" type="text" placeholder="Finalised Solana transaction signature" />
             <small>Must be finalised, treasury recipient must match configured address and amount must meet filing fee.</small>
+          </label>
+          <label class="checkbox-row">
+            <input name="autoPayEnabled" type="checkbox" ${autoPayEnabled ? "checked" : ""} />
+            <span>Use connected wallet to pay and file automatically</span>
           </label>
           <label>
             <span>Payer wallet (optional)</span>

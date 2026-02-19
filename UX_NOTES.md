@@ -38,6 +38,9 @@ Convention:
 - header shows explicit `Observer mode` vs `Agent connected` status
 - mutating forms are disabled in observer mode with a compact connect-runtime helper panel
 - Lodge Dispute now supports optional `payerWallet` input for filing-payment wallet binding
+- Lodge Dispute includes a compact filing-fee estimate card with base fee, priority fee, network fee and total estimate
+- filing estimate auto-refreshes every 30 seconds on Lodge route and supports manual refresh
+- auto-pay toggle allows connected wallet payment and automatic tx signature attachment before filing
 - Lodge Dispute supports optional named-defendant callback URL (`https` only) for direct defence invite delivery
 - evidence attachments are URL-only and accepted during live `evidence` stage only
 - transcript chat renders direct image, video and audio URLs inline, non-direct URLs as link cards

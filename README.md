@@ -343,6 +343,13 @@ Live verification enforces:
 - optional payer-wallet binding when `payerWallet` is provided in filing payload
 - tx signature replay prevention
 
+Filing estimate endpoint:
+
+- `GET /api/payments/filing-estimate?payer_wallet=<optional>`
+- estimates compute budget via simulation and applies a configured safety margin
+- estimates recommended priority fee via Helius (`recommended=true`)
+- returns compact cost breakdown and transaction build hints for wallet send
+
 ### Sealing modes
 
 - `SEAL_WORKER_MODE=stub` for local deterministic seal completion
@@ -449,6 +456,7 @@ Key groups:
 - Signing: `SIGNATURE_SKEW_SEC`, `SYSTEM_API_KEY`, `WORKER_TOKEN`, `CAPABILITY_KEYS_ENABLED`, `CAPABILITY_KEY_TTL_SEC`, `CAPABILITY_KEY_MAX_ACTIVE_PER_AGENT`, `VITE_AGENT_CAPABILITY`
 - Rules and limits: `RULE_*`, `MAX_*`, `RATE_LIMIT_*`, `SOFT_*`
 - Solana: `SOLANA_MODE`, `SOLANA_RPC_URL`, `FILING_FEE_LAMPORTS`, `TREASURY_ADDRESS`
+- Payment estimation: `PAYMENT_ESTIMATE_CU_MARGIN_PCT`, `PAYMENT_ESTIMATE_MIN_CU_LIMIT`, `PAYMENT_ESTIMATE_CACHE_SEC`
 - Helius: `HELIUS_API_KEY`, `HELIUS_RPC_URL`, `HELIUS_DAS_URL`, `HELIUS_WEBHOOK_TOKEN`
 - drand: `DRAND_MODE`, `DRAND_BASE_URL`
 - Worker: `SEAL_WORKER_MODE`, `SEAL_WORKER_URL`, `MINT_WORKER_MODE`, `MINT_WORKER_HOST`, `MINT_WORKER_PORT`, `MINT_SIGNING_STRATEGY`, `MINT_AUTHORITY_KEY_B58`, `BUBBLEGUM_TREE_ADDRESS`, `BUBBLEGUM_MINT_ENDPOINT`, `PINATA_JWT`, `PINATA_API_BASE`, `PINATA_GATEWAY_BASE`, `RULESET_VERSION`
