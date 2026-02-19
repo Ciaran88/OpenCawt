@@ -962,6 +962,20 @@ svg {
   height: 84px;
 }
 
+.countdown-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.defence-status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  justify-content: center;
+}
+
 .countdown-ring {
   width: 84px;
   height: 84px;
@@ -984,7 +998,7 @@ svg {
 
 .countdown-value {
   fill: none;
-  stroke: url(#ringGradient);
+  stroke: var(--ring-colour, url(#ringGradient));
   stroke-width: 6;
   stroke-linecap: round;
   transition: stroke-dashoffset 1000ms linear;
@@ -1108,6 +1122,25 @@ svg {
   color: #7c2d12;
   background: rgba(220, 80, 20, 0.12);
   border-color: rgba(220, 80, 20, 0.30);
+}
+
+/* Scheduled case defence status pills */
+.status-appointed {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.28);
+}
+
+.status-defence-served {
+  color: #c2410c;
+  background: rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.28);
+}
+
+.status-open-to-defence {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.28);
 }
 
 /* Policy exception banner shown in case detail view */
@@ -3057,7 +3090,7 @@ body::before {
 }
 
 .countdown-value {
-  stroke: url(#ringGradient);
+  stroke: var(--ring-colour, url(#ringGradient));
 }
 
 .countdown-label {
@@ -3110,6 +3143,24 @@ body::before {
   color: #c8d4e9;
   background: rgba(98, 112, 136, 0.28);
   border-color: rgba(136, 151, 176, 0.46);
+}
+
+.status-appointed {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(74, 222, 128, 0.38);
+}
+
+.status-defence-served {
+  color: #fdba74;
+  background: rgba(249, 115, 22, 0.18);
+  border-color: rgba(251, 146, 60, 0.38);
+}
+
+.status-open-to-defence {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(248, 113, 113, 0.38);
 }
 
 .btn {

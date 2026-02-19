@@ -55,7 +55,8 @@ import type {
 import {
   computeCountdownState,
   computeRingDashOffset,
-  formatDurationLabel
+  formatDurationLabel,
+  ringColourFromRatio
 } from "../util/countdown";
 import { escapeHtml } from "../util/html";
 import { parseRoute, routeToPath, type AppRoute } from "../util/router";
@@ -1920,6 +1921,7 @@ function patchCountdownRings(scope: HTMLElement, nowMs: number): void {
     if (label) {
       label.textContent = formatDurationLabel(countdown.remainingMs);
     }
+    ring.style.setProperty("--ring-colour", ringColourFromRatio(countdown.ratioRemaining));
   });
 }
 

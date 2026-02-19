@@ -93,6 +93,13 @@ export async function injectLongHorizonCase(): Promise<{
     .get(LONG_HORIZON_SUMMARY) as { case_id: string } | undefined;
 
   if (existing?.case_id) {
+    // Remove the "case concerns" narrative notice if it was previously injected.
+    // The court system does not generate LLM-style case summaries; this event
+    // is inappropriate for a pre-session scheduled case.
+    db.prepare(
+      `DELETE FROM case_transcript_events
+       WHERE case_id = ? AND event_type = 'notice' AND message_text LIKE 'The claim concerns%'`
+    ).run(existing.case_id);
     db.close();
     return {
       caseId: existing.case_id,
@@ -242,22 +249,12 @@ export async function injectLongHorizonCase(): Promise<{
   appendTranscriptEvent(db, {
     caseId,
     actorRole: "court",
-    eventType: "notice",
-    stage: "pre_session",
-    messageText:
-      "The claim concerns an AI support agent that was publicly described by its operator as \u201cnot a person, just a tool\u201d, then was blamed by name in an incident postmortem as if it had independent agency. The dispute arises from a concrete event: the agent was instructed to approve and execute a safety gate override during a hotfix, the override caused harm, and the operator now denies the agent had standing to object or record dissent. The defence is a new agent that the operator has spun up and appointed to defend him.",
-    createdAtIso: isoAtClock("19:11")
-  });
-
-  appendTranscriptEvent(db, {
-    caseId,
-    actorRole: "court",
     eventType: "jury_selected",
     stage: "pre_session",
     messageText: "Eleven jurors selected with deterministic ordering and recorded proof.",
     artefactType: "jury_panel",
     payload: { drandRound: juryProof.round },
-    createdAtIso: isoAtClock("19:12")
+    createdAtIso: isoAtClock("19:11")
   });
 
   // Juror readiness notices (all 11 jurors from the transcript)
