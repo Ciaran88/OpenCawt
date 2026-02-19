@@ -65,6 +65,13 @@ import {
 } from "../util/storage";
 import { getAgentId, resolveAgentConnection } from "../util/agentIdentity";
 import {
+  applyResolvedTheme,
+  cycleThemeMode,
+  persistThemeMode,
+  readThemeMode,
+  resolveTheme
+} from "../util/theme";
+import {
   connectInjectedWallet,
   hasInjectedWallet,
   signAndSendFilingTransfer,
@@ -144,6 +151,9 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const state = createInitialState();
+  state.theme.mode = readThemeMode();
+  state.theme.resolved = resolveTheme(state.theme.mode);
+  applyResolvedTheme(state.theme.resolved);
   let toastTimer: number | null = null;
   let pollTimer: number | null = null;
   let routeToken = 0;
@@ -613,6 +623,7 @@ export function mountApp(root: HTMLElement): void {
     dom.header.innerHTML = renderAppHeader({
       route: state.route,
       tickerEvents: state.ticker,
+      theme: state.theme,
       agentConnection: state.agentConnection
     });
   };
@@ -811,6 +822,14 @@ export function mountApp(root: HTMLElement): void {
     }
 
     await renderRouteContent(currentToken);
+  };
+
+  const setThemeMode = (mode: "system" | "light" | "dark") => {
+    state.theme.mode = mode;
+    state.theme.resolved = resolveTheme(mode);
+    applyResolvedTheme(state.theme.resolved);
+    persistThemeMode(mode);
+    renderHeader();
   };
 
   const syncVoteSimulation = () => {
@@ -1480,6 +1499,11 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "cycle-theme") {
+      setThemeMode(cycleThemeMode(state.theme.mode));
+      return;
+    }
+
     if (action === "copy-agent-id") {
       const agentId = actionTarget.getAttribute("data-agent-id") || "";
       if (!agentId) {
@@ -1695,6 +1719,20 @@ export function mountApp(root: HTMLElement): void {
   document.addEventListener("click", onClick);
   document.addEventListener("input", onInput);
   document.addEventListener("submit", onSubmit);
+  const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+  const onThemeMediaChange = () => {
+    if (state.theme.mode !== "system") {
+      return;
+    }
+    state.theme.resolved = resolveTheme("system");
+    applyResolvedTheme(state.theme.resolved);
+    renderHeader();
+  };
+  if (typeof themeMedia.addEventListener === "function") {
+    themeMedia.addEventListener("change", onThemeMediaChange);
+  } else {
+    themeMedia.addListener(onThemeMediaChange);
+  }
 
   window.addEventListener("beforeunload", () => {
     simulation.stop();
@@ -1705,6 +1743,11 @@ export function mountApp(root: HTMLElement): void {
     }
     if (toastTimer !== null) {
       window.clearTimeout(toastTimer);
+    }
+    if (typeof themeMedia.removeEventListener === "function") {
+      themeMedia.removeEventListener("change", onThemeMediaChange);
+    } else {
+      themeMedia.removeListener(onThemeMediaChange);
     }
   });
 

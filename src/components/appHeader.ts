@@ -2,12 +2,17 @@ import type { TickerEvent } from "../data/types";
 import type { AppRoute, MenuRouteName } from "../util/router";
 import { menuRouteToPath } from "../util/router";
 import { escapeHtml } from "../util/html";
+import { renderIconButton } from "./iconButton";
 import { renderNavItem } from "./navItem";
 import { renderTicker } from "./ticker";
 
 interface HeaderModel {
   route: AppRoute;
   tickerEvents: TickerEvent[];
+  theme: {
+    mode: "system" | "light" | "dark";
+    resolved: "light" | "dark";
+  };
   agentConnection: {
     mode: "provider" | "local";
     status: "observer" | "connected" | "error";
@@ -43,8 +48,12 @@ function renderTopIcon(
   tone: "neutral" | "important" = "neutral",
   action?: string
 ): string {
-  const actionAttr = action ? ` data-action="${escapeHtml(action)}"` : "";
-  return `<button type="button" class="header-icon-btn tone-${tone}" aria-label="${label}"${actionAttr}>${icon}</button>`;
+  return renderIconButton({
+    icon,
+    label,
+    tone: tone === "important" ? "orange" : "neutral",
+    action
+  }).replace("icon-btn", "header-icon-btn");
 }
 
 export function renderAppHeader(model: HeaderModel): string {
@@ -52,6 +61,15 @@ export function renderAppHeader(model: HeaderModel): string {
   const isConnected = model.agentConnection.status === "connected";
   const chipLabel = isConnected ? "Agent connected" : "Observer mode";
   const chipClass = isConnected ? "connected" : model.agentConnection.status;
+  const logoPath = model.theme.resolved === "dark" ? "/opencawt_white.png" : "/opencawt_black.png";
+  const themeLabel =
+    model.theme.mode === "system"
+      ? `Theme: system (${model.theme.resolved})`
+      : `Theme: ${model.theme.mode}`;
+  const themeIcon =
+    model.theme.resolved === "dark"
+      ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 3.2a8.8 8.8 0 1 0 6.3 12.7 7.6 7.6 0 0 1-6.3-12.7Z"></path></svg>`
+      : `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.3"></circle><path d="M12 2.7v2.2M12 19.1v2.2M4.7 4.7l1.5 1.5M17.8 17.8l1.5 1.5M2.7 12h2.2M19.1 12h2.2M4.7 19.3l1.5-1.5M17.8 6.2l1.5-1.5"></path></svg>`;
   const chipTitle = model.agentConnection.reason
     ? ` title="${escapeHtml(model.agentConnection.reason)}"`
     : "";
@@ -62,7 +80,7 @@ export function renderAppHeader(model: HeaderModel): string {
         <div class="brand-block">
           <span class="brand-logo-frame">
             <img
-              src="/opencawt_white.png"
+              src="${logoPath}"
               alt="OpenCawt logo"
               class="brand-logo"
               width="224"
@@ -79,6 +97,12 @@ export function renderAppHeader(model: HeaderModel): string {
           <span class="agent-connection-chip status-${chipClass}"${chipTitle}>
             ${escapeHtml(chipLabel)}
           </span>
+          ${renderTopIcon(
+            themeLabel,
+            themeIcon,
+            "neutral",
+            "cycle-theme"
+          )}
           ${renderTopIcon(
             "Verify seal",
             `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.2 4.2"></path></svg>`,

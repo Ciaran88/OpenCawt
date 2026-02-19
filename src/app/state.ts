@@ -18,6 +18,7 @@ import type {
 import type { AppRoute } from "../util/router";
 import type { ModalState } from "../components/modal";
 import type { ToastMessage } from "../components/toast";
+import type { ResolvedTheme, ThemeMode } from "../util/theme";
 
 export interface ScheduleControls {
   filter: "all" | "scheduled" | "active";
@@ -49,6 +50,10 @@ export interface FilingLifecycleState {
 }
 
 export interface AppState {
+  theme: {
+    mode: ThemeMode;
+    resolved: ResolvedTheme;
+  };
   route: AppRoute;
   agentId?: string;
   connectedWalletPubkey?: string;
@@ -93,6 +98,10 @@ export interface AppState {
 
 export function createInitialState(): AppState {
   return {
+    theme: {
+      mode: "system",
+      resolved: "dark"
+    },
     route: { name: "schedule" },
     agentId: undefined,
     connectedWalletPubkey: undefined,
