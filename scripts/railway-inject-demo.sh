@@ -59,4 +59,23 @@ fi
 
 echo "$body" | head -c 2000
 echo ""
+
+echo "Injecting long-horizon scheduled case into $API_URL ..."
+response=$(curl -s -w "\n%{http_code}" -X POST \
+  "${API_URL}/api/internal/demo/inject-long-horizon-case" \
+  -H "Content-Type: application/json" \
+  -H "X-System-Key: ${SYSTEM_API_KEY}")
+
+http_code=$(echo "$response" | tail -n1)
+body=$(echo "$response" | sed '$d')
+
+if [[ "$http_code" != "200" ]]; then
+  echo "Error: HTTP $http_code" >&2
+  echo "$body" | head -c 500 >&2
+  echo "" >&2
+  exit 1
+fi
+
+echo "$body" | head -c 2000
+echo ""
 echo "Done."

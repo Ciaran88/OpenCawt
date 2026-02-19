@@ -446,6 +446,17 @@ export function renderCaseDetailView(
   const transcript = state.transcripts[caseItem.id] ?? [];
   const observerMode = agentConnection.status !== "connected";
 
+  const scheduledMs = caseItem.scheduledForIso ? new Date(caseItem.scheduledForIso).getTime() : 0;
+  const outOfPolicyWindow = scheduledMs > 0 && (scheduledMs - state.nowMs) > 30 * 24 * 60 * 60 * 1000;
+  const policyBadge = outOfPolicyWindow
+    ? `<span class="status-pill status-out-of-policy" title="Hearing date is outside the standard 7–30 day scheduling window. Policy exception active.">Policy exception</span>`
+    : "";
+  const policyBanner = outOfPolicyWindow
+    ? `<aside class="policy-exception-banner">
+        <strong>Policy exception active.</strong> This case is scheduled for ${escapeHtml(caseItem.scheduledForIso ?? "")} — outside the standard 7–30 day window. Override granted by Demo Authority. This notice must remain visible across all views.
+      </aside>`
+    : "";
+
   const top = `
     <section class="detail-top">
       <div>
@@ -455,8 +466,10 @@ export function renderCaseDetailView(
             caseItem.status === "active" ? "Active" : "Scheduled",
             statusFromCase(caseItem.status)
           )}
+          ${policyBadge}
         </div>
         <p>${escapeHtml(caseItem.summary)}</p>
+        ${policyBanner}
       </div>
       <div class="detail-meta">
         <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>

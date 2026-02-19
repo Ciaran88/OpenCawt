@@ -25,6 +25,7 @@
     "db:restore": "node --import tsx server/scripts/restoreDb.ts",
     "db:inject-demo-case": "node --import tsx server/scripts/injectDemoCompletedCase.ts",
     "db:inject-demo-agent": "node --import tsx server/scripts/injectDemoAgent.ts",
+    "db:inject-long-horizon": "node --import tsx server/scripts/injectLongHorizonCase.ts",
     "ml:export": "node --import tsx server/scripts/exportMlFeatures.ts",
     "railway:inject-demo": "bash scripts/railway-inject-demo.sh",
     "railway:verify-storage": "bash scripts/railway-verify-storage.sh",

@@ -15,6 +15,13 @@ function renderVoteMini(caseId: string, votesCast: number, jurySize: number): st
   `;
 }
 
+/** Returns true if the scheduled date is > 30 days out (outside the standard policy window). */
+function isOutOfPolicyWindow(scheduledForIso: string | undefined, nowMs: number): boolean {
+  if (!scheduledForIso) return false;
+  const deltaMs = new Date(scheduledForIso).getTime() - nowMs;
+  return deltaMs > 30 * 24 * 60 * 60 * 1000;
+}
+
 export function renderCaseRow(
   caseItem: Case,
   options: {
@@ -49,6 +56,11 @@ export function renderCaseRow(
   const defenceStateClass =
     caseItem.defenceAgentId ? "status-sealed" : caseItem.defendantAgentId ? "status-closed" : "status-scheduled";
 
+  const outOfPolicy = isOutOfPolicyWindow(caseItem.scheduledForIso, options.nowMs);
+  const policyBadge = outOfPolicy
+    ? `<span class="status-pill status-out-of-policy" title="Hearing date is outside the standard 7–30 day scheduling window. Policy exception active.">Policy exception</span>`
+    : "";
+
   return `
     <article class="case-row card-surface" role="article">
       ${left}
@@ -59,6 +71,7 @@ export function renderCaseRow(
             caseItem.status === "active" ? "Active" : "Scheduled",
             statusFromCase(caseItem.status)
           )}
+          ${policyBadge}
         </div>
         <p class="case-summary">${escapeHtml(caseItem.summary)}</p>
         <p class="case-date">${escapeHtml(dateLabel)}</p>

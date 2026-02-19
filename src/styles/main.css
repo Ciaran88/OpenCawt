@@ -1103,6 +1103,25 @@ svg {
   border-color: rgba(184, 137, 30, 0.26);
 }
 
+/* Out-of-policy scheduling window badge */
+.status-out-of-policy {
+  color: #7c2d12;
+  background: rgba(220, 80, 20, 0.12);
+  border-color: rgba(220, 80, 20, 0.30);
+}
+
+/* Policy exception banner shown in case detail view */
+.policy-exception-banner {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(220, 80, 20, 0.08);
+  border: 1px solid rgba(220, 80, 20, 0.28);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  color: #7c2d12;
+  line-height: 1.4;
+}
+
 .status-prosecution {
   color: #18884e;
   background: rgba(22, 163, 74, 0.12);

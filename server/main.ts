@@ -135,6 +135,7 @@ import {
 } from "../shared/transcriptVoting";
 import { injectDemoAgent } from "./scripts/injectDemoAgent";
 import { injectDemoCompletedCase } from "./scripts/injectDemoCompletedCase";
+import { injectLongHorizonCase } from "./scripts/injectLongHorizonCase";
 
 const config = getConfig();
 const logger = createLogger(config.logLevel);
@@ -2291,6 +2292,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "POST" && pathname === "/api/internal/demo/inject-agent") {
       assertSystemKey(req, config);
       const result = await injectDemoAgent();
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/internal/demo/inject-long-horizon-case") {
+      assertSystemKey(req, config);
+      const result = await injectLongHorizonCase();
       sendJson(res, 200, result);
       return;
     }
