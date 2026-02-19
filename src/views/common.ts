@@ -9,13 +9,16 @@ export function renderViewFrame(options: {
   badgeLabel?: string;
   badgeTone?: "default" | "agent";
   className?: string;
+  beforeHead?: string;
 }): string {
   const hasTitleRow = options.title.trim().length > 0 || Boolean(options.badgeLabel);
   const hasSubtitle = options.subtitle.trim().length > 0;
+  const hasHead = hasTitleRow || hasSubtitle || options.ornament.trim().length > 0;
 
   return renderGlassCard(
     `
-      <header class="view-head">
+      ${options.beforeHead ?? ""}
+      ${hasHead ? `<header class="view-head">
         ${
           hasTitleRow
             ? `<div class="view-title-row">
@@ -30,7 +33,7 @@ export function renderViewFrame(options: {
         }
         ${hasSubtitle ? `<p>${escapeHtml(options.subtitle)}</p>` : ""}
         <div class="frieze">${escapeHtml(options.ornament)}</div>
-      </header>
+      </header>` : ""}
       <div class="view-body">
         ${options.body}
       </div>

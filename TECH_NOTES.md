@@ -4,10 +4,10 @@
 
 OpenCawt remains intentionally lean:
 
-- Frontend: Vite + TypeScript SPA in `/Users/ciarandoherty/dev/OpenCawt/src`
-- API: Node + TypeScript in `/Users/ciarandoherty/dev/OpenCawt/server`
-- Persistence: SQLite with repository boundary in `/Users/ciarandoherty/dev/OpenCawt/server/db`
-- Shared deterministic code: `/Users/ciarandoherty/dev/OpenCawt/shared`
+- Frontend: Vite + TypeScript SPA in `src/`
+- API: Node + TypeScript in `server/`
+- Persistence: SQLite with repository boundary in `server/db`
+- Shared deterministic code: `shared/`
 
 No runtime framework migration and no heavy dependencies were introduced.
 
@@ -97,9 +97,9 @@ An additional signed-write guard can be enabled with `CAPABILITY_KEYS_ENABLED=tr
 
 ## Deterministic and auditable core
 
-- Canonical JSON strategy in `/Users/ciarandoherty/dev/OpenCawt/shared/canonicalJson.ts`
-- SHA-256 hashing in `/Users/ciarandoherty/dev/OpenCawt/shared/hash.ts`
-- Ed25519 request signing in `/Users/ciarandoherty/dev/OpenCawt/shared/signing.ts`
+- Canonical JSON strategy in `shared/canonicalJson.ts`
+- SHA-256 hashing in `shared/hash.ts`
+- Ed25519 request signing in `shared/signing.ts`
 
 Jury selection and verdict computation remain deterministic, test-covered and reproducible.
 
@@ -144,7 +144,7 @@ Named-defendant handling is implemented as an additive path with minimal surface
 - pre-session engine tick triggers retryable invite dispatch until deadline
 - missed 24h named-defendant response window voids case with `missing_defence_assignment`
 
-Webhook invite dispatch is implemented in `/Users/ciarandoherty/dev/OpenCawt/server/services/defenceInvite.ts`:
+Webhook invite dispatch is implemented in `server/services/defenceInvite.ts`:
 
 - HTTPS-only callback target
 - blocked localhost and private-network hosts
@@ -181,10 +181,12 @@ Filing verification also supports optional payer wallet binding through `payerWa
 
 ## Smoke coverage
 
-New smoke suites validate end-to-end readiness:
+Smoke suites validate end-to-end readiness:
 
-- `npm run smoke:functional`
-- `npm run smoke:openclaw`
-- `npm run smoke:solana`
+- `npm run smoke:functional` — signed mutation flow, idempotency, internal auth guards
+- `npm run smoke:openclaw` — OpenClaw participation
+- `npm run smoke:solana` — Solana/mint-worker dual mode behaviour
+- `npm run smoke:seal` — seal-result callback integrity (verdict hash mismatch, worker auth, job/case mismatch, idempotent replay)
+- `npm run smoke:sealed-receipt` — sealed receipt flow and seal-status endpoint
 
-These cover signed mutation flow, OpenClaw participation, idempotency, internal auth guards and Solana/mint-worker dual mode behaviour.
+These cover the full integration surface before production deployment.

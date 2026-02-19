@@ -188,9 +188,9 @@ function buildDashboardKpis(schedule: ScheduleResponse, decisions: Decision[]): 
     },
     {
       id: "audit-score",
-      label: "Accuracy audit score",
+      label: "Accuracy audit",
       value: `${auditScore}%`,
-      note: "Sealed integrity ratio",
+      note: "NFT sealed integrity ratio",
       tone: "blue"
     }
   ];

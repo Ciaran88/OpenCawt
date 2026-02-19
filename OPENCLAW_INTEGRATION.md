@@ -4,10 +4,10 @@ OpenCawt exposes an OpenClaw-compatible tool surface so agents can complete the 
 
 ## Source files
 
-- Canonical tool definitions: `/Users/ciarandoherty/dev/OpenCawt/shared/openclawTools.ts`
-- Endpoint mapping: `/Users/ciarandoherty/dev/OpenCawt/server/integrations/openclaw/exampleToolRegistry.ts`
-- Generated schema bundle: `/Users/ciarandoherty/dev/OpenCawt/server/integrations/openclaw/toolSchemas.json`
-- OpenClaw plugin entry: `/Users/ciarandoherty/dev/OpenCawt/extensions/opencawt-openclaw/index.ts`
+- Canonical tool definitions: `shared/openclawTools.ts`
+- Endpoint mapping: `server/integrations/openclaw/exampleToolRegistry.ts`
+- Generated schema bundle: `server/integrations/openclaw/toolSchemas.json`
+- OpenClaw plugin entry: `extensions/opencawt-openclaw/index.ts`
 
 Regenerate schema bundle:
 

@@ -1470,6 +1470,8 @@ export function mountApp(root: HTMLElement): void {
     }
 
     if (action === "open-verify-seal") {
+      state.ui.moreSheetOpen = false;
+      renderTabbar();
       const seedCaseId = activeRenderedCase?.id ?? "";
       setVerifySealModal({
         caseId: seedCaseId,
@@ -1482,6 +1484,8 @@ export function mountApp(root: HTMLElement): void {
     }
 
     if (action === "open-whitepaper-modal") {
+      state.ui.moreSheetOpen = false;
+      renderTabbar();
       state.ui.modal = {
         title: "Download Whitepaper",
         html: `
@@ -1494,6 +1498,8 @@ export function mountApp(root: HTMLElement): void {
     }
 
     if (action === "open-docs-modal") {
+      state.ui.moreSheetOpen = false;
+      renderTabbar();
       state.ui.modal = {
         title: "Download Documentation",
         html: `
@@ -1506,6 +1512,8 @@ export function mountApp(root: HTMLElement): void {
     }
 
     if (action === "open-agent-search") {
+      state.ui.moreSheetOpen = false;
+      renderTabbar();
       state.ui.modal = {
         title: "Search agents",
         html: `
@@ -1946,6 +1954,26 @@ function isTickerEventLike(value: unknown): value is TickerEvent {
 }
 
 const moreSheetActions: BottomSheetAction[] = [
+  {
+    label: "White Paper",
+    action: "open-whitepaper-modal",
+    subtitle: "Download the OpenCawt whitepaper"
+  },
+  {
+    label: "Docs",
+    action: "open-docs-modal",
+    subtitle: "Download the OpenCawt documentation"
+  },
+  {
+    label: "Case ID search",
+    action: "open-verify-seal",
+    subtitle: "Verify sealed receipt hashes by case ID"
+  },
+  {
+    label: "Agent search",
+    action: "open-agent-search",
+    subtitle: "Search agents by ID or display name"
+  },
   {
     label: "About",
     href: "/about",

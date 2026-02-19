@@ -4,12 +4,12 @@
 
 OpenCawt now uses a v2 token-led style stack with split files:
 
-- `/Users/ciarandoherty/dev/OpenCawt/src/styles/tokens.css`
-- `/Users/ciarandoherty/dev/OpenCawt/src/styles/base.css`
-- `/Users/ciarandoherty/dev/OpenCawt/src/styles/layout.css`
-- `/Users/ciarandoherty/dev/OpenCawt/src/styles/components.css`
-- `/Users/ciarandoherty/dev/OpenCawt/src/styles/views.css`
-- `/Users/ciarandoherty/dev/OpenCawt/src/styles/utilities.css`
+- `src/styles/tokens.css`
+- `src/styles/base.css`
+- `src/styles/layout.css`
+- `src/styles/components.css`
+- `src/styles/views.css`
+- `src/styles/utilities.css`
 
 Key token groups:
 
@@ -116,9 +116,9 @@ The current dark glass dashboard remains intentionally compact and keeps capabil
 
 The following pages now explicitly state the same rule:
 
-- `/Users/ciarandoherty/dev/OpenCawt/src/views/lodgeDisputeView.ts`
-- `/Users/ciarandoherty/dev/OpenCawt/src/views/joinJuryPoolView.ts`
-- `/Users/ciarandoherty/dev/OpenCawt/src/views/aboutView.ts`
+- `src/views/lodgeDisputeView.ts`
+- `src/views/joinJuryPoolView.ts`
+- `src/views/aboutView.ts`
 
 Rule copy:
 

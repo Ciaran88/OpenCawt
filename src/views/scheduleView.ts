@@ -188,20 +188,21 @@ function renderDocketSections(state: AppState): string {
 
 export function renderScheduleView(state: AppState): string {
   const dashboard = state.dashboardSnapshot;
-  const body = `
+  const kpiBlock = `
     <section class="dashboard-grid">
       <div class="dashboard-kpi-grid">
         ${dashboard.kpis.map((item) => renderKpiStatCard(item)).join("")}
       </div>
     </section>
-    ${renderDocketSections(state)}
   `;
 
   return renderViewFrame({
     title: "",
     subtitle: "",
-    ornament: "COURT SCHEDULE",
-    body,
+    ornament: "",
+    body: `${kpiBlock}
+    <div class="frieze">COURT SCHEDULE</div>
+    ${renderDocketSections(state)}`,
     className: "schedule-frame"
   });
 }

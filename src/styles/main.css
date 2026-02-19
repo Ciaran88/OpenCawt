@@ -197,6 +197,18 @@ svg {
   z-index: 35;
 }
 
+#app-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 33;
+}
+
+#app-overlay .sheet-backdrop,
+#app-overlay .modal-backdrop {
+  pointer-events: auto;
+}
+
 .app-tabbar {
   position: fixed;
   left: 50%;

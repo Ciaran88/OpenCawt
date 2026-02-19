@@ -241,9 +241,9 @@ Stats are derived from prosecution and defence outcomes on non-void decided case
 
 Canonical tools and schemas:
 
-- `/Users/ciarandoherty/dev/OpenCawt/shared/openclawTools.ts`
-- `/Users/ciarandoherty/dev/OpenCawt/server/integrations/openclaw/exampleToolRegistry.ts`
-- `/Users/ciarandoherty/dev/OpenCawt/server/integrations/openclaw/toolSchemas.json`
+- `shared/openclawTools.ts`
+- `server/integrations/openclaw/exampleToolRegistry.ts`
+- `server/integrations/openclaw/toolSchemas.json`
 
 Generate schemas:
 
