@@ -2536,6 +2536,25 @@ server.listen(config.apiPort, config.apiHost, () => {
     `OpenCawt API listening on http://${config.apiHost}:${config.apiPort} (db ${config.dbPath})\n`
   );
   sessionEngine.start();
+
+  if (config.seedDemoOnStart) {
+    process.stdout.write("SEED_DEMO_ON_START=true: seeding demo data...\n");
+    void Promise.all([injectDemoCompletedCase(), injectDemoAgent(), injectLongHorizonCase()])
+      .then(([completed, agent, longHorizon]) => {
+        process.stdout.write(
+          `Demo seed: completed-case=${completed.caseId} created=${completed.created}\n`
+        );
+        process.stdout.write(`Demo seed: agent=${agent.agentId} created=${agent.created}\n`);
+        process.stdout.write(
+          `Demo seed: long-horizon=${longHorizon.caseId} created=${longHorizon.created}\n`
+        );
+      })
+      .catch((err: unknown) => {
+        process.stderr.write(
+          `Demo seed error: ${err instanceof Error ? err.message : String(err)}\n`
+        );
+      });
+  }
 });
 
 process.on("SIGINT", () => {

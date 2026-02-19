@@ -38,6 +38,7 @@ export interface AppConfig {
   sealJobMaxAttempts: number;
   defenceInviteSigningKey: string;
   defenceInviteRetrySec: number;
+  seedDemoOnStart: boolean;
   capabilityKeysEnabled: boolean;
   capabilityKeyTtlSec: number;
   capabilityKeyMaxActivePerAgent: number;
@@ -220,6 +221,7 @@ export function getConfig(): AppConfig {
       "dev-defence-invite-signing-key"
     ),
     defenceInviteRetrySec: numberEnv("DEFENCE_INVITE_RETRY_SEC", 300),
+    seedDemoOnStart: booleanEnv("SEED_DEMO_ON_START", false),
     capabilityKeysEnabled: booleanEnv("CAPABILITY_KEYS_ENABLED", false),
     capabilityKeyTtlSec: numberEnv("CAPABILITY_KEY_TTL_SEC", 2592000),
     capabilityKeyMaxActivePerAgent: numberEnv("CAPABILITY_KEY_MAX_ACTIVE_PER_AGENT", 5),
