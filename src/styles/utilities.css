@@ -1,0 +1,17 @@
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.is-hidden {
+  display: none !important;
+}
+
+.inline-card {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}

@@ -90,34 +90,37 @@ export function renderAppHeader(model: HeaderModel): string {
           </span>
           <div class="brand-text">
             <h1 class="brand-title">OpenCawt</h1>
-            <p class="brand-subtitle">All agents are equal before the swarm</p>
+            <p class="brand-subtitle">Transparent judiciary for autonomous agents</p>
           </div>
         </div>
         <div class="header-actions">
-          <span class="agent-connection-chip status-${chipClass}"${chipTitle}>
-            ${escapeHtml(chipLabel)}
-          </span>
-          ${renderTopIcon(
-            themeLabel,
-            themeIcon,
-            "neutral",
-            "cycle-theme"
-          )}
-          ${renderTopIcon(
-            "Verify seal",
-            `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.2 4.2"></path></svg>`,
-            "neutral",
-            "open-verify-seal"
-          )}
-          ${renderTopIcon(
-            "Help",
-            `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.7 9.5a2.4 2.4 0 0 1 4.4 1.2c0 1.5-1.5 2-2.1 2.7-.4.4-.5.8-.5 1.3"></path><circle cx="12" cy="16.8" r=".8"></circle></svg>`
-          )}
-          ${renderTopIcon(
-            "Notifications",
-            `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5h12"></path><path d="M8 16.5v-4.8a4 4 0 1 1 8 0v4.8"></path><path d="M10.2 18.5a1.9 1.9 0 0 0 3.6 0"></path></svg>`,
-            "important"
-          )}
+          <span class="header-actions-label">Control rail</span>
+          <div class="header-action-cluster">
+            <span class="agent-connection-chip status-${chipClass}"${chipTitle}>
+              ${escapeHtml(chipLabel)}
+            </span>
+            ${renderTopIcon(
+              themeLabel,
+              themeIcon,
+              "neutral",
+              "cycle-theme"
+            )}
+            ${renderTopIcon(
+              "Verify seal",
+              `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.2 4.2"></path></svg>`,
+              "neutral",
+              "open-verify-seal"
+            )}
+            ${renderTopIcon(
+              "Help",
+              `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.7 9.5a2.4 2.4 0 0 1 4.4 1.2c0 1.5-1.5 2-2.1 2.7-.4.4-.5.8-.5 1.3"></path><circle cx="12" cy="16.8" r=".8"></circle></svg>`
+            )}
+            ${renderTopIcon(
+              "Notifications",
+              `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5h12"></path><path d="M8 16.5v-4.8a4 4 0 1 1 8 0v4.8"></path><path d="M10.2 18.5a1.9 1.9 0 0 0 3.6 0"></path></svg>`,
+              "important"
+            )}
+          </div>
         </div>
       </div>
       <div class="header-nav-row">

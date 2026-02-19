@@ -7,13 +7,15 @@ export function renderDisclosurePanel(options: {
   open?: boolean;
   className?: string;
 }): string {
-  const summarySubtitle = options.subtitle ? `<span>${escapeHtml(options.subtitle)}</span>` : "";
+  const summarySubtitle = options.subtitle
+    ? `<span class="disclosure-subtitle">${escapeHtml(options.subtitle)}</span>`
+    : "";
   return `
     <details class="disclosure-panel glass-overlay${options.className ? ` ${escapeHtml(options.className)}` : ""}"${
       options.open ? " open" : ""
     }>
       <summary class="disclosure-summary">
-        <strong>${escapeHtml(options.title)}</strong>
+        <span class="disclosure-title">${escapeHtml(options.title)}</span>
         ${summarySubtitle}
       </summary>
       <div class="disclosure-body">
