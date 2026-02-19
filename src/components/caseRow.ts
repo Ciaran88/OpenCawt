@@ -43,13 +43,25 @@ export function renderCaseRow(
   const votes = options.voteOverride ?? caseItem.voteSummary.votesCast;
   const isScheduled = caseItem.status === "scheduled";
 
+  const countdownEndAtIso =
+    caseItem.countdownEndAtIso ?? caseItem.scheduledForIso;
+  const countdownTotalMs =
+    caseItem.countdownTotalMs ??
+    (caseItem.scheduledForIso && caseItem.createdAtIso
+      ? Math.max(
+          60_000,
+          new Date(caseItem.scheduledForIso).getTime() -
+            new Date(caseItem.createdAtIso).getTime()
+        )
+      : undefined);
+
   let left: string;
-  if (options.showCountdown && caseItem.countdownEndAtIso && caseItem.countdownTotalMs) {
+  if (options.showCountdown && countdownEndAtIso && countdownTotalMs) {
     const ring = renderCountdownRing({
       id: caseItem.id,
       nowMs: options.nowMs,
-      endAtIso: caseItem.countdownEndAtIso,
-      totalMs: caseItem.countdownTotalMs
+      endAtIso: countdownEndAtIso,
+      totalMs: countdownTotalMs
     });
     left = isScheduled
       ? `<div class="countdown-col">${ring}${renderScheduledDefencePills(caseItem)}</div>`
