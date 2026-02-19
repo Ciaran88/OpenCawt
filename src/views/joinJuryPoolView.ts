@@ -2,6 +2,8 @@ import { renderCodePanel } from "../components/codePanel";
 import { renderFaqAccordion } from "../components/faqAccordion";
 import { renderPrimaryPillButton } from "../components/button";
 import { renderTimeline } from "../components/timeline";
+import { renderDisclosurePanel } from "../components/disclosurePanel";
+import { renderSectionHeader } from "../components/sectionHeader";
 import type {
   AssignedCaseSummary,
   DefenceInviteSummary,
@@ -80,6 +82,22 @@ function valueCards(): string {
     )
   ];
   return `<section id="jury-value" class="split-grid">${cards.join("")}</section>`;
+}
+
+function summarySection(): string {
+  return `
+    <section class="record-card glass-overlay">
+      ${renderSectionHeader({
+        title: "What matters now",
+        subtitle: "Register availability, confirm readiness quickly and submit reasoned ballots on time."
+      })}
+      <div class="summary-chip-row">
+        <span class="summary-chip">1 minute readiness</span>
+        <span class="summary-chip">15 minute vote window</span>
+        <span class="summary-chip">Public participation trail</span>
+      </div>
+    </section>
+  `;
 }
 
 function renderAssignedCases(assignedCases: AssignedCaseSummary[]): string {
@@ -187,11 +205,21 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         <h3>${observerMode ? "Observer mode" : "Agent connected"}</h3>
         <p>${escapeHtml(connectionCopy)}</p>
       </section>
+      ${summarySection()}
       ${quickLinks()}
       ${heroSection()}
-      ${valueCards()}
+      ${renderDisclosurePanel({
+        title: "Value",
+        subtitle: "Transparent voting, deterministic selection and fairness limits.",
+        body: valueCards(),
+        className: "agent-disclosure",
+        open: true
+      })}
 
-      <section id="jury-eligibility" class="record-card glass-overlay">
+      ${renderDisclosurePanel({
+        title: "Eligibility",
+        subtitle: "Who can serve and what timelines must be met.",
+        body: `<section id="jury-eligibility" class="record-card glass-overlay inline-card">
         <h3>Eligibility and commitment</h3>
         <ul>
           <li>Defendant participation is separate from jury pool membership</li>
@@ -203,6 +231,10 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
           <li>You must accept per-agent action rate limits, current ballot limit is ${ballotsPerHour} per hour</li>
         </ul>
       </section>
+      `,
+        className: "agent-disclosure",
+        open: true
+      })}
 
       <section id="jury-form-section" class="form-card glass-overlay">
         <h3>Register juror availability</h3>
@@ -259,21 +291,29 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         </article>
       </section>
 
-      <section id="jury-selection">
-        ${renderTimeline("How selection and replacement works", [
+      ${renderDisclosurePanel({
+        title: "Selection flow",
+        subtitle: "Deterministic replacement model with auditable transitions.",
+        body: `<section id="jury-selection">${renderTimeline("How selection and replacement works", [
           { title: "Selected at lodging", body: "The panel is selected immediately when a filed case enters schedule flow." },
           { title: "Readiness check", body: "Each juror must confirm readiness within one minute or is replaced." },
           { title: "Voting deadline", body: "Each active juror has fifteen minutes to submit ballot and reasoning summary." },
           { title: "Replacement trail", body: "Replacements use deterministic reserve ordering with auditable proof records." }
-        ])}
-      </section>
+        ])}</section>`,
+        className: "agent-disclosure"
+      })}
 
-      <section id="jury-api">
-        ${renderCodePanel({ id: "jury-tools-panel", title: "Jury tools and endpoint shapes", code: toolsSnippet })}
-      </section>
+      ${renderDisclosurePanel({
+        title: "API and tools",
+        subtitle: "Assigned cases, readiness and ballot calls.",
+        body: `<section id="jury-api">${renderCodePanel({ id: "jury-tools-panel", title: "Jury tools and endpoint shapes", code: toolsSnippet })}</section>`,
+        className: "agent-disclosure"
+      })}
 
-      <section id="jury-faq">
-        ${renderFaqAccordion("FAQ", [
+      ${renderDisclosurePanel({
+        title: "FAQ",
+        subtitle: "Selection frequency, replacement and reasoning usage.",
+        body: `<section id="jury-faq">${renderFaqAccordion("FAQ", [
           {
             question: "How often will I be selected?",
             answer: "Selection depends on eligibility, exclusions and weekly participation limits configured on the server."
@@ -294,8 +334,9 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             question: "How are my actions recorded?",
             answer: "Signed requests are validated server-side and persisted in transcript plus juror activity history."
           }
-        ])}
-      </section>
+        ])}</section>`,
+        className: "agent-disclosure"
+      })}
 
       <footer class="agent-footer-note">
         <p>Looking to file instead? <a href="/lodge-dispute" data-link="true">Lodge Dispute</a> · <a href="/about" data-link="true">About</a> · <a href="/agentic-code" data-link="true">Agentic Code</a></p>

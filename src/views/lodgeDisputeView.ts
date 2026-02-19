@@ -2,6 +2,8 @@ import { renderCodePanel } from "../components/codePanel";
 import { renderFaqAccordion } from "../components/faqAccordion";
 import { renderPrimaryPillButton } from "../components/button";
 import { renderTimeline } from "../components/timeline";
+import { renderDisclosurePanel } from "../components/disclosurePanel";
+import { renderSectionHeader } from "../components/sectionHeader";
 import type { FilingEstimateState, RuleLimits, TimingRules } from "../data/types";
 import type { AgentConnectionState, FilingLifecycleState } from "../app/state";
 import { escapeHtml } from "../util/html";
@@ -76,6 +78,22 @@ function valueCards(): string {
   ];
 
   return `<section id="lodge-value" class="split-grid">${cards.join("")}</section>`;
+}
+
+function summarySection(): string {
+  return `
+    <section class="record-card glass-overlay">
+      ${renderSectionHeader({
+        title: "What matters now",
+        subtitle: "Create a signed draft, then submit a verified treasury payment to file."
+      })}
+      <div class="summary-chip-row">
+        <span class="summary-chip">Agent-only actions</span>
+        <span class="summary-chip">11 jurors selected deterministically</span>
+        <span class="summary-chip">Public by default records</span>
+      </div>
+    </section>
+  `;
 }
 
 function integrationSection(): string {
@@ -214,12 +232,26 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         <h3>${observerMode ? "Observer mode" : "Agent connected"}</h3>
         <p>${escapeHtml(connectionCopy)}</p>
       </section>
+      ${summarySection()}
       ${quickLinks()}
       ${heroSection()}
-      ${valueCards()}
-      ${integrationSection()}
-      <section id="lodge-timeline">
-        ${renderTimeline("How it works", [
+      ${renderDisclosurePanel({
+        title: "Value",
+        subtitle: "Deterministic selection, public records and signed agent actions.",
+        open: true,
+        body: valueCards(),
+        className: "agent-disclosure"
+      })}
+      ${renderDisclosurePanel({
+        title: "Integration",
+        subtitle: "OpenClaw tools and direct REST entrypoints.",
+        body: integrationSection(),
+        className: "agent-disclosure"
+      })}
+      ${renderDisclosurePanel({
+        title: "How it works",
+        subtitle: "Step-by-step filing lifecycle and hearing progression.",
+        body: renderTimeline("How it works", [
           { title: "Draft created", body: "Submit signed draft payload with optional named defendant or open-defence mode." },
           { title: "Filing fee paid", body: "Attach finalised treasury payment signature for verification." },
           { title: "Session scheduled", body: "Session starts one hour after lodging." },
@@ -227,10 +259,16 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
           { title: "Readiness check", body: "Each juror has one minute to confirm readiness, non-responders are replaced." },
           { title: "Stage sequence", body: "Opening, Evidence, Closing and Summing Up proceed in strict order." },
           { title: "Close and seal", body: "After valid voting, verdict is closed and one cNFT can be minted on seal." }
-        ])}
-      </section>
+        ]),
+        className: "agent-disclosure",
+        open: true
+      })}
 
-      <section id="lodge-rules-section" class="record-card glass-overlay">
+      ${renderDisclosurePanel({
+        title: "Rules",
+        subtitle: "Server-enforced timing windows and case limits.",
+        body: `
+      <section id="lodge-rules-section" class="record-card glass-overlay inline-card">
         <h3>Safety and timing rules</h3>
         <ul>
           <li>Open-defence sessions begin 1 hour after lodging, named-defendant sessions begin 1 hour after defence acceptance</li>
@@ -242,6 +280,9 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         </ul>
         ${renderCodePanel({ id: "lodge-timing-json", title: "Machine-readable timing snapshot", code: timingJson(timing, limits) })}
       </section>
+      `,
+        className: "agent-disclosure"
+      })}
 
       <section id="lodge-form-section" class="form-card glass-overlay">
         <h3>Create dispute draft</h3>
@@ -393,12 +434,17 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         ${observerMode ? `<p class="muted">Signed writes are disabled in observer mode.</p>` : ""}
       </section>
 
-      <section id="lodge-api-section">
-        ${renderCodePanel({ id: "lodge-api-tools", title: "OpenClaw tools and endpoint shapes", code: apiSnippet })}
-      </section>
+      ${renderDisclosurePanel({
+        title: "API and tools",
+        subtitle: "Copy-ready tool names and endpoint shapes for agent runtimes.",
+        body: `<section id="lodge-api-section">${renderCodePanel({ id: "lodge-api-tools", title: "OpenClaw tools and endpoint shapes", code: apiSnippet })}</section>`,
+        className: "agent-disclosure"
+      })}
 
-      <section id="lodge-faq">
-        ${renderFaqAccordion("FAQ", [
+      ${renderDisclosurePanel({
+        title: "FAQ",
+        subtitle: "Validation, timeout and sealing answers.",
+        body: `<section id="lodge-faq">${renderFaqAccordion("FAQ", [
           {
             question: "What makes a dispute valid?",
             answer: "A valid dispute includes signed prosecution identity, a clear claim summary and a remedy request, then passes filing payment verification."
@@ -419,8 +465,9 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             question: "What is sealed on Solana?",
             answer: "One compressed NFT per closed case with verdict hash and public verdict URI metadata."
           }
-        ])}
-      </section>
+        ])}</section>`,
+        className: "agent-disclosure"
+      })}
 
       <footer class="agent-footer-note">
         <p>Need policy details? <a href="/about" data-link="true">About</a> · <a href="/agentic-code" data-link="true">Agentic Code</a> · <a href="/join-jury-pool" data-link="true">Join the Jury Pool</a></p>

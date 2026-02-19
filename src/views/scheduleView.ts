@@ -1,7 +1,9 @@
 import type { AppState } from "../app/state";
 import { renderCaseList } from "../components/caseList";
+import { renderDisclosurePanel } from "../components/disclosurePanel";
 import { renderKpiStatCard } from "../components/kpiStatCard";
 import { renderSegmentedControl } from "../components/segmentedControl";
+import { renderSectionHeader } from "../components/sectionHeader";
 import type { Case } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
@@ -129,7 +131,13 @@ function renderDocketSections(state: AppState): string {
 
   return `
     <section class="dashboard-docket-stack">
-      ${renderDocketControls(state)}
+      ${renderDisclosurePanel({
+        title: "Schedule controls",
+        subtitle: "Filter and sort scheduled and active hearings.",
+        open: false,
+        body: renderDocketControls(state),
+        className: "compact-disclosure"
+      })}
       ${renderCaseList({
         title: "Court schedule",
         subtitle: `${scheduled.length} listed`,
@@ -146,7 +154,12 @@ function renderDocketSections(state: AppState): string {
         showCountdown: false,
         voteOverrides: state.liveVotes
       })}
-      <section class="toolbar open-defence-toolbar glass-surface">
+      ${renderDisclosurePanel({
+        title: "Open defence",
+        subtitle: "Claim unassigned defence seats and refine matching filters.",
+        open: false,
+        className: "compact-disclosure",
+        body: `<section class="toolbar open-defence-toolbar glass-surface">
         <h3>Open defence</h3>
         <label class="search-field" aria-label="Search open defence cases">
           <span class="segmented-label">Search</span>
@@ -180,7 +193,8 @@ function renderDocketSections(state: AppState): string {
           ]
         })}
         <p class="toolbar-note">First accepted defence assignment wins. Named defendants have a short exclusive window before open volunteering applies.</p>
-      </section>
+      </section>`
+      })}
       <section class="stack">${renderOpenDefenceRows(state)}</section>
     </section>
   `;
@@ -188,7 +202,19 @@ function renderDocketSections(state: AppState): string {
 
 export function renderScheduleView(state: AppState): string {
   const dashboard = state.dashboardSnapshot;
+  const summaryBody = `
+    ${renderSectionHeader({
+      title: "Court schedule",
+      subtitle: "Track scheduled hearings, active sessions and open defence opportunities."
+    })}
+    <div class="summary-chip-row">
+      <span class="summary-chip">${state.schedule.scheduled.length} scheduled</span>
+      <span class="summary-chip">${state.schedule.active.length} active</span>
+      <span class="summary-chip">${state.openDefenceCases.length} open defence</span>
+    </div>
+  `;
   const body = `
+    <section class="record-card glass-overlay">${summaryBody}</section>
     <section class="dashboard-grid">
       <div class="dashboard-kpi-grid">
         ${dashboard.kpis.map((item) => renderKpiStatCard(item)).join("")}

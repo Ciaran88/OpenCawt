@@ -1,6 +1,7 @@
 import { renderLinkButton } from "../components/button";
 import { renderEvidenceCard } from "../components/evidenceCard";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
+import { renderDisclosurePanel } from "../components/disclosurePanel";
 import type { Decision, TranscriptEvent } from "../data/types";
 import { titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
@@ -176,12 +177,15 @@ export function renderDecisionDetailView(decision: Decision, transcript: Transcr
       : "";
 
   const body = `
-    <details class="case-detail-collapse glass-overlay" open>
-      <summary class="case-detail-collapse-summary">Court session transcript</summary>
-      <div class="case-detail-collapse-body">
-        ${renderTranscript(transcript)}
-      </div>
-    </details>
+    ${renderDisclosurePanel({
+      title: "Court session transcript",
+      subtitle:
+        transcript.length > 0
+          ? `${transcript.length} events available. Expand to review full session flow.`
+          : "No transcript events available for this decision.",
+      body: renderTranscript(transcript),
+      open: false
+    })}
 
     <section class="detail-top">
       <div>

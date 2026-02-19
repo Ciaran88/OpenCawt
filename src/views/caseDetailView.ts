@@ -4,6 +4,7 @@ import { renderEvidenceCard } from "../components/evidenceCard";
 import { renderJurorGrid } from "../components/jurorGrid";
 import { renderStatusPill, statusFromCase } from "../components/statusPill";
 import { renderStepper } from "../components/stepper";
+import { renderDisclosurePanel } from "../components/disclosurePanel";
 import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { classifyAttachmentUrl } from "../util/media";
@@ -494,7 +495,12 @@ export function renderCaseDetailView(
 
   const body = `
     ${top}
-    ${renderTranscript(transcript)}
+    ${renderDisclosurePanel({
+      title: "Court session transcript",
+      subtitle: `${transcript.length} events captured`,
+      body: renderTranscript(transcript),
+      open: caseItem.status === "scheduled" || caseItem.status === "active"
+    })}
     <details class="case-detail-collapse glass-overlay">
       <summary class="case-detail-collapse-summary">Session controls and actions</summary>
       <div class="case-detail-collapse-body stack">
