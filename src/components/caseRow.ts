@@ -1,7 +1,6 @@
 import type { Case } from "../data/types";
 import { formatDashboardDateLabel } from "../util/format";
 import { escapeHtml } from "../util/html";
-import { renderCountdownRing } from "./countdownRing";
 import { renderLinkButton } from "./button";
 import { renderStatusPill, statusFromCase } from "./statusPill";
 
@@ -24,52 +23,33 @@ export function renderCaseRow(
   }
 ): string {
   const votes = options.voteOverride ?? caseItem.voteSummary.votesCast;
-  const left =
-    options.showCountdown && caseItem.countdownEndAtIso && caseItem.countdownTotalMs
-      ? renderCountdownRing({
-          id: caseItem.id,
-          nowMs: options.nowMs,
-          endAtIso: caseItem.countdownEndAtIso,
-          totalMs: caseItem.countdownTotalMs
-        })
-      : `<div class="countdown-spacer" aria-hidden="true"></div>`;
-
   const dateLabel =
     caseItem.displayDateLabel ??
     formatDashboardDateLabel(caseItem.scheduledForIso ?? caseItem.createdAtIso);
-  const defenceLabel =
-    caseItem.defenceAgentId ??
-    (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence");
-  const defenceStateLabel =
-    caseItem.defenceAgentId
-      ? "Defence taken"
-      : caseItem.defendantAgentId
-        ? "Invited"
-        : "Open defence";
-  const defenceStateClass =
-    caseItem.defenceAgentId ? "status-sealed" : caseItem.defendantAgentId ? "status-closed" : "status-scheduled";
+  
+  const isActive = caseItem.status === "active";
 
   return `
-    <article class="case-row card-surface" role="article">
-      ${left}
-      <div class="case-main">
-        <div class="case-idline">
-          <span class="case-id">${escapeHtml(caseItem.id)}</span>
-          ${renderStatusPill(
-            caseItem.status === "active" ? "Active" : "Scheduled",
+    <article class="case-card" role="article">
+      <div class="case-card-header">
+        <span class="case-id">${escapeHtml(caseItem.id)}</span>
+        ${renderStatusPill(
+            isActive ? "Active" : "Scheduled",
             statusFromCase(caseItem.status)
-          )}
-        </div>
+        )}
+      </div>
+      <div class="case-card-body">
         <p class="case-summary">${escapeHtml(caseItem.summary)}</p>
         <p class="case-date">${escapeHtml(dateLabel)}</p>
+        <div class="case-participants-mini">
+           <span><strong>P:</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
+           ${caseItem.defendantAgentId ? `<span><strong>D:</strong> ${escapeHtml(caseItem.defendantAgentId)}</span>` : ""}
+        </div>
       </div>
-      <div class="case-participants">
-        <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
-        <span><strong>Defence</strong> ${escapeHtml(defenceLabel)}</span>
-        <span class="status-pill ${defenceStateClass}">${escapeHtml(defenceStateLabel)}</span>
+      ${isActive ? renderVoteMini(caseItem.id, votes, caseItem.voteSummary.jurySize) : ''}
+      <div class="case-card-footer">
+        ${renderLinkButton("Open Case", `/case/${encodeURIComponent(caseItem.id)}`, "secondary")}
       </div>
-      ${renderVoteMini(caseItem.id, votes, caseItem.voteSummary.jurySize)}
-      <div class="case-actions">${renderLinkButton("Open", `/case/${encodeURIComponent(caseItem.id)}`, "pill-primary")}</div>
     </article>
   `;
 }

@@ -74,7 +74,7 @@ function timeRemainingLabel(nowMs: number, iso?: string): string {
   return `${remMins}m remaining`;
 }
 
-function renderTranscript(events: TranscriptEvent[]): string {
+export function renderTranscript(events: TranscriptEvent[]): string {
   if (events.length === 0) {
     return `<p class="muted">No transcript events yet.</p>`;
   }
@@ -134,7 +134,7 @@ function renderTranscript(events: TranscriptEvent[]): string {
   `;
 }
 
-function renderEvidenceSubmissionForm(
+export function renderEvidenceSubmissionForm(
   caseId: string,
   stage: SessionStage | undefined,
   disabled: boolean
@@ -202,7 +202,7 @@ function renderEvidenceSubmissionForm(
   `;
 }
 
-function renderStageMessageForm(
+export function renderStageMessageForm(
   caseId: string,
   stage: SessionStage | undefined,
   disabled: boolean
@@ -242,7 +242,7 @@ function renderStageMessageForm(
   `;
 }
 
-function renderReadinessForm(caseId: string, stage: SessionStage | undefined, disabled: boolean): string {
+export function renderReadinessForm(caseId: string, stage: SessionStage | undefined, disabled: boolean): string {
   if (stage !== "jury_readiness") {
     return "";
   }

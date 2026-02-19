@@ -1,11 +1,11 @@
-import { renderAppHeader } from "../components/appHeader";
 import { renderAppShell } from "../components/appShell";
+import { renderSideNav } from "../components/sideNav";
+import { renderTopBar } from "../components/topBar";
 import {
   renderBottomSheet,
   type BottomSheetAction,
   type BottomSheetState
 } from "../components/bottomSheet";
-import { renderBottomTabBar } from "../components/bottomTabBar";
 import { renderModal } from "../components/modal";
 import { renderToastHost, type ToastMessage } from "../components/toast";
 import {
@@ -77,11 +77,11 @@ import { renderPastDecisionsView } from "../views/pastDecisionsView";
 import { renderScheduleView } from "../views/scheduleView";
 
 interface AppDom {
-  header: HTMLElement;
+  sidebarNav: HTMLElement;
+  topbar: HTMLElement;
   main: HTMLElement;
   toast: HTMLElement;
   overlay: HTMLElement;
-  tabbar: HTMLElement;
 }
 
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -127,11 +127,11 @@ export function mountApp(root: HTMLElement): void {
   root.innerHTML = renderAppShell();
 
   const dom: AppDom = {
-    header: root.querySelector("#app-header") as HTMLElement,
+    sidebarNav: root.querySelector("#app-sidebar-nav-container") as HTMLElement,
+    topbar: root.querySelector("#app-topbar") as HTMLElement,
     main: root.querySelector("#app-main") as HTMLElement,
     toast: root.querySelector("#app-toast") as HTMLElement,
-    overlay: root.querySelector("#app-overlay") as HTMLElement,
-    tabbar: root.querySelector("#app-tabbar") as HTMLElement
+    overlay: root.querySelector("#app-overlay") as HTMLElement
   };
 
   const state = createInitialState();
@@ -154,7 +154,7 @@ export function mountApp(root: HTMLElement): void {
       },
       onTickerPush(event) {
         state.ticker = [event, ...state.ticker.filter((item) => item.id !== event.id)].slice(0, 16);
-        renderHeader();
+        // Ticker removed from UI for now
       }
     },
     []
@@ -483,16 +483,12 @@ export function mountApp(root: HTMLElement): void {
     }
   };
 
-  const renderHeader = () => {
-    dom.header.innerHTML = renderAppHeader({
+  const renderChrome = () => {
+    dom.sidebarNav.innerHTML = renderSideNav(state.route);
+    dom.topbar.innerHTML = renderTopBar({
       route: state.route,
-      tickerEvents: state.ticker,
       agentConnection: state.agentConnection
     });
-  };
-
-  const renderTabbar = () => {
-    dom.tabbar.innerHTML = renderBottomTabBar(state.route, state.ui.moreSheetOpen);
   };
 
   const renderToast = () => {
@@ -648,8 +644,7 @@ export function mountApp(root: HTMLElement): void {
       state.filingLifecycle = { status: "idle" };
     }
 
-    renderHeader();
-    renderTabbar();
+    renderChrome();
     renderOverlay();
 
     if (state.ui.loading) {
@@ -1209,7 +1204,6 @@ export function mountApp(root: HTMLElement): void {
 
     if (action === "toggle-more-sheet") {
       state.ui.moreSheetOpen = !state.ui.moreSheetOpen;
-      renderTabbar();
       renderOverlay();
       return;
     }
@@ -1219,7 +1213,6 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       state.ui.moreSheetOpen = false;
-      renderTabbar();
       renderOverlay();
       return;
     }
@@ -1488,8 +1481,7 @@ export function mountApp(root: HTMLElement): void {
     }
   });
 
-  renderHeader();
-  renderTabbar();
+  renderChrome();
   renderLoading();
   renderToast();
   renderOverlay();
@@ -1518,6 +1510,14 @@ function patchCountdownRings(scope: HTMLElement, nowMs: number): void {
     if (label) {
       label.textContent = formatDurationLabel(countdown.remainingMs);
     }
+  });
+
+  const textCountdowns = scope.querySelectorAll<HTMLElement>(".header-countdown");
+  textCountdowns.forEach((el) => {
+      const endAt = Number(el.dataset.endAt || 0);
+      if (!endAt) return;
+      const countdown = computeCountdownState(nowMs, endAt, 3600000);
+      el.textContent = `Next session in - ${formatDurationLabel(countdown.remainingMs)}`;
   });
 }
 

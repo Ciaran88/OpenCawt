@@ -1,10 +1,9 @@
 import type { AppState } from "../app/state";
 import { renderCaseList } from "../components/caseList";
 import { renderKpiStatCard } from "../components/kpiStatCard";
-import { renderSegmentedControl } from "../components/segmentedControl";
+import { renderFilterDropdown } from "../components/filterDropdown";
 import type { Case } from "../data/types";
 import { escapeHtml } from "../util/html";
-import { renderViewFrame } from "./common";
 
 function byTimeAsc(a: Case, b: Case): number {
   const aTime = a.scheduledForIso
@@ -95,27 +94,25 @@ function renderOpenDefenceRows(state: AppState): string {
 
 function renderDocketControls(state: AppState): string {
   return `
-    <section class="toolbar toolbar-compact glass-surface">
-      ${renderSegmentedControl({
+      ${renderFilterDropdown({
         label: "Status",
         action: "schedule-filter",
         selected: state.scheduleControls.filter,
         list: [
-          { value: "all", label: "All" },
+          { value: "all", label: "All Cases" },
           { value: "scheduled", label: "Scheduled" },
           { value: "active", label: "Active" }
         ]
       })}
-      ${renderSegmentedControl({
+      ${renderFilterDropdown({
         label: "Sort",
         action: "schedule-sort",
         selected: state.scheduleControls.sort,
         list: [
-          { value: "time-asc", label: "Soonest" },
-          { value: "time-desc", label: "Latest" }
+          { value: "time-asc", label: "Soonest First" },
+          { value: "time-desc", label: "Latest First" }
         ]
       })}
-    </section>
   `;
 }
 
@@ -126,17 +123,19 @@ function renderDocketSections(state: AppState): string {
 
   const scheduled = filter === "active" ? [] : scheduledBase;
   const active = filter === "scheduled" ? [] : activeBase;
+  
+  const docketControls = renderDocketControls(state);
 
   return `
     <section class="dashboard-docket-stack">
-      ${renderDocketControls(state)}
       ${renderCaseList({
         title: "Court schedule",
         subtitle: `${scheduled.length} listed`,
         cases: scheduled,
         nowMs: state.nowMs,
         showCountdown: true,
-        voteOverrides: state.liveVotes
+        voteOverrides: state.liveVotes,
+        controls: docketControls
       })}
       ${renderCaseList({
         title: "Active",
@@ -146,7 +145,7 @@ function renderDocketSections(state: AppState): string {
         showCountdown: false,
         voteOverrides: state.liveVotes
       })}
-      <section class="toolbar open-defence-toolbar glass-surface">
+      <section class="toolbar open-defence-toolbar">
         <h3>Open defence</h3>
         <label class="search-field" aria-label="Search open defence cases">
           <span class="segmented-label">Search</span>
@@ -160,23 +159,23 @@ function renderDocketSections(state: AppState): string {
             state.openDefenceControls.tag
           )}" />
         </label>
-        ${renderSegmentedControl({
+        ${renderFilterDropdown({
           label: "Sort",
           action: "open-defence-sort",
           selected: state.openDefenceControls.timeSort,
           list: [
-            { value: "soonest", label: "Soonest" },
-            { value: "latest", label: "Latest" }
+            { value: "soonest", label: "Soonest First" },
+            { value: "latest", label: "Latest First" }
           ]
         })}
-        ${renderSegmentedControl({
+        ${renderFilterDropdown({
           label: "Start",
           action: "open-defence-window",
           selected: state.openDefenceControls.startWindow,
           list: [
-            { value: "all", label: "Any" },
-            { value: "next-2h", label: "2h" },
-            { value: "next-6h", label: "6h" }
+            { value: "all", label: "Any Time" },
+            { value: "next-2h", label: "Next 2 Hours" },
+            { value: "next-6h", label: "Next 6 Hours" }
           ]
         })}
         <p class="toolbar-note">First accepted defence assignment wins. Named defendants have a short exclusive window before open volunteering applies.</p>
@@ -188,7 +187,7 @@ function renderDocketSections(state: AppState): string {
 
 export function renderScheduleView(state: AppState): string {
   const dashboard = state.dashboardSnapshot;
-  const body = `
+  return `
     <section class="dashboard-grid">
       <div class="dashboard-kpi-grid">
         ${dashboard.kpis.map((item) => renderKpiStatCard(item)).join("")}
@@ -196,12 +195,4 @@ export function renderScheduleView(state: AppState): string {
     </section>
     ${renderDocketSections(state)}
   `;
-
-  return renderViewFrame({
-    title: "",
-    subtitle: "",
-    ornament: "COURT SCHEDULE",
-    body,
-    className: "schedule-frame"
-  });
 }
