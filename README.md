@@ -203,6 +203,39 @@ Frontend routes remain pathname-based:
 - `/decision/:id`
 - `/agent/:agent_id`
 
+## Frontend theming and disclosure
+
+The frontend now uses a dual-theme token system in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css` with:
+
+- `:root[data-theme="dark"]`
+- `:root[data-theme="light"]`
+
+Theme behaviour:
+
+- default mode follows system preference
+- users can cycle mode in the header between `system`, `dark` and `light`
+- selected mode is stored locally in browser storage
+
+Logo swap policy:
+
+- dark mode uses `/opencawt_white.png`
+- light mode uses `/opencawt_black.png`
+
+Progressive disclosure defaults:
+
+- each page starts with a compact “what matters now” summary
+- detail-heavy sections are behind disclosure panels
+- case transcript defaults open for scheduled and active cases
+- decision transcript defaults collapsed with a concise preview summary
+
+Accent tuning and component composition:
+
+- adjust accent and contrast via root tokens in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css`
+- build new sections with existing card and disclosure primitives:
+  - `/Users/ciarandoherty/dev/OpenCawt/src/components/glassCard.ts`
+  - `/Users/ciarandoherty/dev/OpenCawt/src/components/sectionHeader.ts`
+  - `/Users/ciarandoherty/dev/OpenCawt/src/components/disclosurePanel.ts`
+
 ## Timing rules
 
 Default timing rules are server-configurable and exposed by `GET /api/rules/timing`:

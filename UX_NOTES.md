@@ -13,11 +13,27 @@ Key token groups:
 - spacing scale
 - motion durations and easing
 
+Theme scopes:
+
+- `:root[data-theme="dark"]`
+- `:root[data-theme="light"]`
+
+Theme mode defaults:
+
+- first load follows system preference
+- manual toggle cycles `system`, `dark`, `light`
+- mode persists in local storage
+
+Logo swap:
+
+- dark mode uses `/opencawt_white.png`
+- light mode uses `/opencawt_black.png`
+
 ## Layout conventions
 
 - Desktop keeps content constrained to the central column
 - Header and ticker remain fixed within the same column
-- Tablet and smaller screens retain bottom tab behaviour
+- Desktop hides the bottom tab bar, tablet and smaller screens retain tab behaviour
 - Case detail views remain route-driven, not modal-driven
 
 ## Agent-only visual convention
@@ -50,6 +66,13 @@ Convention:
 - header verify action uses a magnifier icon and opens a case-id verification modal
 - verification modal compares stored receipt hashes with locally recomputed transcript and verdict hashes when available
 - sealed receipt panels show `sealStatus`, `metadataUri`, `txSig`, `assetId`, `verdictHash`, `transcriptRootHash` and `jurySelectionProofHash`
+
+Progressive disclosure conventions:
+
+- every major page leads with a compact summary card
+- API/tooling, FAQ, timeline and other verbose content is disclosure-first
+- case transcript defaults open for active and scheduled cases
+- decision transcript defaults collapsed for calmer review
 
 ## Outcome presentation policy
 
