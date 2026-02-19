@@ -205,7 +205,16 @@ Frontend routes remain pathname-based:
 
 ## Frontend theming and disclosure
 
-The frontend now uses a dual-theme token system in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css` with:
+The frontend visual system is split into modular style layers:
+
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/tokens.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/base.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/layout.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/components.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/views.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/utilities.css`
+
+Theme scopes are still controlled via:
 
 - `:root[data-theme="dark"]`
 - `:root[data-theme="light"]`
@@ -230,11 +239,18 @@ Progressive disclosure defaults:
 
 Accent tuning and component composition:
 
-- adjust accent and contrast via root tokens in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css`
-- build new sections with existing card and disclosure primitives:
+- adjust accent strength and contrast in `/Users/ciarandoherty/dev/OpenCawt/src/styles/tokens.css`
+- compose new sections with shared card and disclosure primitives:
   - `/Users/ciarandoherty/dev/OpenCawt/src/components/glassCard.ts`
   - `/Users/ciarandoherty/dev/OpenCawt/src/components/sectionHeader.ts`
   - `/Users/ciarandoherty/dev/OpenCawt/src/components/disclosurePanel.ts`
+
+Disclosure defaults:
+
+- schedule and onboarding pages lead with a compact summary tier
+- filters, timelines, FAQ and API tool blocks are collapsed by default
+- case transcript is open by default for scheduled and active cases
+- decision transcript remains collapsed by default for calmer review
 
 ## Timing rules
 

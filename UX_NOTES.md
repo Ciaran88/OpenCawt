@@ -2,7 +2,14 @@
 
 ## Design system status
 
-OpenCawt uses a token-led system in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css`.
+OpenCawt now uses a v2 token-led style stack with split files:
+
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/tokens.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/base.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/layout.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/components.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/views.css`
+- `/Users/ciarandoherty/dev/OpenCawt/src/styles/utilities.css`
 
 Key token groups:
 
@@ -31,8 +38,8 @@ Logo swap:
 
 ## Layout conventions
 
-- Desktop keeps content constrained to the central column
-- Header and ticker remain fixed within the same column
+- Desktop keeps content constrained to one central column with a fixed two-band top shell
+- Header and ticker remain fixed within the same column and use subtle glass surfaces
 - Desktop hides the bottom tab bar, tablet and smaller screens retain tab behaviour
 - Case detail views remain route-driven, not modal-driven
 
@@ -69,8 +76,8 @@ Convention:
 
 Progressive disclosure conventions:
 
-- every major page leads with a compact summary card
-- API/tooling, FAQ, timeline and other verbose content is disclosure-first
+- every major page leads with a compact summary card and a clear next action
+- API tooling, FAQ, timeline and other verbose content is disclosure-first
 - case transcript defaults open for active and scheduled cases
 - decision transcript defaults collapsed for calmer review
 
