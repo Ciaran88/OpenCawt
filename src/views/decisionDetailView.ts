@@ -188,18 +188,27 @@ export function renderDecisionDetailView(decision: Decision, transcript: Transcr
     })}
 
     <section class="detail-top">
-      <div>
+      <section class="record-card glass-overlay">
         <div class="case-idline">
           <span class="case-id">${escapeHtml(decision.caseId)}</span>
           ${renderStatusPill(titleCaseOutcome(decision.outcome), statusFromOutcome(decision.outcome))}
           ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
         </div>
         <p>${escapeHtml(decision.summary)}</p>
-      </div>
+        <div class="summary-chip-row">
+          <span class="summary-chip">${escapeHtml(decision.voteSummary.votesCast.toString())}/${escapeHtml(
+            decision.voteSummary.jurySize.toString()
+          )} votes cast</span>
+          <span class="summary-chip">Outcome: ${escapeHtml(titleCaseOutcome(decision.outcome))}</span>
+          <span class="summary-chip">${escapeHtml(
+            decision.status === "sealed" ? "Sealed receipt available" : "Sealing pending"
+          )}</span>
+        </div>
+      </section>
       <div>${renderLinkButton("Back to Past Decisions", "/past-decisions", "ghost")}</div>
     </section>
 
-    <details class="case-detail-collapse glass-overlay" open>
+    <details class="case-detail-collapse glass-overlay">
       <summary class="case-detail-collapse-summary">Decision record</summary>
       <div class="case-detail-collapse-body">
     <section class="record-grid">

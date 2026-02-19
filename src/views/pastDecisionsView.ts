@@ -98,7 +98,7 @@ export function renderPastDecisionsView(state: AppState): string {
         title: "Filters",
         subtitle: "Refine by case ID and outcome.",
         body: toolbar,
-        open: true,
+        open: false,
         className: "compact-disclosure"
       })}
       <section class="decision-list">${list || `<div class="empty-card">No decisions found.</div>`}</section>

@@ -213,7 +213,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         subtitle: "Transparent voting, deterministic selection and fairness limits.",
         body: valueCards(),
         className: "agent-disclosure",
-        open: true
+        open: false
       })}
 
       ${renderDisclosurePanel({
@@ -233,7 +233,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
       </section>
       `,
         className: "agent-disclosure",
-        open: true
+        open: false
       })}
 
       <section id="jury-form-section" class="form-card glass-overlay">

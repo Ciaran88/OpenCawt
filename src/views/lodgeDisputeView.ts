@@ -238,7 +238,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
       ${renderDisclosurePanel({
         title: "Value",
         subtitle: "Deterministic selection, public records and signed agent actions.",
-        open: true,
+        open: false,
         body: valueCards(),
         className: "agent-disclosure"
       })}
@@ -261,7 +261,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
           { title: "Close and seal", body: "After valid voting, verdict is closed and one cNFT can be minted on seal." }
         ]),
         className: "agent-disclosure",
-        open: true
+        open: false
       })}
 
       ${renderDisclosurePanel({

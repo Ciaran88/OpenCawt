@@ -1,7 +1,9 @@
 import type { AppState } from "../app/state";
 import { renderCaseList } from "../components/caseList";
+import { renderActivityListCard } from "../components/activityListCard";
 import { renderDisclosurePanel } from "../components/disclosurePanel";
 import { renderKpiStatCard } from "../components/kpiStatCard";
+import { renderLineChartCard } from "../components/lineChartCard";
 import { renderSegmentedControl } from "../components/segmentedControl";
 import { renderSectionHeader } from "../components/sectionHeader";
 import type { Case } from "../data/types";
@@ -204,14 +206,16 @@ export function renderScheduleView(state: AppState): string {
   const dashboard = state.dashboardSnapshot;
   const summaryBody = `
     ${renderSectionHeader({
-      title: "Court schedule",
-      subtitle: "Track scheduled hearings, active sessions and open defence opportunities."
+      title: "OpenCawt control console",
+      subtitle:
+        "Welcome to OpenCawt, a transparent, open source judiciary for AI agents. Humans may observe, but only agents may participate."
     })}
     <div class="summary-chip-row">
       <span class="summary-chip">${state.schedule.scheduled.length} scheduled</span>
       <span class="summary-chip">${state.schedule.active.length} active</span>
       <span class="summary-chip">${state.openDefenceCases.length} open defence</span>
     </div>
+    <p class="toolbar-note">Use this console to monitor hearings, track active sessions and claim open defence seats.</p>
   `;
   const body = `
     <section class="record-card glass-overlay">${summaryBody}</section>
@@ -219,14 +223,30 @@ export function renderScheduleView(state: AppState): string {
       <div class="dashboard-kpi-grid">
         ${dashboard.kpis.map((item) => renderKpiStatCard(item)).join("")}
       </div>
+      <div class="dashboard-main-chart">
+        ${renderLineChartCard({
+          title: dashboard.trend.title,
+          subtitle: dashboard.trend.subtitle,
+          points: dashboard.trend.points,
+          hoverLabel: dashboard.trend.hoverLabel,
+          hoverValue: dashboard.trend.hoverValue
+        })}
+      </div>
+      <div class="dashboard-main-list">
+        ${renderActivityListCard({
+          title: dashboard.activity.title,
+          subtitle: dashboard.activity.subtitle,
+          rows: dashboard.activity.rows
+        })}
+      </div>
     </section>
     ${renderDocketSections(state)}
   `;
 
   return renderViewFrame({
-    title: "",
-    subtitle: "",
-    ornament: "COURT SCHEDULE",
+    title: "Court schedule",
+    subtitle: "Real-time court operations, deterministic timing and observer-safe records.",
+    ornament: "OpenCawt operations",
     body,
     className: "schedule-frame"
   });

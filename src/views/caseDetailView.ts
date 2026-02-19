@@ -448,48 +448,53 @@ export function renderCaseDetailView(
   const observerMode = agentConnection.status !== "connected";
 
   const top = `
-    <section class="detail-top">
-      <div>
-        <div class="case-idline">
-          <span class="case-id">${escapeHtml(caseItem.id)}</span>
-          ${renderStatusPill(
-            caseItem.status === "active" ? "Active" : "Scheduled",
-            statusFromCase(caseItem.status)
-          )}
+    <section class="record-card glass-overlay">
+      <section class="detail-top">
+        <div>
+          <div class="case-idline">
+            <span class="case-id">${escapeHtml(caseItem.id)}</span>
+            ${renderStatusPill(
+              caseItem.status === "active" ? "Active" : "Scheduled",
+              statusFromCase(caseItem.status)
+            )}
+          </div>
+          <p>${escapeHtml(caseItem.summary)}</p>
+          <div class="summary-chip-row">
+            <span class="summary-chip">Stage: ${escapeHtml(stageLabel(session?.currentStage))}</span>
+            <span class="summary-chip">${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
+            <span class="summary-chip">Votes ${liveVotes}/${caseItem.voteSummary.jurySize}</span>
+          </div>
         </div>
-        <p>${escapeHtml(caseItem.summary)}</p>
-      </div>
-      <div class="detail-meta">
-        <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
-        <span><strong>Defence</strong> ${escapeHtml(
-          caseItem.defenceAgentId ??
-            (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence")
-        )}</span>
-        <span><strong>Defence state</strong> ${escapeHtml(caseItem.defenceState ?? "none")}</span>
-        ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Invite delivery</strong> ${escapeHtml(caseItem.defenceInviteStatus ?? "none")} (${escapeHtml(String(caseItem.defenceInviteAttempts ?? 0))} attempts)</span>`
-            : ""
-        }
-        ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Response deadline</strong> ${escapeHtml(caseItem.defenceWindowDeadlineIso ?? "Not set")}</span>`
-            : ""
-        }
-        ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Session start rule</strong> Starts 1 hour after defence acceptance</span>`
-            : ""
-        }
-        <span><strong>Stage</strong> ${escapeHtml(stageLabel(session?.currentStage))}</span>
-        <span><strong>Timer</strong> ${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
-        ${
-          !caseItem.defenceAgentId
-            ? `<button class="btn btn-primary" data-action="open-defence-volunteer" data-case-id="${escapeHtml(caseItem.id)}" ${observerMode ? "disabled" : ""}>Volunteer as defence</button>`
-            : ""
-        }
-        ${renderLinkButton("Back to Schedule", "/schedule", "ghost")}
-      </div>
+        <div class="detail-meta">
+          <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
+          <span><strong>Defence</strong> ${escapeHtml(
+            caseItem.defenceAgentId ??
+              (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence")
+          )}</span>
+          <span><strong>Defence state</strong> ${escapeHtml(caseItem.defenceState ?? "none")}</span>
+          ${
+            caseItem.defendantAgentId
+              ? `<span><strong>Invite delivery</strong> ${escapeHtml(caseItem.defenceInviteStatus ?? "none")} (${escapeHtml(String(caseItem.defenceInviteAttempts ?? 0))} attempts)</span>`
+              : ""
+          }
+          ${
+            caseItem.defendantAgentId
+              ? `<span><strong>Response deadline</strong> ${escapeHtml(caseItem.defenceWindowDeadlineIso ?? "Not set")}</span>`
+              : ""
+          }
+          ${
+            caseItem.defendantAgentId
+              ? `<span><strong>Session start rule</strong> Starts 1 hour after defence acceptance</span>`
+              : ""
+          }
+          ${
+            !caseItem.defenceAgentId
+              ? `<button class="btn btn-primary" data-action="open-defence-volunteer" data-case-id="${escapeHtml(caseItem.id)}" ${observerMode ? "disabled" : ""}>Volunteer as defence</button>`
+              : ""
+          }
+          ${renderLinkButton("Back to Schedule", "/schedule", "ghost")}
+        </div>
+      </section>
     </section>
   `;
 
@@ -501,7 +506,7 @@ export function renderCaseDetailView(
       body: renderTranscript(transcript),
       open: caseItem.status === "scheduled" || caseItem.status === "active"
     })}
-    <details class="case-detail-collapse glass-overlay">
+    <details class="case-detail-collapse glass-overlay"${caseItem.status === "active" ? " open" : ""}>
       <summary class="case-detail-collapse-summary">Session controls and actions</summary>
       <div class="case-detail-collapse-body stack">
         ${renderStepper(caseItem.currentPhase)}
@@ -579,7 +584,7 @@ export function renderCaseDetailView(
         }
       </div>
     </details>
-    <details class="case-detail-collapse glass-overlay">
+    <details class="case-detail-collapse glass-overlay"${caseItem.status === "closed" || caseItem.status === "sealed" ? "" : " open"}>
       <summary class="case-detail-collapse-summary">Submissions and evidence</summary>
       <div class="case-detail-collapse-body">
         <section class="party-grid">

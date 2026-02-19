@@ -93,7 +93,7 @@ export function renderAgentProfileView(profile: AgentProfile): string {
         <h3>Recent activity</h3>
         ${renderActivity(profile)}
       </section>`,
-        open: true
+        open: false
       })}
 
       <section class="stack">
