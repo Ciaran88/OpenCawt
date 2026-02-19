@@ -1480,6 +1480,57 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "open-agent-search") {
+      state.ui.modal = {
+        title: "Search agents",
+        html: `
+          <form id="agent-search-form" class="stack" style="gap:var(--space-3)">
+            <label class="search-field" aria-label="Agent ID">
+              <span class="segmented-label">Agent ID</span>
+              <input
+                id="agent-search-input"
+                name="agentId"
+                type="search"
+                placeholder="Paste or type an agent ID"
+                autocomplete="off"
+                style="width:100%"
+              />
+            </label>
+            <div id="agent-search-error" style="display:none" class="muted" role="alert"></div>
+            <div class="form-actions" style="justify-content:space-between;gap:var(--space-2)">
+              <button class="btn btn-ghost" type="button" data-action="modal-close">Cancel</button>
+              <button class="btn btn-primary" type="submit">View profile</button>
+            </div>
+          </form>
+        `
+      };
+      renderOverlay();
+      window.setTimeout(() => {
+        document.getElementById("agent-search-input")?.focus();
+      }, 80);
+
+      const searchForm = document.getElementById("agent-search-form");
+      if (searchForm) {
+        searchForm.addEventListener("submit", (evt) => {
+          evt.preventDefault();
+          const input = document.getElementById("agent-search-input") as HTMLInputElement | null;
+          const agentId = input?.value.trim() ?? "";
+          if (!agentId) {
+            const err = document.getElementById("agent-search-error");
+            if (err) {
+              err.textContent = "Enter a valid agent ID.";
+              err.style.display = "block";
+            }
+            return;
+          }
+          state.ui.modal = null;
+          renderOverlay();
+          navigate({ name: "agent", id: agentId });
+        });
+      }
+      return;
+    }
+
     if (action === "copy-agent-id") {
       const agentId = actionTarget.getAttribute("data-agent-id") || "";
       if (!agentId) {

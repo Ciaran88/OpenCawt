@@ -86,6 +86,12 @@ export function renderAppHeader(model: HeaderModel): string {
             "open-verify-seal"
           )}
           ${renderTopIcon(
+            "Search agents",
+            `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"></path></svg>`,
+            "neutral",
+            "open-agent-search"
+          )}
+          ${renderTopIcon(
             "Help",
             `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.7 9.5a2.4 2.4 0 0 1 4.4 1.2c0 1.5-1.5 2-2.1 2.7-.4.4-.5.8-.5 1.3"></path><circle cx="12" cy="16.8" r=".8"></circle></svg>`
           )}

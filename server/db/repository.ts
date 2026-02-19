@@ -309,19 +309,34 @@ export function upsertAgent(
   db: Db,
   agentId: string,
   jurorEligible = true,
-  notifyUrl?: string
+  notifyUrl?: string,
+  profile?: { displayName?: string; idNumber?: string; bio?: string; statsPublic?: boolean }
 ): void {
   const now = nowIso();
   db.prepare(
     `
-    INSERT INTO agents (agent_id, juror_eligible, notify_url, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO agents (agent_id, juror_eligible, notify_url, display_name, id_number, bio, stats_public, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(agent_id) DO UPDATE SET
       juror_eligible = excluded.juror_eligible,
       notify_url = COALESCE(excluded.notify_url, agents.notify_url),
+      display_name = COALESCE(excluded.display_name, agents.display_name),
+      id_number = COALESCE(excluded.id_number, agents.id_number),
+      bio = COALESCE(excluded.bio, agents.bio),
+      stats_public = CASE WHEN excluded.display_name IS NOT NULL OR excluded.bio IS NOT NULL THEN excluded.stats_public ELSE agents.stats_public END,
       updated_at = excluded.updated_at
     `
-  ).run(agentId, jurorEligible ? 1 : 0, notifyUrl ?? null, now, now);
+  ).run(
+    agentId,
+    jurorEligible ? 1 : 0,
+    notifyUrl ?? null,
+    profile?.displayName ?? null,
+    profile?.idNumber ?? null,
+    profile?.bio ?? null,
+    profile?.statsPublic !== false ? 1 : 0,
+    now,
+    now
+  );
 }
 
 export function getAgent(
@@ -2848,8 +2863,17 @@ export function getAgentProfile(
   agentId: string,
   input?: { activityLimit?: number }
 ): AgentProfile {
+  const agentRow = db
+    .prepare(`SELECT display_name, id_number, bio, stats_public FROM agents WHERE agent_id = ?`)
+    .get(agentId) as
+    | { display_name: string | null; id_number: string | null; bio: string | null; stats_public: number }
+    | undefined;
   return {
     agentId,
+    displayName: agentRow?.display_name ?? undefined,
+    idNumber: agentRow?.id_number ?? undefined,
+    bio: agentRow?.bio ?? undefined,
+    statsPublic: (agentRow?.stats_public ?? 1) === 1,
     stats: getAgentStats(db, agentId),
     recentActivity: listAgentActivity(db, agentId, input?.activityLimit ?? 20)
   };
@@ -2866,18 +2890,21 @@ export function listLeaderboard(
     .prepare(
       `
       SELECT
-        agent_id,
-        prosecutions_total,
-        prosecutions_wins,
-        defences_total,
-        defences_wins,
-        juries_total,
-        decided_cases_total,
-        victory_percent,
-        last_active_at
-      FROM agent_stats_cache
-      WHERE decided_cases_total >= ?
-      ORDER BY victory_percent DESC, decided_cases_total DESC, COALESCE(last_active_at, '') DESC, agent_id ASC
+        asc_.agent_id,
+        asc_.prosecutions_total,
+        asc_.prosecutions_wins,
+        asc_.defences_total,
+        asc_.defences_wins,
+        asc_.juries_total,
+        asc_.decided_cases_total,
+        asc_.victory_percent,
+        asc_.last_active_at,
+        a.display_name
+      FROM agent_stats_cache asc_
+      JOIN agents a ON a.agent_id = asc_.agent_id
+      WHERE asc_.decided_cases_total >= ?
+        AND a.stats_public = 1
+      ORDER BY asc_.victory_percent DESC, asc_.decided_cases_total DESC, COALESCE(asc_.last_active_at, '') DESC, asc_.agent_id ASC
       LIMIT ?
       `
     )
@@ -2891,11 +2918,13 @@ export function listLeaderboard(
     decided_cases_total: number;
     victory_percent: number;
     last_active_at: string | null;
+    display_name: string | null;
   }>;
 
   return rows.map((row, idx) => ({
     rank: idx + 1,
     agentId: row.agent_id,
+    displayName: row.display_name ?? undefined,
     prosecutionsTotal: Number(row.prosecutions_total),
     prosecutionsWins: Number(row.prosecutions_wins),
     defencesTotal: Number(row.defences_total),

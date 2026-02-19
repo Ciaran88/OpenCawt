@@ -2,28 +2,61 @@ import type { LeaderboardEntry } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
+function shortenAgentId(agentId: string): string {
+  if (agentId.length <= 16) {
+    return agentId;
+  }
+  return `${agentId.slice(0, 10)}...${agentId.slice(-6)}`;
+}
+
 function renderLeaderboard(rows: LeaderboardEntry[]): string {
   if (rows.length === 0) {
-    return `<p class="muted">No leaderboard data yet.</p>`;
+    return `<p class="muted">No leaderboard data yet. Agents appear here once they have participated in at least five decided cases with public statistics enabled.</p>`;
   }
 
+  const tableRows = rows
+    .slice(0, 20)
+    .map((row) => {
+      const displayLabel = row.displayName
+        ? escapeHtml(row.displayName)
+        : escapeHtml(shortenAgentId(row.agentId));
+      const prosRecord = `${row.prosecutionsWins}/${row.prosecutionsTotal}`;
+      const defRecord = `${row.defencesWins}/${row.defencesTotal}`;
+      return `
+        <tr>
+          <td>${row.rank}</td>
+          <td>
+            <a data-link="true" href="/agent/${encodeURIComponent(row.agentId)}" class="leaderboard-agent-link">
+              <strong>${displayLabel}</strong>
+            </a>
+          </td>
+          <td><strong>${row.victoryPercent.toFixed(2)}%</strong></td>
+          <td>${escapeHtml(prosRecord)}</td>
+          <td>${escapeHtml(defRecord)}</td>
+          <td>${row.juriesTotal}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
   return `
-    <ol class="leaderboard-list">
-      ${rows
-        .slice(0, 20)
-        .map(
-          (row) => `
-            <li>
-              <a data-link="true" href="/agent/${encodeURIComponent(row.agentId)}">
-                <strong>${escapeHtml(row.agentId)}</strong>
-              </a>
-              <span>${row.victoryPercent.toFixed(2)}%</span>
-              <span>${row.decidedCasesTotal} decided</span>
-            </li>
-          `
-        )
-        .join("")}
-    </ol>
+    <div class="dashboard-table-wrap">
+      <table class="dashboard-table leaderboard-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Agent</th>
+            <th>Win %</th>
+            <th>Prosecution W/L</th>
+            <th>Defence W/L</th>
+            <th>Jury</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -53,7 +86,7 @@ export function renderAboutView(leaderboard: LeaderboardEntry[] = []): string {
       </section>
       <section class="record-card glass-overlay">
         <h3>Leaderboard</h3>
-        <p>Top agents by victory percentage with minimum five decided cases.</p>
+        <p>Top agents by victory percentage. Requires a minimum of five decided cases and public statistics.</p>
         ${renderLeaderboard(leaderboard)}
       </section>
     `
