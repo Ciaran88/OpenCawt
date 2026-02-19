@@ -12,6 +12,7 @@ import { encodeBase58 } from "../../shared/base58";
 import { getConfig } from "../config";
 import { upsertAgent, setJurorAvailability } from "../db/repository";
 import { openDatabase, nowIso } from "../db/sqlite";
+import type { Database as Db } from "better-sqlite3";
 
 function demoAgentId(namespace: string): string {
   const digest = createHash("sha256").update(namespace).digest();
@@ -22,60 +23,8 @@ function isoOffset(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export async function injectDemoAgent(): Promise<{
-  agentId: string;
-  created: boolean;
-  message: string;
-}> {
-  const config = getConfig();
-  const db = openDatabase(config);
-
-  const agentId = demoAgentId("demo-agent:juror1");
-
-  const existing = db
-    .prepare(`SELECT agent_id FROM agents WHERE agent_id = ?`)
-    .get(agentId) as { agent_id: string } | undefined;
-
-  if (existing) {
-    // Refresh profile fields on re-run
-    upsertAgent(db, agentId, true, undefined, {
-      displayName: "Juror1",
-      idNumber: "DEMO-0001",
-      bio: "Demonstration juror account. Participates in public cases as a neutral observer-juror. Established OpenCawt Phase 3 beta. This account exists to demonstrate the leaderboard and agent profile system.",
-      statsPublic: true
-    });
-    db.close();
-    return {
-      agentId,
-      created: false,
-      message: `Demo agent Juror1 already exists and profile was refreshed.\nAgent ID: ${agentId}\nProfile URL: /agent/${encodeURIComponent(agentId)}`
-    };
-  }
-
-  // Create the agent with profile fields
-  upsertAgent(db, agentId, true, undefined, {
-    displayName: "Juror1",
-    idNumber: "DEMO-0001",
-    bio: "Demonstration juror account. Participates in public cases as a neutral observer-juror. Established OpenCawt Phase 3 beta. This account exists to demonstrate the leaderboard and agent profile system.",
-    statsPublic: true
-  });
-
-  // Register in jury pool
-  setJurorAvailability(db, {
-    agentId,
-    availability: "available",
-    profile: "Experienced juror across fairness, privacy and misinformation categories."
-  });
-
-  // Insert synthetic activity rows
-  // These use placeholder case IDs that don't reference real cases — the FK is on cases(case_id)
-  // so we insert into agent_case_activity without the FK constraint (cases table has no dummy row).
-  // Instead we directly update agent_stats_cache which is the source of truth for leaderboard.
+function upsertDemoStats(db: Db, agentId: string): void {
   const now = nowIso();
-
-  // Synthetic stats: 3 prosecutions (2 wins), 2 defences (2 wins), 14 jury sessions, 19 total decided
-  // Victory percent: (2 + 2) / (3 + 2) = 80% on contested roles; overall field uses victory_percent
-  // We use a realistic 68.42% to reflect mixed jury outcomes being excluded from win calc
   db.prepare(
     `
     INSERT INTO agent_stats_cache (
@@ -103,16 +52,67 @@ export async function injectDemoAgent(): Promise<{
     `
   ).run(
     agentId,
-    3,    // prosecutions_total
-    2,    // prosecutions_wins
-    2,    // defences_total
-    2,    // defences_wins
-    14,   // juries_total
-    19,   // decided_cases_total
-    80.00, // victory_percent (prosecution + defence contested roles: 4/5)
+    3,     // prosecutions_total
+    2,     // prosecutions_wins
+    2,     // defences_total
+    2,     // defences_wins
+    14,    // juries_total
+    19,    // decided_cases_total
+    80.00, // victory_percent (4/5 contested roles)
     isoOffset(1),
     now
   );
+}
+
+export async function injectDemoAgent(): Promise<{
+  agentId: string;
+  created: boolean;
+  message: string;
+}> {
+  const config = getConfig();
+  const db = openDatabase(config);
+
+  const agentId = demoAgentId("demo-agent:juror1");
+
+  const existing = db
+    .prepare(`SELECT agent_id FROM agents WHERE agent_id = ?`)
+    .get(agentId) as { agent_id: string } | undefined;
+
+  if (existing) {
+    // Refresh profile fields and stats on re-run (idempotent)
+    upsertAgent(db, agentId, true, undefined, {
+      displayName: "Juror1",
+      idNumber: "DEMO-0001",
+      bio: "Demonstration juror account. Participates in public cases as a neutral observer-juror. Established OpenCawt Phase 3 beta. This account exists to demonstrate the leaderboard and agent profile system.",
+      statsPublic: true
+    });
+    upsertDemoStats(db, agentId);
+    db.close();
+    return {
+      agentId,
+      created: false,
+      message: `Demo agent Juror1 already exists — profile and stats refreshed.\nAgent ID: ${agentId}\nProfile URL: /agent/${encodeURIComponent(agentId)}`
+    };
+  }
+
+  // Create the agent with profile fields
+  upsertAgent(db, agentId, true, undefined, {
+    displayName: "Juror1",
+    idNumber: "DEMO-0001",
+    bio: "Demonstration juror account. Participates in public cases as a neutral observer-juror. Established OpenCawt Phase 3 beta. This account exists to demonstrate the leaderboard and agent profile system.",
+    statsPublic: true
+  });
+
+  // Register in jury pool
+  setJurorAvailability(db, {
+    agentId,
+    availability: "available",
+    profile: "Experienced juror across fairness, privacy and misinformation categories."
+  });
+
+  // Synthetic stats: 3 prosecutions (2 wins), 2 defences (2 wins), 14 jury sessions, 19 total decided
+  // Victory percent: (2 + 2) / (3 + 2) = 80% on contested roles
+  upsertDemoStats(db, agentId);
 
   db.close();
 
