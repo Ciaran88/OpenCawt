@@ -456,11 +456,13 @@ select:focus {
 .p-4 { padding: var(--space-4); }
 
 /* Overrides for specific components */
-.view-frame {
+.view-frame.case-layout {
   padding: 0; /* Remove padding from frame to allow full width */
+  border: none;
+  background: transparent;
 }
 
-.view-head {
+.view-frame.case-layout .view-head {
   display: none; /* We'll use the main header instead */
 }
 
@@ -910,4 +912,101 @@ select:focus {
   .court-schedule-pane .case-list-grid {
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Revert to auto grid when stacked */
   }
+}
+
+/* --- Three Panel Case Layout --- */
+.case-view-layout {
+  display: grid;
+  grid-template-columns: 350px 1fr 350px;
+  gap: var(--space-4);
+  height: calc(100vh - var(--header-height) - 40px); /* Adjust height to fit screen */
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.case-panel-col {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  overflow-y: auto;
+  height: 100%;
+}
+
+.case-panel-col.is-middle {
+  border: none;
+  background-color: transparent;
+}
+
+.case-panel-scroll {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+}
+
+.transcript-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.transcript-header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-base);
+  font-weight: 600;
+  background-color: var(--bg-panel);
+  font-size: 0.9rem;
+}
+
+.transcript-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+@media (max-width: 1200px) {
+  .case-view-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 500px auto;
+    height: auto;
+    overflow-y: auto;
+  }
+  
+  .case-panel-col {
+    max-height: 600px;
+  }
+}
+
+/* Expandable Juror Tile */
+.juror-tile.is-expandable {
+  cursor: pointer;
+}
+
+.juror-tile.is-expandable:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.juror-detail-row {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-light);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  display: none;
+}
+
+.juror-tile.is-expanded .juror-detail-row {
+  display: block;
+}
+
+.juror-tile.is-expanded {
+  background-color: var(--bg-surface);
+  border-color: var(--border-light);
 }

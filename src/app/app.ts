@@ -621,7 +621,15 @@ export function mountApp(root: HTMLElement): void {
       if (token !== routeToken) {
         return;
       }
-      setMainContent(decision ? renderDecisionDetailView(decision) : renderMissingDecisionView());
+      if (decision) {
+        const [caseItem, transcript] = await Promise.all([
+          getCase(decision.caseId),
+          getCaseTranscript(decision.caseId)
+        ]);
+        setMainContent(renderDecisionDetailView(decision, caseItem, transcript));
+      } else {
+        setMainContent(renderMissingDecisionView());
+      }
     }
 
     patchCountdownRings(dom.main, state.nowMs);

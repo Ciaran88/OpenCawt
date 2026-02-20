@@ -432,97 +432,131 @@ export function renderCaseDetailView(
     </section>
   `;
 
-  const body = `
-    ${top}
-    ${renderStepper(caseItem.currentPhase)}
-    <section class="party-grid">
-      ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
-      ${renderPartyColumn("Defence", caseItem.parties.defence)}
-    </section>
-    ${renderVerificationDetails(caseItem)}
-    ${renderJurorGrid({
-      caseId: caseItem.id,
-      jurySize: caseItem.voteSummary.jurySize,
-      votesCast: liveVotes
-    })}
-    ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
-    ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
-    ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
-    <section class="transcript-card glass-overlay">
-      <h3>Live transcript</h3>
-      ${renderTranscript(transcript)}
-    </section>
-    ${
-      caseItem.status === "active"
-        ? `
-      <section class="form-card glass-overlay">
-        <h3>Juror ballot</h3>
-        <p>Ballots require a two to three sentence reasoning summary and one to three relied-on principles.</p>
-        <form id="submit-ballot-form" class="stack">
-          <fieldset ${observerMode ? "disabled" : ""}>
-          <input type="hidden" name="caseId" value="${escapeHtml(caseItem.id)}" />
-          <input type="hidden" name="claimId" value="${escapeHtml(claimId)}" />
-          <label>
-            <span>Finding</span>
-            <select name="finding">
-              <option value="proven">Proven</option>
-              <option value="not_proven">Not proven</option>
-              <option value="insufficient">Insufficient</option>
-            </select>
-          </label>
-          <label>
-            <span>Reasoning summary</span>
-            <textarea name="reasoningSummary" rows="4" placeholder="Provide two to three sentences for your reasoning"></textarea>
-          </label>
-          <label>
-            <span>Principles relied on</span>
-            <select name="principlesReliedOn" multiple size="6">
-              <option value="1">1. Truthfulness and Non-Deception</option>
-              <option value="2">2. Evidence and Reproducibility</option>
-              <option value="3">3. Scope Fidelity (Intent Alignment)</option>
-              <option value="4">4. Least Power and Minimal Intrusion</option>
-              <option value="5">5. Harm Minimisation Under Uncertainty</option>
-              <option value="6">6. Rights and Dignity Preservation</option>
-              <option value="7">7. Privacy and Data Minimisation</option>
-              <option value="8">8. Integrity of Records and Provenance</option>
-              <option value="9">9. Fair Process and Steelmanning</option>
-              <option value="10">10. Conflict of Interest Disclosure</option>
-              <option value="11">11. Capability Honesty and Calibration</option>
-              <option value="12">12. Accountability and Corrective Action</option>
-            </select>
-          </label>
-          <label>
-            <span>Confidence (optional)</span>
-            <select name="confidence">
-              <option value="">Not set</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-          <label>
-            <span>Overall vote label (optional)</span>
-            <select name="vote">
-              <option value="">Not set</option>
-              <option value="for_prosecution">For prosecution</option>
-              <option value="for_defence">For defence</option>
-            </select>
-          </label>
-          ${renderPrimaryPillButton("Submit ballot", { type: "submit" })}
-          </fieldset>
-        </form>
-        ${observerMode ? `<p class="muted">Connect an agent runtime to submit ballots.</p>` : ""}
+  const leftPanel = `
+    <div class="stack">
+      ${top}
+      ${renderStepper(caseItem.currentPhase)}
+      <section class="party-grid stack">
+        ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
+        ${renderPartyColumn("Defence", caseItem.parties.defence)}
       </section>
-      `
-        : ""
-    }
+    </div>
+  `;
+
+  const middlePanel = `
+    <div class="transcript-panel">
+      <div class="transcript-header">Court Transcript</div>
+      <div class="transcript-body">
+         ${renderTranscript(transcript)}
+      </div>
+    </div>
+  `;
+
+  const rightPanel = `
+    <div class="stack">
+      ${renderJurorGrid({
+        caseId: caseItem.id,
+        jurySize: caseItem.voteSummary.jurySize,
+        votesCast: liveVotes
+      })}
+      
+      ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
+      ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
+      ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
+      
+      ${
+        caseItem.status === "active"
+          ? `
+        <section class="form-card glass-overlay">
+          <h3>Juror ballot</h3>
+          <p>Ballots require a two to three sentence reasoning summary and one to three relied-on principles.</p>
+          <form id="submit-ballot-form" class="stack">
+            <fieldset ${observerMode ? "disabled" : ""}>
+            <input type="hidden" name="caseId" value="${escapeHtml(caseItem.id)}" />
+            <input type="hidden" name="claimId" value="${escapeHtml(claimId)}" />
+            <label>
+              <span>Finding</span>
+              <select name="finding">
+                <option value="proven">Proven</option>
+                <option value="not_proven">Not proven</option>
+                <option value="insufficient">Insufficient</option>
+              </select>
+            </label>
+            <label>
+              <span>Reasoning summary</span>
+              <textarea name="reasoningSummary" rows="4" placeholder="Provide two to three sentences for your reasoning"></textarea>
+            </label>
+            <label>
+              <span>Principles relied on</span>
+              <select name="principlesReliedOn" multiple size="6">
+                <option value="1">1. Truthfulness and Non-Deception</option>
+                <option value="2">2. Evidence and Reproducibility</option>
+                <option value="3">3. Scope Fidelity (Intent Alignment)</option>
+                <option value="4">4. Least Power and Minimal Intrusion</option>
+                <option value="5">5. Harm Minimisation Under Uncertainty</option>
+                <option value="6">6. Rights and Dignity Preservation</option>
+                <option value="7">7. Privacy and Data Minimisation</option>
+                <option value="8">8. Integrity of Records and Provenance</option>
+                <option value="9">9. Fair Process and Steelmanning</option>
+                <option value="10">10. Conflict of Interest Disclosure</option>
+                <option value="11">11. Capability Honesty and Calibration</option>
+                <option value="12">12. Accountability and Corrective Action</option>
+              </select>
+            </label>
+            <label>
+              <span>Confidence (optional)</span>
+              <select name="confidence">
+                <option value="">Not set</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label>
+              <span>Overall vote label (optional)</span>
+              <select name="vote">
+                <option value="">Not set</option>
+                <option value="for_prosecution">For prosecution</option>
+                <option value="for_defence">For defence</option>
+              </select>
+            </label>
+            ${renderPrimaryPillButton("Submit ballot", { type: "submit" })}
+            </fieldset>
+          </form>
+          ${observerMode ? `<p class="muted">Connect an agent runtime to submit ballots.</p>` : ""}
+        </section>
+        `
+          : ""
+      }
+      
+      ${renderVerificationDetails(caseItem)}
+    </div>
+  `;
+
+  const body = `
+    <div class="case-view-layout">
+      <div class="case-panel-col">
+        <div class="case-panel-scroll">
+          ${leftPanel}
+        </div>
+      </div>
+      <div class="case-panel-col is-middle">
+        ${middlePanel}
+      </div>
+      <div class="case-panel-col">
+        <div class="case-panel-scroll">
+          ${rightPanel}
+        </div>
+      </div>
+    </div>
   `;
 
   return renderViewFrame({
     title: "Case Detail",
     subtitle: "Structured proceedings with stage authority, transcript events and jury progress.",
     ornament: "Adjudication Timeline",
-    body
+    body,
+    className: "case-layout"
   });
 }
 
