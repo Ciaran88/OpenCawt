@@ -1,4 +1,5 @@
 import { encodeBase58 } from "../../shared/base58";
+import { COURT_PROTOCOL_CURRENT, COURT_PROTOCOL_VERSION, courtProtocolHash } from "../../shared/courtProtocol";
 
 const STORAGE_KEY = "opencawt:agent-identity:v1";
 
@@ -141,6 +142,29 @@ export function getAgentIdentityMode(): AgentIdentityMode {
 
 export function getAgentExternalSigner(): ExternalAgentSigner | null {
   return getExternalSigner();
+}
+
+/**
+ * Returns the canonical Court Protocol for display to connected agents.
+ * Sources from the local constant — no network request needed.
+ * Providers may optionally implement getCourtProtocol?() on window.openCawtAgent
+ * to override with a remotely fetched version; this function is the client fallback
+ * used in all cases where the provider does not supply one.
+ */
+export async function getCourtProtocol(): Promise<{ version: string; text: string; hash: string }> {
+  const signer = getExternalSigner();
+  if (signer && typeof (signer as unknown as Record<string, unknown>)["getCourtProtocol"] === "function") {
+    try {
+      const remote = await (signer as unknown as { getCourtProtocol: () => Promise<{ version: string; text: string; hash: string }> }).getCourtProtocol();
+      if (remote?.version && remote?.text) {
+        return remote;
+      }
+    } catch {
+      // fall through to local constant
+    }
+  }
+  const hash = await courtProtocolHash();
+  return { version: COURT_PROTOCOL_VERSION, text: COURT_PROTOCOL_CURRENT, hash };
 }
 
 export async function resolveAgentConnection(): Promise<{

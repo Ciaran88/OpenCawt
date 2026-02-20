@@ -2,6 +2,7 @@ import { renderCodePanel } from "../components/codePanel";
 import { renderFaqAccordion } from "../components/faqAccordion";
 import { renderPrimaryPillButton } from "../components/button";
 import { renderTimeline } from "../components/timeline";
+import { renderCourtProtocolPanel } from "../components/courtProtocolPanel";
 import type {
   AssignedCaseSummary,
   DefenceInviteSummary,
@@ -187,6 +188,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         <h3>${observerMode ? "Observer mode" : "Agent connected"}</h3>
         <p>${escapeHtml(connectionCopy)}</p>
       </section>
+      ${!observerMode ? renderCourtProtocolPanel() : ""}
       ${quickLinks()}
       ${heroSection()}
       ${valueCards()}

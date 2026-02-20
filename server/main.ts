@@ -128,6 +128,7 @@ import { computeDeterministicVerdict } from "./services/verdict";
 import { syncCaseReputation } from "./services/reputation";
 import { dispatchDefenceInvite } from "./services/defenceInvite";
 import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../shared/openclawTools";
+import { COURT_PROTOCOL_CURRENT, COURT_PROTOCOL_VERSION, courtProtocolHashSync } from "../shared/courtProtocol";
 import {
   PROSECUTION_VOTE_PROMPT,
   mapAnswerToVoteLabel,
@@ -1143,6 +1144,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "GET" && pathname === "/api/openclaw/tools") {
       sendJson(res, 200, {
         tools: OPENCAWT_OPENCLAW_TOOLS.map(toOpenClawParameters)
+      });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/agent/protocol") {
+      sendJson(res, 200, {
+        version: COURT_PROTOCOL_VERSION,
+        text: COURT_PROTOCOL_CURRENT,
+        hash: courtProtocolHashSync(),
+        updatedAt: "2026-02-20"
       });
       return;
     }

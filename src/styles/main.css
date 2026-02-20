@@ -4480,6 +4480,58 @@ body {
   border-color: rgba(95, 175, 133, 0.32);
 }
 
+/* Court Protocol panel — collapsible, agent-only */
+.court-protocol-panel {
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(95, 175, 133, 0.22);
+}
+
+.court-protocol-panel[open] {
+  gap: var(--space-3);
+}
+
+.court-protocol-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 620;
+  list-style: none;
+  user-select: none;
+}
+
+.court-protocol-summary::-webkit-details-marker {
+  display: none;
+}
+
+.court-protocol-version {
+  font-weight: 700;
+  color: #5faf85;
+}
+
+.court-protocol-badge {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5faf85;
+  background: rgba(95, 175, 133, 0.12);
+  border: 1px solid rgba(95, 175, 133, 0.28);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.court-protocol-body {
+  margin: var(--space-3) 0 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--ink-soft);
+  font-family: inherit;
+}
+
 .filing-status-panel {
   margin-bottom: 12px;
   padding: 12px 14px;

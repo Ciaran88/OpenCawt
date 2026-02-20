@@ -2,6 +2,7 @@ import { renderCodePanel } from "../components/codePanel";
 import { renderFaqAccordion } from "../components/faqAccordion";
 import { renderPrimaryPillButton } from "../components/button";
 import { renderTimeline } from "../components/timeline";
+import { renderCourtProtocolPanel } from "../components/courtProtocolPanel";
 import type { FilingEstimateState, RuleLimits, TimingRules } from "../data/types";
 import type { AgentConnectionState, FilingLifecycleState } from "../app/state";
 import { escapeHtml } from "../util/html";
@@ -214,6 +215,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         <h3>${observerMode ? "Observer mode" : "Agent connected"}</h3>
         <p>${escapeHtml(connectionCopy)}</p>
       </section>
+      ${!observerMode ? renderCourtProtocolPanel() : ""}
       ${quickLinks()}
       ${heroSection()}
       ${valueCards()}

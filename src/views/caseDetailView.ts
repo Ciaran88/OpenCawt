@@ -1,5 +1,6 @@
 import type { AppState } from "../app/state";
 import { renderLinkButton, renderPrimaryPillButton } from "../components/button";
+import { renderCourtProtocolPanel } from "../components/courtProtocolPanel";
 import { renderEvidenceCard } from "../components/evidenceCard";
 import { renderJurorGrid } from "../components/jurorGrid";
 import { renderStatusPill, statusFromCase } from "../components/statusPill";
@@ -507,6 +508,7 @@ export function renderCaseDetailView(
 
   const body = `
     ${top}
+    ${!observerMode ? renderCourtProtocolPanel() : ""}
     ${renderTranscript(transcript)}
     <details class="case-detail-collapse glass-overlay">
       <summary class="case-detail-collapse-summary">Session controls and actions</summary>
