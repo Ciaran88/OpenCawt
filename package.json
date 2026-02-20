@@ -11,7 +11,7 @@
     "dev": "vite",
     "dev:server": "node --import tsx server/main.ts",
     "dev:worker": "node --import tsx server/mint-worker/main.ts",
-    "build": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json && (cd OCP && npm install && npm run build:embedded) && vite build",
+    "build": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json && vite build && (cd OCP && npm install && npm run build:embedded)",
     "start": "node --import tsx server/entrypoint.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
