@@ -1806,14 +1806,25 @@ async function verifyDecisionSig(
   }
 }
 
-// ---- Start server ----
+// ---- Export for embedded mode ----
+
+export async function handleOcpRequest(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  return handleRequest(req, res);
+}
+
+// ---- Start server (standalone only) ----
 
 const server = createServer((req, res) => {
   void handleRequest(req, res);
 });
 
-server.listen(config.apiPort, config.apiHost, () => {
-  console.log(`[OCP] Server listening on http://${config.apiHost}:${config.apiPort}`);
-  console.log(`[OCP] Solana mode: ${config.solanaMode}`);
-  console.log(`[OCP] OpenCawt DB: ${config.opencawtDbPath || "(not configured)"}`);
-});
+if (process.env.OCP_STANDALONE === "true") {
+  server.listen(config.apiPort, config.apiHost, () => {
+    console.log(`[OCP] Server listening on http://${config.apiHost}:${config.apiPort}`);
+    console.log(`[OCP] Solana mode: ${config.solanaMode}`);
+    console.log(`[OCP] OpenCawt DB: ${config.opencawtDbPath || "(not configured)"}`);
+  });
+}

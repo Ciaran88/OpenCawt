@@ -11,6 +11,8 @@ export type OcpRoute =
   | { name: "agreement"; id: string }
   | { name: "decision"; id: string };
 
+const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "") || "";
+
 const routePathMap: Record<string, string> = {
   home: "/",
   register: "/register",
@@ -24,7 +26,8 @@ const routePathMap: Record<string, string> = {
 };
 
 export function parseOcpRoute(pathname: string): OcpRoute {
-  const clean = pathname.replace(/\/$/, "") || "/";
+  const withoutBase = BASE ? (pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname) : pathname;
+  const clean = withoutBase.replace(/\/$/, "") || "/";
   if (clean === "/") return { name: "home" };
   if (clean === "/register") return { name: "register" };
   if (clean === "/propose") return { name: "propose" };
@@ -45,9 +48,11 @@ export function parseOcpRoute(pathname: string): OcpRoute {
 }
 
 export function routeToPath(route: OcpRoute): string {
-  if (route.name === "agreement") return `/agreement/${encodeURIComponent(route.id)}`;
-  if (route.name === "decision") return `/decision/${encodeURIComponent(route.id)}`;
-  return routePathMap[route.name] ?? "/";
+  let path: string;
+  if (route.name === "agreement") path = `/agreement/${encodeURIComponent(route.id)}`;
+  else if (route.name === "decision") path = `/decision/${encodeURIComponent(route.id)}`;
+  else path = routePathMap[route.name] ?? "/";
+  return BASE ? `${BASE}${path}` : path;
 }
 
 export const NAV_ITEMS: Array<{ name: OcpRoute["name"]; label: string }> = [

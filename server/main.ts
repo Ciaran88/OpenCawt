@@ -1179,6 +1179,57 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   });
 
   try {
+    // OCP embedded: delegate API and serve frontend
+    if (pathname.startsWith("/api/ocp") || pathname.startsWith("/v1")) {
+      try {
+        const ocpPath: string = "../OCP/server/main.js";
+        const ocpModule = await import(/* @vite-ignore */ ocpPath);
+        await ocpModule.handleOcpRequest(req, res);
+      } catch (err) {
+        logger.error("ocp_delegate_failed", {
+          requestId,
+          pathname,
+          error: String(err)
+        });
+        sendJson(res, 503, {
+          error: {
+            code: "OCP_UNAVAILABLE",
+            message: "OCP service temporarily unavailable."
+          }
+        });
+      }
+      return;
+    }
+    if (method === "GET" && (pathname === "/ocp" || pathname.startsWith("/ocp/"))) {
+      const ocpDist = resolve(process.cwd(), "dist", "ocp");
+      const safePath =
+        pathname === "/ocp" || pathname === "/ocp/"
+          ? "/index.html"
+          : pathname.slice(4) || "/index.html";
+      const filePath = join(ocpDist, safePath.replace(/^\/+/, ""));
+      if (filePath.startsWith(ocpDist) && existsSync(filePath)) {
+        const ext = extname(filePath);
+        const mime: Record<string, string> = {
+          ".html": "text/html",
+          ".js": "application/javascript",
+          ".css": "text/css",
+          ".ico": "image/x-icon",
+          ".png": "image/png",
+          ".svg": "image/svg+xml",
+          ".json": "application/json"
+        };
+        res.setHeader("Content-Type", mime[ext] ?? "application/octet-stream");
+        createReadStream(filePath).pipe(res);
+        return;
+      }
+      const indexPath = join(ocpDist, "index.html");
+      if (existsSync(indexPath)) {
+        res.setHeader("Content-Type", "text/html");
+        createReadStream(indexPath).pipe(res);
+        return;
+      }
+    }
+
     if (method === "GET" && pathname === "/api/health") {
       sendJson(res, 200, {
         ok: true,

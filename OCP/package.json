@@ -7,11 +7,12 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "node --import tsx server/main.ts",
+    "dev": "OCP_STANDALONE=true node --import tsx server/main.ts",
     "lint": "tsc --noEmit -p tsconfig.server.json",
     "test": "node --import tsx tests/run-tests.ts",
     "frontend": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "build:embedded": "VITE_OCP_BASE=/ocp/ VITE_OCP_OUTDIR=../../dist/ocp vite build"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
