@@ -683,9 +683,12 @@ export function mountApp(root: HTMLElement): void {
     notifyLabel.classList.toggle("is-hidden", !hasDefendant || openDefenceEnabled);
   };
 
-  const renderRouteContent = async (token: number) => {
+  const renderRouteContent = async (token: number, background = false) => {
     activeRenderedCase = null;
     const route = state.route;
+    // When rendering in the background (poll-triggered, not user navigation) we
+    // suppress the enter animation to avoid a visible flash on every 15-second tick.
+    const contentOptions = background ? { animate: false } : undefined;
 
     if (route.name !== "case") {
       stopCaseLivePolling();
@@ -695,13 +698,13 @@ export function mountApp(root: HTMLElement): void {
     }
 
     if (route.name === "schedule") {
-      setMainContent(renderScheduleView(state));
+      setMainContent(renderScheduleView(state), contentOptions);
     } else if (route.name === "past-decisions") {
-      setMainContent(renderPastDecisionsView(state));
+      setMainContent(renderPastDecisionsView(state), contentOptions);
     } else if (route.name === "about") {
-      setMainContent(renderAboutView(state.leaderboard));
+      setMainContent(renderAboutView(state.leaderboard), contentOptions);
     } else if (route.name === "agentic-code") {
-      setMainContent(renderAgenticCodeView(state.principles, state.caseMetrics.closedCasesCount));
+      setMainContent(renderAgenticCodeView(state.principles, state.caseMetrics.closedCasesCount), contentOptions);
     } else if (route.name === "lodge-dispute") {
       if (!state.filingEstimate.value && !state.filingEstimate.loading) {
         await refreshFilingEstimate();
@@ -717,7 +720,8 @@ export function mountApp(root: HTMLElement): void {
           state.timingRules,
           state.ruleLimits,
           state.connectedWalletPubkey
-        )
+        ),
+        contentOptions
       );
       syncLodgeDefendantNotifyField();
     } else if (route.name === "join-jury-pool") {
@@ -730,7 +734,8 @@ export function mountApp(root: HTMLElement): void {
           state.leaderboard,
           state.timingRules,
           state.ruleLimits
-        )
+        ),
+        contentOptions
       );
     } else if (route.name === "agent") {
       const existing = state.agentProfiles[route.id];
@@ -739,10 +744,10 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       if (!profile) {
-        setMainContent(renderMissingAgentProfileView());
+        setMainContent(renderMissingAgentProfileView(), contentOptions);
       } else {
         state.agentProfiles[route.id] = profile as AgentProfile;
-        setMainContent(renderAgentProfileView(profile));
+        setMainContent(renderAgentProfileView(profile), contentOptions);
       }
     } else if (route.name === "case") {
       const caseItem = await resolveCaseById(route.id);
@@ -750,7 +755,7 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       if (!caseItem) {
-        setMainContent(renderMissingCaseView());
+        setMainContent(renderMissingCaseView(), contentOptions);
       } else {
         activeRenderedCase = caseItem;
         if (
@@ -759,7 +764,7 @@ export function mountApp(root: HTMLElement): void {
         ) {
           await refreshCaseLive(route.id, false);
         }
-        setMainContent(renderCaseDetailView(state, caseItem, state.agentConnection));
+        setMainContent(renderCaseDetailView(state, caseItem, state.agentConnection), contentOptions);
         if (caseItem.status === "scheduled" || caseItem.status === "active") {
           ensureCaseLivePolling(route.id);
         } else {
@@ -774,13 +779,13 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       if (!decision) {
-        setMainContent(renderMissingDecisionView());
+        setMainContent(renderMissingDecisionView(), contentOptions);
       } else {
         const transcript = await getCaseTranscript(decision.caseId);
         if (token !== routeToken) {
           return;
         }
-        setMainContent(renderDecisionDetailView(decision, transcript));
+        setMainContent(renderDecisionDetailView(decision, transcript), contentOptions);
       }
     }
 
@@ -789,7 +794,7 @@ export function mountApp(root: HTMLElement): void {
     syncVoteSimulation();
   };
 
-  const renderRoute = async () => {
+  const renderRoute = async (background = false) => {
     routeToken += 1;
     const currentToken = routeToken;
     state.route = parseRoute(window.location.pathname);
@@ -813,7 +818,7 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
-    await renderRouteContent(currentToken);
+    await renderRouteContent(currentToken, background);
   };
 
   const syncVoteSimulation = () => {
@@ -879,7 +884,13 @@ export function mountApp(root: HTMLElement): void {
       state.liveVotes[activeCase.id] = activeCase.voteSummary.votesCast;
     }
     if (renderAfter) {
-      await renderRoute();
+      // Preserve scroll position across background data refreshes so the page
+      // does not jump to the top while the user is reading.
+      const savedScrollY = window.scrollY;
+      await renderRoute(true);
+      if (savedScrollY > 0) {
+        window.scrollTo({ top: savedScrollY, left: 0, behavior: "auto" });
+      }
     }
   };
 
