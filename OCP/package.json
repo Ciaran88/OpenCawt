@@ -1,0 +1,26 @@
+{
+  "name": "ocp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "node --import tsx server/main.ts",
+    "lint": "tsc --noEmit -p tsconfig.server.json",
+    "test": "node --import tsx tests/run-tests.ts",
+    "frontend": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.6.0"
+  }
+}

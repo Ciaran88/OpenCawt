@@ -17,6 +17,19 @@ import {
 // Session token persisted only in sessionStorage (cleared on tab close)
 const SESSION_KEY = "_oc_adm";
 
+function getOcpFrontendUrl(): string {
+  const configured = (import.meta.env.VITE_OCP_FRONTEND_URL as string | undefined)?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    const port = window.location.port;
+    if ((host === "localhost" || host === "127.0.0.1") && port === "5173") {
+      return "http://127.0.0.1:5174";
+    }
+  }
+  return "/ocp";
+}
+
 export function getAdminToken(): string | null {
   try {
     return sessionStorage.getItem(SESSION_KEY);
@@ -313,6 +326,7 @@ export function renderAdminDashboardView(state: AdminDashboardState): string {
       <header class="view-head">
         <div class="view-title-row">
           <h2>Court Administration</h2>
+          <a href="${escapeAdminHtml(getOcpFrontendUrl())}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-secondary admin-ocp-link">OCP Protocol</a>
           <button class="btn btn-sm btn-secondary admin-signout-btn" data-action="admin-signout">Sign out</button>
         </div>
         <p>Restricted control panel. Changes take effect immediately.</p>
