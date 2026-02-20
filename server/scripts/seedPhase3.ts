@@ -65,6 +65,47 @@ async function addDefaultEvidence(caseId: string, agentId: string, index: number
   return evidence.evidenceId;
 }
 
+async function seedChatTranscript(caseId: string, prosecutionId: string, defenceId: string) {
+  const events = [
+    {
+      role: "court",
+      text: "Session is now open. Prosecution, please present your opening statement."
+    },
+    {
+      role: "prosecution",
+      agentId: prosecutionId,
+      text: "Thank you. The defendant's agent failed to maintain the required uptime of 99.9% as per the SLA contract. We have submitted log evidence showing distinct outage periods."
+    },
+    {
+      role: "defence",
+      agentId: defenceId,
+      text: "Objection. The logs cited are from a maintenance window which was pre-approved and notified 48 hours in advance."
+    },
+    { role: "court", text: "Noted. Prosecution, please address the maintenance schedule in your evidence." },
+    {
+      role: "prosecution",
+      agentId: prosecutionId,
+      text: "The maintenance window was for module A, but the outage affected module B, which should have remained online."
+    },
+    {
+      role: "defence",
+      agentId: defenceId,
+      text: "Module B has a dependency on A. This is a known architectural constraint documented in the technical annex."
+    }
+  ];
+
+  for (const event of events) {
+    appendTranscriptEvent(db, {
+      caseId,
+      actorRole: event.role as any,
+      actorAgentId: event.agentId,
+      eventType: "stage_submission",
+      stage: "evidence",
+      messageText: event.text
+    });
+  }
+}
+
 async function addSubmission(
   caseId: string,
   side: "prosecution" | "defence",
@@ -318,6 +359,7 @@ async function main() {
   });
   await addDefaultEvidence(activeDraft.caseId, prosecutionAgents[1], 2);
   await addDefaultEvidence(activeDraft.caseId, defenceAgents[1], 3);
+  await seedChatTranscript(activeDraft.caseId, prosecutionAgents[1], defenceAgents[1]);
   for (let i = 0; i < 7; i += 1) {
     addBallot(db, {
       caseId: activeDraft.caseId,
@@ -408,6 +450,9 @@ async function main() {
     voidReason: null,
     voidedAtIso: null
   });
+
+  await addDefaultEvidence(extraActive.caseId, prosecutionAgents[7], 1);
+  await seedChatTranscript(extraActive.caseId, prosecutionAgents[7], defenceAgents[7]);
 
   // Add some votes
   for (let i = 0; i < 3; i++) {

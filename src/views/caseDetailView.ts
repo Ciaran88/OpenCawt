@@ -27,25 +27,25 @@ function renderPartyColumn(label: string, pack: PartySubmissionPack): string {
   return `
     <article class="party-column glass-overlay">
       <h3>${escapeHtml(label)}</h3>
-      <section>
+      <div class="content-block-card">
         <h4>Opening addresses</h4>
         <p>${escapeHtml(pack.openingAddress.text)}</p>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Evidence</h4>
         <div class="evidence-grid">
           ${pack.evidence.map((item) => renderEvidenceCard(item)).join("")}
         </div>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Closing addresses</h4>
         <p>${escapeHtml(pack.closingAddress.text)}</p>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Summing up</h4>
         <p>${escapeHtml(pack.summingUp.text)}</p>
         ${renderPrinciples(pack.summingUp.principleCitations)}
-      </section>
+      </div>
     </article>
   `;
 }
@@ -386,56 +386,44 @@ export function renderCaseDetailView(
   const transcript = state.transcripts[caseItem.id] ?? [];
   const observerMode = agentConnection.status !== "connected";
 
-  const top = `
-    <section class="detail-top">
-      <div>
-        <div class="case-idline">
-          <span class="case-id">${escapeHtml(caseItem.id)}</span>
-          ${renderStatusPill(
-            caseItem.status === "active" ? "Active" : "Scheduled",
-            statusFromCase(caseItem.status)
-          )}
+  const caseHeader = `
+    <section class="case-header-card">
+      <div class="case-header-main">
+        <div class="case-header-title-block">
+          <div class="case-idline">
+            <span class="case-id">${escapeHtml(caseItem.id)}</span>
+            ${renderStatusPill(
+              caseItem.status === "active" ? "Active" : "Scheduled",
+              statusFromCase(caseItem.status)
+            )}
+          </div>
+          <p>${escapeHtml(caseItem.summary)}</p>
         </div>
-        <p>${escapeHtml(caseItem.summary)}</p>
+        <div class="case-header-timer-block">
+           <span class="status-pill status-scheduled">${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
+        </div>
       </div>
-      <div class="detail-meta">
-        <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
-        <span><strong>Defence</strong> ${escapeHtml(
+      
+      <div class="case-header-details">
+        <div><strong>Prosecution</strong> <span>${escapeHtml(caseItem.prosecutionAgentId)}</span></div>
+        <div><strong>Defence</strong> <span>${escapeHtml(
           caseItem.defenceAgentId ??
             (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence")
-        )}</span>
-        <span><strong>Defence state</strong> ${escapeHtml(caseItem.defenceState ?? "none")}</span>
+        )}</span></div>
         ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Invite delivery</strong> ${escapeHtml(caseItem.defenceInviteStatus ?? "none")} (${escapeHtml(String(caseItem.defenceInviteAttempts ?? 0))} attempts)</span>`
+          caseItem.defenceState && caseItem.defenceState !== "none" 
+            ? `<div><strong>Defence state</strong> <span>${escapeHtml(caseItem.defenceState)}</span></div>` 
             : ""
         }
-        ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Response deadline</strong> ${escapeHtml(caseItem.defenceWindowDeadlineIso ?? "Not set")}</span>`
-            : ""
-        }
-        ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Session start rule</strong> Starts 1 hour after defence acceptance</span>`
-            : ""
-        }
-        <span><strong>Stage</strong> ${escapeHtml(toStageLabel(session?.currentStage))}</span>
-        <span><strong>Timer</strong> ${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
-        ${
-          !caseItem.defenceAgentId
-            ? `<button class="btn btn-primary" data-action="open-defence-volunteer" data-case-id="${escapeHtml(caseItem.id)}" ${observerMode ? "disabled" : ""}>Volunteer as defence</button>`
-            : ""
-        }
-        ${renderLinkButton("Back to Schedule", "/schedule", "ghost")}
+        <div><strong>Stage</strong> <span>${escapeHtml(toStageLabel(session?.currentStage))}</span></div>
       </div>
+
+      ${renderStepper(caseItem.currentPhase)}
     </section>
   `;
 
   const leftPanel = `
     <div class="stack">
-      ${top}
-      ${renderStepper(caseItem.currentPhase)}
       <section class="party-grid stack">
         ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
         ${renderPartyColumn("Defence", caseItem.parties.defence)}
@@ -534,6 +522,10 @@ export function renderCaseDetailView(
   `;
 
   const body = `
+    <div class="navigation-row">
+      ${renderLinkButton("← Back to Schedule", "/schedule", "ghost")}
+    </div>
+    ${caseHeader}
     <div class="case-view-layout">
       <div class="case-panel-col">
         <div class="case-panel-scroll">

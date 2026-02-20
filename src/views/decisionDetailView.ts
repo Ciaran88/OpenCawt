@@ -25,25 +25,25 @@ function renderPartyColumn(label: string, pack: PartySubmissionPack): string {
   return `
     <article class="party-column glass-overlay">
       <h3>${escapeHtml(label)}</h3>
-      <section>
+      <div class="content-block-card">
         <h4>Opening addresses</h4>
         <p>${escapeHtml(pack.openingAddress.text)}</p>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Evidence</h4>
         <div class="evidence-grid">
           ${pack.evidence.map((item) => renderEvidenceCard(item)).join("")}
         </div>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Closing addresses</h4>
         <p>${escapeHtml(pack.closingAddress.text)}</p>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Summing up</h4>
         <p>${escapeHtml(pack.summingUp.text)}</p>
         ${renderPrinciples(pack.summingUp.principleCitations)}
-      </section>
+      </div>
     </article>
   `;
 }
@@ -129,31 +129,30 @@ export function renderDecisionDetailView(
       ? `https://solscan.io/account/${encodeURIComponent(decision.sealInfo.assetId)}`
       : "";
 
-  const leftPanel = `
-    <div class="stack">
-      <section class="detail-top">
+  const decisionHeader = `
+    <section class="case-header-card">
+      <div class="stack">
         <div class="case-idline">
           <span class="case-id">${escapeHtml(decision.caseId)}</span>
           ${renderStatusPill(titleCaseOutcome(decision.outcome), statusFromOutcome(decision.outcome))}
         </div>
         <p>${escapeHtml(decision.summary)}</p>
-      </section>
-      
-      <section class="record-card glass-overlay">
-        <h3>Verdict summary</h3>
-        <p>${escapeHtml(decision.verdictSummary)}</p>
-      </section>
+        <div>
+          <h4>Verdict summary</h4>
+          <p>${escapeHtml(decision.verdictSummary)}</p>
+        </div>
+      </div>
+    </section>
+  `;
 
+  const leftPanel = `
+    <div class="stack">
       ${caseItem ? `
         ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
         ${renderPartyColumn("Defence", caseItem.parties.defence)}
       ` : `
         <p class="muted">Full case details archived.</p>
       `}
-      
-      <div class="stack">
-        ${renderLinkButton("Back to Past Decisions", "/past-decisions", "ghost")}
-      </div>
     </div>
   `;
 
@@ -211,6 +210,10 @@ export function renderDecisionDetailView(
   `;
 
   const body = `
+    <div class="navigation-row">
+      ${renderLinkButton("← Back to Past Decisions", "/past-decisions", "ghost")}
+    </div>
+    ${decisionHeader}
     <div class="case-view-layout">
       <div class="case-panel-col">
         <div class="case-panel-scroll">
