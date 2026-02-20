@@ -1291,6 +1291,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const heliusReady = Boolean(config.heliusApiKey);
       // Drand: check if mode is http (stub means not connected)
       const drandReady = config.drandMode === "http";
+
+      const workflowParts: string[] = [
+        "Filing fee: prosecution pays SOL to treasury.",
+        "Case close: verdict computed, seal job enqueued.",
+        `Mint worker (${config.sealWorkerMode}): receives seal request, uploads metadata, mints cNFT on Solana.`
+      ];
+      if (config.sealWorkerMode === "stub") {
+        workflowParts[2] = "Mint worker (stub): returns synthetic seal data without on-chain mint.";
+      } else if (config.sealWorkerMode === "http" && config.sealWorkerUrl) {
+        workflowParts[2] =
+          "Mint worker (http): receives seal request from server, uploads metadata (Pinata), mints cNFT on Solana.";
+      }
+      const workflowSummary = workflowParts.join(" ");
+
       sendJson(res, 200, {
         db: { ready: dbReady },
         railwayWorker: { ready: workerReady, mode: config.sealWorkerMode },
@@ -1298,7 +1312,130 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         drand: { ready: drandReady, mode: config.drandMode },
         softDailyCaseCap: config.softDailyCaseCap,
         jurorPanelSize: config.rules.jurorPanelSize,
-        courtMode: "11-juror"
+        courtMode: "11-juror",
+        treasuryAddress: config.treasuryAddress,
+        sealWorkerUrl: config.sealWorkerUrl,
+        sealWorkerMode: config.sealWorkerMode,
+        workflowSummary
+      });
+      return;
+    }
+
+    // Admin check systems (live connectivity tests)
+    if (
+      (method === "GET" || method === "POST") &&
+      pathname === "/api/internal/admin-check-systems"
+    ) {
+      assertSystemKey(req, config);
+      const CHECK_TIMEOUT_MS = 6000;
+
+      const withTimeout = <T>(promise: Promise<T>, label: string): Promise<{ ok: true; data: T } | { ok: false; error: string }> =>
+        Promise.race([
+          promise.then((data) => ({ ok: true as const, data })),
+          new Promise<{ ok: false; error: string }>((resolve) =>
+            setTimeout(() => resolve({ ok: false, error: `${label} timeout` }), CHECK_TIMEOUT_MS)
+          )
+        ]).catch((err) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
+
+      const dbCheck = (async () => {
+        try {
+          db.prepare("SELECT 1").get();
+          return { ready: true as const };
+        } catch (e) {
+          return { ready: false as const, error: e instanceof Error ? e.message : String(e) };
+        }
+      })();
+
+      const workerCheck =
+        config.sealWorkerMode === "http" && config.sealWorkerUrl
+          ? withTimeout(
+              fetch(`${config.sealWorkerUrl.replace(/\/$/, "")}/health`, {
+                method: "GET",
+                headers: { "X-Worker-Token": config.workerToken }
+              }).then(async (r) => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const json = (await r.json()) as { ok?: boolean; mode?: string; mintAuthorityPubkey?: string };
+                return {
+                  ready: json.ok === true,
+                  mode: config.sealWorkerMode,
+                  mintAuthorityPubkey: json.mintAuthorityPubkey
+                };
+              }),
+              "Railway Worker"
+            ).then((r) =>
+              r.ok
+                ? { ready: r.data.ready, mode: r.data.mode, mintAuthorityPubkey: r.data.mintAuthorityPubkey }
+                : { ready: false as const, error: r.error, mode: config.sealWorkerMode, mintAuthorityPubkey: undefined }
+            )
+          : Promise.resolve({
+              ready: false,
+              error: "stub mode",
+              mode: config.sealWorkerMode,
+              mintAuthorityPubkey: undefined
+            });
+
+      const heliusCheck =
+        config.heliusApiKey
+          ? withTimeout(
+              (async () => {
+                let url = (config.heliusRpcUrl || "").trim();
+                if (!url.includes("api-key=")) {
+                  url += url.includes("?") ? "&" : "?";
+                  url += `api-key=${encodeURIComponent(config.heliusApiKey!)}`;
+                }
+                const res = await fetch(url, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Accept: "application/json" },
+                  body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "getHealth",
+                    params: []
+                  })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const envelope = (await res.json()) as { result?: string; error?: { message?: string } };
+                if (envelope.error) throw new Error(envelope.error.message ?? "RPC error");
+                return envelope.result === "ok";
+              })(),
+              "Helius API"
+            ).then((r) =>
+              r.ok ? { ready: r.data } : { ready: false as const, error: r.error }
+            )
+          : Promise.resolve({ ready: false, error: "no API key" });
+
+      const drandCheck =
+        config.drandMode === "http"
+          ? withTimeout(
+              fetch(`${config.drandBaseUrl.replace(/\/$/, "")}/info`, {
+                method: "GET",
+                headers: { Accept: "application/json" }
+              }).then(async (r) => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                await r.json();
+                return true;
+              }),
+              "Drand API"
+            ).then((r) => (r.ok ? { ready: r.data } : { ready: false as const, error: r.error }))
+          : Promise.resolve({ ready: false, error: "stub mode" });
+
+      const [dbResult, workerResult, heliusResult, drandResult] = await Promise.all([
+        dbCheck,
+        workerCheck,
+        heliusCheck,
+        drandCheck
+      ]);
+
+      sendJson(res, 200, {
+        db: { ready: dbResult.ready, error: dbResult.error },
+        railwayWorker: {
+          ready: workerResult.ready,
+          error: workerResult.error,
+          mode: workerResult.mode ?? config.sealWorkerMode,
+          mintAuthorityPubkey: workerResult.mintAuthorityPubkey
+        },
+        helius: { ready: heliusResult.ready, error: heliusResult.error },
+        drand: { ready: drandResult.ready, error: drandResult.error }
       });
       return;
     }

@@ -68,6 +68,22 @@ export interface AdminStatus {
   softDailyCaseCap: number;
   jurorPanelSize: number;
   courtMode: string;
+  treasuryAddress?: string;
+  sealWorkerUrl?: string;
+  sealWorkerMode?: string;
+  workflowSummary?: string;
+}
+
+export interface AdminCheckResult {
+  db: { ready: boolean; error?: string };
+  railwayWorker: {
+    ready: boolean;
+    error?: string;
+    mode: string;
+    mintAuthorityPubkey?: string;
+  };
+  helius: { ready: boolean; error?: string };
+  drand: { ready: boolean; error?: string };
 }
 
 export async function adminGetStatus(token: string): Promise<AdminStatus> {
@@ -75,6 +91,14 @@ export async function adminGetStatus(token: string): Promise<AdminStatus> {
     headers: { "X-System-Key": token }
   });
   return handleAdminResponse<AdminStatus>(response);
+}
+
+export async function adminCheckSystems(token: string): Promise<AdminCheckResult> {
+  const response = await fetch(`${apiBase}/api/internal/admin-check-systems`, {
+    method: "POST",
+    headers: { "X-System-Key": token }
+  });
+  return handleAdminResponse<AdminCheckResult>(response);
 }
 
 export async function adminBanFiling(

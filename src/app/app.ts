@@ -96,6 +96,7 @@ import {
   handleAdminBanFiling,
   handleAdminBanDefence,
   handleAdminBanJury,
+  handleAdminCheckSystems,
   handleAdminDeleteCase,
   handleAdminSetDailyCap,
   fetchAdminStatus,
@@ -173,6 +174,8 @@ export function mountApp(root: HTMLElement): void {
   const adminState: AdminDashboardState = {
     status: null,
     statusLoading: false,
+    checkResults: null,
+    checkLoading: false,
     feedback: {}
   };
 
@@ -1809,8 +1812,22 @@ export function mountApp(root: HTMLElement): void {
     if (action === "admin-signout") {
       clearAdminToken();
       adminState.status = null;
+      adminState.checkResults = null;
+      adminState.checkLoading = false;
       adminState.feedback = {};
       setMainContent(renderAdminLoginView());
+      return;
+    }
+    if (action === "admin-check-systems") {
+      const token = getAdminToken();
+      if (!token) return;
+      adminState.checkLoading = true;
+      setMainContent(renderAdminDashboardView(adminState), { animate: false });
+      handleAdminCheckSystems(token).then((results) => {
+        adminState.checkResults = results;
+        adminState.checkLoading = false;
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+      });
       return;
     }
 
@@ -1962,6 +1979,8 @@ export function mountApp(root: HTMLElement): void {
         } else {
           adminState.status = null;
           adminState.statusLoading = false;
+          adminState.checkResults = null;
+          adminState.checkLoading = false;
           adminState.feedback = {};
           void renderRoute();
         }

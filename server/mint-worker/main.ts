@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
+import { Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
 import { createId } from "../../shared/ids";
 import type { WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
 import { mintWithBubblegumV2 } from "./bubblegumMint";
@@ -7,6 +9,19 @@ import { mintWithMetaplexNft } from "./metaplexNftMint";
 import { getMintWorkerConfig } from "./workerConfig";
 
 const config = getMintWorkerConfig();
+
+function deriveMintAuthorityPubkey(): string | undefined {
+  if (!config.mintAuthorityKeyB58) return undefined;
+  if (config.mode === "stub") return undefined;
+  if (config.mode === "bubblegum_v2" && config.mintSigningStrategy === "external_endpoint") return undefined;
+  try {
+    const secret = bs58.decode(config.mintAuthorityKeyB58);
+    const keypair = Keypair.fromSecretKey(secret);
+    return keypair.publicKey.toBase58();
+  } catch {
+    return undefined;
+  }
+}
 
 async function readJson<T>(req: IncomingMessage, limitBytes = 1024 * 1024): Promise<T> {
   const chunks: Buffer[] = [];
@@ -42,6 +57,25 @@ const server = createServer((req, res) => {
     if (req.method === "OPTIONS") {
       res.statusCode = 204;
       res.end();
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/health") {
+      if (String(req.headers["x-worker-token"] || "") !== config.token) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: "invalid_worker_token" }));
+        return;
+      }
+      const mintAuthorityPubkey = deriveMintAuthorityPubkey();
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(
+        JSON.stringify({
+          ok: true,
+          mode: config.mode,
+          ...(mintAuthorityPubkey ? { mintAuthorityPubkey } : {})
+        })
+      );
       return;
     }
 

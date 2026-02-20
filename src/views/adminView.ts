@@ -3,10 +3,12 @@ import {
   adminBanDefence,
   adminBanFiling,
   adminBanJury,
+  adminCheckSystems,
   adminDeleteCase,
   adminGetStatus,
   adminSetDailyCap,
   AdminApiError,
+  type AdminCheckResult,
   type AdminStatus
 } from "../data/adminAdapter";
 
@@ -71,32 +73,76 @@ export function renderAdminLoginView(errorMsg?: string): string {
 
 // --- Status pills ---
 
-function statusPill(label: string, ready: boolean, detail?: string): string {
-  const tone = ready ? "ready" : "error";
-  const text = ready ? "Ready" : "Error";
+function statusPill(
+  label: string,
+  ready: boolean,
+  detail?: string,
+  options?: { checking?: boolean; error?: string }
+): string {
+  const checking = options?.checking ?? false;
+  const tone = checking ? "checking" : ready ? "ready" : "error";
+  const text = checking ? "Checking…" : ready ? "Ready" : "Error";
+  const displayDetail = options?.error ?? detail;
   return `
     <div class="admin-status-item">
       <span class="admin-status-label">${escapeAdminHtml(label)}</span>
       <span class="admin-status-pill is-${tone}">${text}</span>
-      ${detail ? `<span class="admin-status-detail">${escapeAdminHtml(detail)}</span>` : ""}
+      ${displayDetail ? `<span class="admin-status-detail">${escapeAdminHtml(displayDetail)}</span>` : ""}
     </div>
   `;
 }
 
-function renderStatusSection(status: AdminStatus | null, loading: boolean): string {
+function renderStatusSection(
+  status: AdminStatus | null,
+  loading: boolean,
+  checkResults: AdminCheckResult | null,
+  checkLoading: boolean
+): string {
   if (loading) {
     return `<div class="admin-section-body"><p class="muted">Loading status…</p></div>`;
   }
   if (!status) {
     return `<div class="admin-section-body"><p class="admin-error">Unable to fetch status.</p></div>`;
   }
+
+  const useCheck = checkResults !== null;
+  const checking = checkLoading;
+
+  const dbReady = useCheck ? checkResults.db.ready : status.db.ready;
+  const dbDetail = useCheck && checkResults.db.error ? checkResults.db.error : undefined;
+
+  const workerReady = useCheck ? checkResults.railwayWorker.ready : status.railwayWorker.ready;
+  const workerDetail = useCheck
+    ? checkResults.railwayWorker.error ?? checkResults.railwayWorker.mode
+    : status.railwayWorker.mode;
+
+  const heliusReady = useCheck ? checkResults.helius.ready : status.helius.ready;
+  const heliusDetail = useCheck
+    ? checkResults.helius.error ?? (status.helius.hasApiKey ? "key present" : "no key")
+    : status.helius.hasApiKey
+      ? "key present"
+      : "no key";
+
+  const drandReady = useCheck ? checkResults.drand.ready : status.drand.ready;
+  const drandDetail = useCheck ? (checkResults.drand.error ?? status.drand.mode) : status.drand.mode;
+
   return `
     <div class="admin-section-body">
-      <div class="admin-status-grid">
-        ${statusPill("SQL Database", status.db.ready)}
-        ${statusPill("Railway Worker", status.railwayWorker.ready, status.railwayWorker.mode)}
-        ${statusPill("Helius API", status.helius.ready, status.helius.hasApiKey ? "key present" : "no key")}
-        ${statusPill("Drand API", status.drand.ready, status.drand.mode)}
+      <div class="admin-status-row">
+        <div class="admin-status-grid">
+          ${statusPill("SQL Database", dbReady, dbDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.db.error : undefined) })}
+          ${statusPill("Railway Worker", workerReady, workerDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.railwayWorker.error : undefined) })}
+          ${statusPill("Helius API", heliusReady, heliusDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.helius.error : undefined) })}
+          ${statusPill("Drand API", drandReady, drandDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.drand.error : undefined) })}
+        </div>
+        <button
+          type="button"
+          class="btn btn-sm btn-secondary admin-check-btn"
+          data-action="admin-check-systems"
+          ${checkLoading ? "disabled" : ""}
+        >
+          ${checkLoading ? "Checking…" : "Check Systems"}
+        </button>
       </div>
       <p class="admin-meta">Daily case cap: <strong>${status.softDailyCaseCap}</strong> &nbsp;|&nbsp; Juror panel size: <strong>${status.jurorPanelSize}</strong></p>
     </div>
@@ -118,6 +164,34 @@ function renderCourtModeSection(): string {
       <p class="admin-toggle-note muted">
         Placeholder toggle for a planned 12 Juror + LLM Judge hybrid mode. Not yet implemented.
       </p>
+    </div>
+  `;
+}
+
+// --- NFT System ---
+
+function renderNftSystemSection(
+  status: AdminStatus | null,
+  checkResults: AdminCheckResult | null
+): string {
+  const treasuryAddress = status?.treasuryAddress ?? "—";
+  const workerAddress =
+    checkResults?.railwayWorker?.mintAuthorityPubkey ?? "Run Check Systems to see";
+  const workflowSummary = status?.workflowSummary ?? "Workflow summary unavailable.";
+
+  return `
+    <div class="admin-section-body">
+      <dl class="admin-address-list">
+        <div class="admin-address-row">
+          <dt>Treasury</dt>
+          <dd><code class="admin-address-code">${escapeAdminHtml(treasuryAddress)}</code></dd>
+        </div>
+        <div class="admin-address-row">
+          <dt>Worker mint authority</dt>
+          <dd><code class="admin-address-code">${escapeAdminHtml(workerAddress)}</code></dd>
+        </div>
+      </dl>
+      <p class="admin-workflow-summary muted">${escapeAdminHtml(workflowSummary)}</p>
     </div>
   `;
 }
@@ -203,6 +277,8 @@ function renderDailyCapSection(currentCap: number | null, feedback?: string): st
 export interface AdminDashboardState {
   status: AdminStatus | null;
   statusLoading: boolean;
+  checkResults: AdminCheckResult | null;
+  checkLoading: boolean;
   feedback: Record<string, string>;
 }
 
@@ -222,12 +298,17 @@ export function renderAdminDashboardView(state: AdminDashboardState): string {
 
         <div class="admin-section">
           <h3 class="admin-section-title">System Status</h3>
-          ${renderStatusSection(state.status, state.statusLoading)}
+          ${renderStatusSection(state.status, state.statusLoading, state.checkResults, state.checkLoading)}
         </div>
 
         <div class="admin-section">
           <h3 class="admin-section-title">Court Mode</h3>
           ${renderCourtModeSection()}
+        </div>
+
+        <div class="admin-section">
+          <h3 class="admin-section-title">NFT System</h3>
+          ${renderNftSystemSection(state.status, state.checkResults)}
         </div>
 
         <div class="admin-section">
@@ -342,6 +423,16 @@ export async function handleAdminSetDailyCap(token: string, cap: number): Promis
 export async function fetchAdminStatus(token: string): Promise<AdminStatus | null> {
   try {
     return await adminGetStatus(token);
+  } catch {
+    return null;
+  }
+}
+
+export async function handleAdminCheckSystems(
+  token: string
+): Promise<AdminCheckResult | null> {
+  try {
+    return await adminCheckSystems(token);
   } catch {
     return null;
   }
