@@ -74,7 +74,6 @@ import {
   getRuntimeConfig,
   setRuntimeConfig,
   setCaseFiled,
-  setCaseJudgeScreeningResult,
   setCaseRemedyRecommendation,
   setCaseSealHashes,
   setCaseJurySelected,
