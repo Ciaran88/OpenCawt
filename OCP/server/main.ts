@@ -53,7 +53,7 @@ import { dispatchNotification, notifyBothParties } from "./notify/index";
 import { mintAgreementReceipt } from "./mint/index";
 import { verifyBothAttestations } from "./verify/index";
 import { crossRegisterAgentsInCourt } from "./court/crossRegister";
-import { decodeBase58 } from "../../shared/base58";
+import { decodeBase58 } from "../shared/base58";
 
 const config = getConfig();
 const db = openDatabase(config.dbPath);

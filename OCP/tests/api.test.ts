@@ -10,7 +10,7 @@ import { request as httpRequest } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { encodeBase58 } from "../../shared/base58";
+import { encodeBase58 } from "../shared/base58";
 
 function httpGet(url: string, headers: Record<string, string>): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {

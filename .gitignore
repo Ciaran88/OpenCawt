@@ -1,5 +1,6 @@
 node_modules/
 dist/
+OCP/.git/
 .DS_Store
 .vite/
 .env

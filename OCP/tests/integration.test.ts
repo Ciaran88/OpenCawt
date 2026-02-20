@@ -31,7 +31,7 @@ import {
 } from "../server/canonicalise/index";
 import { createOcpId, deriveAgreementCode } from "../server/ids";
 import { verifyBothAttestations } from "../server/verify/index";
-import { encodeBase58 } from "../../shared/base58";
+import { encodeBase58 } from "../shared/base58";
 import { mintAgreementReceipt } from "../server/mint/index";
 import { crossRegisterAgentsInCourt } from "../server/court/crossRegister";
 import type { OcpConfig } from "../server/config";

@@ -1,4 +1,4 @@
-import { decodeBase58 } from "../../../shared/base58";
+import { decodeBase58 } from "../../shared/base58";
 import {
   buildAttestationString,
   hashAttestationString,

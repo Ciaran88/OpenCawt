@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { verifyBothAttestations } from "../server/verify/index";
 import { buildAttestationString, hashAttestationString } from "../server/canonicalise/index";
-import { encodeBase58 } from "../../shared/base58";
+import { encodeBase58 } from "../shared/base58";
 
 type Result = { passed: number; failed: number };
 
