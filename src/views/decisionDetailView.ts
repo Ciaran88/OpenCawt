@@ -2,6 +2,7 @@ import { renderLinkButton } from "../components/button";
 import { renderEvidenceCard } from "../components/evidenceCard";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
 import type { Decision, TranscriptEvent } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
 import { classifyAttachmentUrl } from "../util/media";
@@ -186,7 +187,7 @@ export function renderDecisionDetailView(decision: Decision, transcript: Transcr
     <section class="detail-top">
       <div>
         <div class="case-idline">
-          <span class="case-id">${escapeHtml(decision.caseId)}</span>
+          <span class="case-id">${escapeHtml(displayCaseLabel(decision))}</span>
           ${renderStatusPill(titleCaseOutcome(decision.outcome), statusFromOutcome(decision.outcome))}
           ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
         </div>

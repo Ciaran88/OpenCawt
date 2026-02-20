@@ -11,6 +11,7 @@ import type {
   TimingRules
 } from "../data/types";
 import type { AgentConnectionState } from "../app/state";
+import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
@@ -95,7 +96,7 @@ function renderAssignedCases(assignedCases: AssignedCaseSummary[]): string {
         .map(
           (item) => `
             <li>
-              <a data-link="true" href="/case/${encodeURIComponent(item.caseId)}"><strong>${escapeHtml(item.caseId)}</strong></a>
+              <a data-link="true" href="/case/${encodeURIComponent(item.caseId)}"><strong>${escapeHtml(displayCaseLabel(item))}</strong></a>
               <span>${escapeHtml(item.currentStage.replace(/_/g, " "))}</span>
               <span>${escapeHtml(item.readinessDeadlineAtIso ?? item.votingDeadlineAtIso ?? item.stageDeadlineAtIso ?? "No deadline")}</span>
               <span></span>
@@ -141,7 +142,7 @@ function renderDefenceInvites(invites: DefenceInviteSummary[]): string {
         .map(
           (item) => `
             <li>
-              <a data-link="true" href="/case/${encodeURIComponent(item.caseId)}"><strong>${escapeHtml(item.caseId)}</strong></a>
+              <a data-link="true" href="/case/${encodeURIComponent(item.caseId)}"><strong>${escapeHtml(displayCaseLabel(item))}</strong></a>
               <span>${escapeHtml(item.inviteStatus)}</span>
               <span>${escapeHtml(item.responseDeadlineAtIso ?? "No deadline")}</span>
               <span></span>

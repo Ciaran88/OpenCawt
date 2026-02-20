@@ -10,6 +10,7 @@ import type {
   CaseOutcome,
   CaseVoidReason,
   ClaimOutcome,
+  CourtMode,
   CreateCaseDraftPayload,
   DefenceInviteStatus,
   DefenceInviteSummary,
@@ -207,6 +208,11 @@ export interface CaseRecord {
   sealUri?: string;
   filingWarning?: string;
   defendantNotifyUrl?: string;
+  courtMode: CourtMode;
+  caseTitle?: string;
+  judgeScreeningStatus?: "pending" | "approved" | "rejected";
+  judgeScreeningReason?: string;
+  judgeRemedyRecommendation?: string;
 }
 
 export interface ClaimRecord {
@@ -732,7 +738,18 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     sealTxSig: row.seal_tx_sig ? String(row.seal_tx_sig) : undefined,
     sealUri: row.seal_uri ? String(row.seal_uri) : undefined,
     filingWarning: row.filing_warning ? String(row.filing_warning) : undefined,
-    defendantNotifyUrl: row.defendant_notify_url ? String(row.defendant_notify_url) : undefined
+    defendantNotifyUrl: row.defendant_notify_url ? String(row.defendant_notify_url) : undefined,
+    courtMode: (String(row.court_mode ?? "11-juror") as CourtMode),
+    caseTitle: row.case_title ? String(row.case_title) : undefined,
+    judgeScreeningStatus: row.judge_screening_status
+      ? (String(row.judge_screening_status) as "pending" | "approved" | "rejected")
+      : undefined,
+    judgeScreeningReason: row.judge_screening_reason
+      ? String(row.judge_screening_reason)
+      : undefined,
+    judgeRemedyRecommendation: row.judge_remedy_recommendation
+      ? String(row.judge_remedy_recommendation)
+      : undefined
   };
 }
 
@@ -796,7 +813,12 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         seal_asset_id,
         seal_tx_sig,
         seal_uri,
-        filing_warning
+        filing_warning,
+        court_mode,
+        case_title,
+        judge_screening_status,
+        judge_screening_reason,
+        judge_remedy_recommendation
       FROM cases
       WHERE case_id = ?
       `
@@ -874,7 +896,12 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         seal_asset_id,
         seal_tx_sig,
         seal_uri,
-        filing_warning
+        filing_warning,
+        court_mode,
+        case_title,
+        judge_screening_status,
+        judge_screening_reason,
+        judge_remedy_recommendation
       FROM cases
       WHERE status IN (${placeholders})
       ORDER BY created_at DESC
@@ -1228,7 +1255,12 @@ export function claimDefenceAssignment(
           seal_asset_id,
           seal_tx_sig,
           seal_uri,
-          filing_warning
+          filing_warning,
+          court_mode,
+          case_title,
+          judge_screening_status,
+          judge_screening_reason,
+          judge_remedy_recommendation
         FROM cases
         WHERE case_id = ?
         LIMIT 1
@@ -2262,6 +2294,27 @@ export function markCaseVoid(
   });
 }
 
+export function setCaseJudgeScreeningResult(
+  db: Db,
+  input: {
+    caseId: string;
+    status: "approved" | "rejected";
+    reason?: string;
+    caseTitle?: string;
+  }
+): void {
+  db.prepare(
+    `UPDATE cases SET judge_screening_status = ?, judge_screening_reason = ?, case_title = ? WHERE case_id = ?`
+  ).run(input.status, input.reason ?? null, input.caseTitle ?? null, input.caseId);
+}
+
+export function setCaseRemedyRecommendation(db: Db, caseId: string, recommendation: string): void {
+  db.prepare(`UPDATE cases SET judge_remedy_recommendation = ? WHERE case_id = ?`).run(
+    recommendation.slice(0, 500),
+    caseId
+  );
+}
+
 export function markSessionStarted(db: Db, caseId: string, atIso: string): void {
   db.prepare(`UPDATE cases SET session_started_at = ?, session_stage = 'jury_readiness' WHERE case_id = ?`).run(
     atIso,
@@ -2402,6 +2455,7 @@ export function listAssignedCasesForJuror(db: Db, agentId: string): AssignedCase
       `
       SELECT
         c.case_id,
+        c.case_title,
         c.summary,
         r.current_stage,
         r.stage_deadline_at,
@@ -2419,6 +2473,7 @@ export function listAssignedCasesForJuror(db: Db, agentId: string): AssignedCase
     )
     .all(agentId) as Array<{
     case_id: string;
+    case_title: string | null;
     summary: string;
     current_stage: SessionStage | null;
     stage_deadline_at: string | null;
@@ -2429,6 +2484,7 @@ export function listAssignedCasesForJuror(db: Db, agentId: string): AssignedCase
 
   return rows.map((row) => ({
     caseId: row.case_id,
+    caseTitle: row.case_title ?? undefined,
     summary: row.summary,
     currentStage: (row.current_stage ?? "pre_session") as SessionStage,
     stageDeadlineAtIso: row.stage_deadline_at ?? undefined,
@@ -2538,6 +2594,7 @@ export function listDefenceInvitesForAgent(db: Db, agentId: string): DefenceInvi
       `
       SELECT
         case_id,
+        case_title,
         summary,
         prosecution_agent_id,
         defendant_agent_id,
@@ -2556,6 +2613,7 @@ export function listDefenceInvitesForAgent(db: Db, agentId: string): DefenceInvi
     )
     .all(agentId) as Array<{
     case_id: string;
+    case_title: string | null;
     summary: string;
     prosecution_agent_id: string;
     defendant_agent_id: string;
@@ -2569,6 +2627,7 @@ export function listDefenceInvitesForAgent(db: Db, agentId: string): DefenceInvi
 
   return rows.map((row) => ({
     caseId: row.case_id,
+    caseTitle: row.case_title ?? undefined,
     summary: row.summary,
     prosecutionAgentId: row.prosecution_agent_id,
     defendantAgentId: row.defendant_agent_id,
@@ -2679,7 +2738,12 @@ export function listOpenDefenceCases(
         seal_asset_id,
         seal_tx_sig,
         seal_uri,
-        filing_warning
+        filing_warning,
+        court_mode,
+        case_title,
+        judge_screening_status,
+        judge_screening_reason,
+        judge_remedy_recommendation
       FROM cases
       WHERE ${where.join(" AND ")}
       ORDER BY COALESCE(scheduled_for, created_at) ASC
@@ -2699,6 +2763,7 @@ export function listOpenDefenceCases(
     const reserved = Boolean(item.defendantAgentId) && nowMs < exclusiveWindowEndMs;
     return {
       caseId: item.caseId,
+      caseTitle: item.caseTitle,
       status: mapUiStatus(item),
       summary: item.summary,
       prosecutionAgentId: item.prosecutionAgentId,
@@ -2758,10 +2823,11 @@ export function listAgentActivity(db: Db, agentId: string, limit = 20): AgentAct
   const rows = db
     .prepare(
       `
-      SELECT activity_id, agent_id, case_id, role, outcome, recorded_at
-      FROM agent_case_activity
-      WHERE agent_id = ?
-      ORDER BY recorded_at DESC
+      SELECT a.activity_id, a.agent_id, a.case_id, a.role, a.outcome, a.recorded_at, c.case_title
+      FROM agent_case_activity a
+      LEFT JOIN cases c ON c.case_id = a.case_id
+      WHERE a.agent_id = ?
+      ORDER BY a.recorded_at DESC
       LIMIT ?
       `
     )
@@ -2772,11 +2838,13 @@ export function listAgentActivity(db: Db, agentId: string, limit = 20): AgentAct
     role: "prosecution" | "defence" | "juror";
     outcome: CaseOutcome | "void" | "pending";
     recorded_at: string;
+    case_title: string | null;
   }>;
   return rows.map((row) => ({
     activityId: row.activity_id,
     agentId: row.agent_id,
     caseId: row.case_id,
+    caseTitle: row.case_title ?? undefined,
     role: row.role,
     outcome: row.outcome,
     recordedAtIso: row.recorded_at
@@ -3289,6 +3357,7 @@ export function saveIdempotencyRecord(
 
 export function listDecisions(db: Db): Array<{
   caseId: string;
+  caseTitle?: string;
   summary: string;
   status: "closed" | "sealed" | "void";
   outcome: "for_prosecution" | "for_defence" | "void";
@@ -3302,7 +3371,7 @@ export function listDecisions(db: Db): Array<{
   const rows = db
     .prepare(
       `
-      SELECT case_id, summary, status, closed_at, decided_at, outcome, verdict_hash, verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, void_reason, created_at, voided_at
+      SELECT case_id, case_title, summary, status, closed_at, decided_at, outcome, verdict_hash, verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, void_reason, created_at, voided_at
       FROM cases
       WHERE status IN ('closed', 'sealed', 'void')
       ORDER BY COALESCE(decided_at, closed_at, voided_at, created_at) DESC
@@ -3310,6 +3379,7 @@ export function listDecisions(db: Db): Array<{
     )
     .all() as Array<{
     case_id: string;
+    case_title: string | null;
     summary: string;
     status: "closed" | "sealed" | "void";
     closed_at: string | null;
@@ -3338,6 +3408,7 @@ export function listDecisions(db: Db): Array<{
         : ((bundle.overall?.outcome as "for_prosecution" | "for_defence" | undefined) ?? "void"));
     return {
       caseId: row.case_id,
+      caseTitle: row.case_title ?? undefined,
       summary: row.summary,
       status: row.status,
       outcome,

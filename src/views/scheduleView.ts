@@ -3,6 +3,7 @@ import { renderCaseList } from "../components/caseList";
 import { renderKpiStatCard } from "../components/kpiStatCard";
 import { renderSegmentedControl } from "../components/segmentedControl";
 import type { Case } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
@@ -73,7 +74,7 @@ function renderOpenDefenceRows(state: AppState): string {
         <article class="case-row card-surface open-defence-row">
           <div class="case-main">
             <div class="case-idline">
-              <span class="case-id">${escapeHtml(item.caseId)}</span>
+              <span class="case-id">${escapeHtml(displayCaseLabel(item))}</span>
               ${badge}
             </div>
             <p class="case-summary">${escapeHtml(item.summary)}</p>

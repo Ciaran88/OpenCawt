@@ -1,6 +1,6 @@
 import { canonicalJson } from "../../shared/canonicalJson";
 import { canonicalHashHex } from "../../shared/hash";
-import type { CaseOutcome, Remedy, VerdictBundle, VoteEntry } from "../../shared/contracts";
+import type { CaseOutcome, CourtMode, Remedy, VerdictBundle, VoteEntry } from "../../shared/contracts";
 
 interface ClaimLike {
   claimId: string;
@@ -25,9 +25,15 @@ interface VerdictInput {
   drandRound: number | null;
   drandRandomness: string | null;
   poolSnapshotHash: string | null;
+  courtMode?: CourtMode;
+  judgeTiebreak?: Record<
+    string,
+    { finding: "proven" | "not_proven"; reasoning: string }
+  >;
+  judgeRemedyRecommendation?: string;
 }
 
-function tallyClaimVotes(
+export function tallyClaimVotes(
   claimId: string,
   ballots: BallotLike[]
 ): {
@@ -68,12 +74,16 @@ function majorityFinding(tally: {
   proven: number;
   notProven: number;
   insufficient: number;
-}): "proven" | "not_proven" | "insufficient" {
+}): "proven" | "not_proven" | "insufficient" | "tied" {
   if (tally.proven > tally.notProven && tally.proven > tally.insufficient) {
     return "proven";
   }
   if (tally.notProven > tally.proven && tally.notProven > tally.insufficient) {
     return "not_proven";
+  }
+  // Detect exact tie (e.g. 6-6 split where proven == notProven, both > insufficient)
+  if (tally.proven === tally.notProven && tally.proven > tally.insufficient) {
+    return "tied";
   }
   return "insufficient";
 }
@@ -123,9 +133,29 @@ export async function computeDeterministicVerdict(input: VerdictInput): Promise<
   overallOutcome: CaseOutcome | null;
   inconclusive: boolean;
 }> {
+  const tiebrokenClaimIds: string[] = [];
+
   const claims = input.claims.map((claim) => {
     const tally = tallyClaimVotes(claim.claimId, input.ballots);
-    const finding = majorityFinding(tally);
+    let finding: "proven" | "not_proven" | "insufficient" | "tied" = majorityFinding(tally);
+    let judgeTiebreakForClaim:
+      | { finding: "proven" | "not_proven"; reasoning: string }
+      | undefined;
+
+    // Handle tie with judge tiebreak (only on exact 6-6 split in judge mode)
+    if (
+      finding === "tied" &&
+      input.courtMode === "judge" &&
+      input.judgeTiebreak?.[claim.claimId]
+    ) {
+      judgeTiebreakForClaim = input.judgeTiebreak[claim.claimId];
+      finding = judgeTiebreakForClaim.finding;
+      tiebrokenClaimIds.push(claim.claimId);
+    } else if (finding === "tied") {
+      // No judge available or 11-juror mode: treat as insufficient
+      finding = "insufficient";
+    }
+
     return {
       claimId: claim.claimId,
       finding,
@@ -134,7 +164,8 @@ export async function computeDeterministicVerdict(input: VerdictInput): Promise<
         notProven: tally.notProven,
         insufficient: tally.insufficient
       },
-      majorityRemedy: majorityRemedy(tally.remedies, claim.requestedRemedy)
+      majorityRemedy: majorityRemedy(tally.remedies, claim.requestedRemedy),
+      ...(judgeTiebreakForClaim ? { judgeTiebreak: judgeTiebreakForClaim } : {})
     };
   });
 
@@ -158,7 +189,13 @@ export async function computeDeterministicVerdict(input: VerdictInput): Promise<
       votesReceived: input.ballots.length,
       ...(overallOutcome ? { outcome: overallOutcome } : {}),
       inconclusive,
-      remedy: overallRemedy
+      remedy: overallRemedy,
+      ...(tiebrokenClaimIds.length > 0
+        ? { judgeTiebreak: { claimsBroken: tiebrokenClaimIds } }
+        : {}),
+      ...(input.judgeRemedyRecommendation
+        ? { judgeRemedyRecommendation: input.judgeRemedyRecommendation }
+        : {})
     },
     integrity: {
       drandRound: input.drandRound,

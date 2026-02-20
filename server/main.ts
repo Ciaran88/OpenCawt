@@ -74,6 +74,8 @@ import {
   getRuntimeConfig,
   setRuntimeConfig,
   setCaseFiled,
+  setCaseJudgeScreeningResult,
+  setCaseRemedyRecommendation,
   setCaseSealHashes,
   setCaseJurySelected,
   setJurorAvailability,
@@ -107,6 +109,7 @@ import { createLogger, createRequestId } from "./services/observability";
 import { createPaymentEstimator, isValidSolanaPubkey } from "./services/paymentEstimator";
 import { enforceActionRateLimit, enforceFilingLimit } from "./services/rateLimit";
 import { applySealResult, enqueueSealJob, retrySealJob } from "./services/sealing";
+import { createJudgeService, JUDGE_CALL_TIMEOUT_MS, withJudgeTimeout } from "./services/judge";
 import { createSessionEngine } from "./services/sessionEngine";
 import { createSolanaProvider } from "./services/solanaProvider";
 import { computeCaseSealHashes } from "./services/sealHashes";
@@ -131,7 +134,7 @@ import {
   setSecurityHeaders
 } from "./services/http";
 import { toUiCase, toUiDecision } from "./services/presenters";
-import { computeDeterministicVerdict } from "./services/verdict";
+import { computeDeterministicVerdict, tallyClaimVotes } from "./services/verdict";
 import { syncCaseReputation } from "./services/reputation";
 import { dispatchDefenceInvite } from "./services/defenceInvite";
 import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../shared/openclawTools";
@@ -151,19 +154,24 @@ const db = openDatabase(config);
 const drand = createDrandClient(config);
 const solana = createSolanaProvider(config);
 const paymentEstimator = createPaymentEstimator(config);
+const judge = createJudgeService({ logger });
 
 for (const historicalCase of listCasesByStatuses(db, ["closed", "sealed", "void"])) {
   syncCaseReputation(db, historicalCase);
 }
 rebuildAllAgentStats(db);
 
-// Apply runtime config overrides (persisted daily cap, etc.)
+// Apply runtime config overrides (persisted daily cap, soft cap mode, etc.)
 const savedDailyCap = getRuntimeConfig(db, "daily_cap");
 if (savedDailyCap !== null) {
   const parsed = Number(savedDailyCap);
   if (Number.isFinite(parsed) && parsed > 0) {
     config.softDailyCaseCap = parsed;
   }
+}
+const savedSoftCapMode = getRuntimeConfig(db, "soft_cap_mode");
+if (savedSoftCapMode === "warn" || savedSoftCapMode === "enforce") {
+  config.softCapMode = savedSoftCapMode;
 }
 
 // In-memory rate limiter for admin auth attempts (ip -> { count, resetAt })
@@ -444,6 +452,8 @@ interface JurySelectionComputation {
 
 async function computeInitialJurySelection(caseId: string): Promise<JurySelectionComputation> {
   const caseRecord = ensureCaseExists(caseId);
+  const globalCourtMode = getRuntimeConfig(db, "court_mode") ?? "11-juror";
+  const jurySize = globalCourtMode === "judge" ? 12 : config.rules.jurorPanelSize;
   const eligible = listEligibleJurors(db, {
     excludeAgentIds: [caseRecord.prosecutionAgentId, caseRecord.defenceAgentId ?? ""].filter(Boolean),
     weeklyLimit: 3
@@ -454,7 +464,7 @@ async function computeInitialJurySelection(caseId: string): Promise<JurySelectio
     caseId,
     eligibleJurorIds: eligible,
     drand: drandData,
-    jurySize: config.rules.jurorPanelSize
+    jurySize
   });
 
   return {
@@ -529,13 +539,50 @@ async function closeCasePipeline(caseId: string): Promise<{
     const ballots = listBallotsByCase(db, caseId);
     const juryMembers = listJuryMembers(db, caseId);
 
+    // Judge mode: detect 6-6 ties and invoke judge tiebreak
+    let judgeTiebreaks:
+      | Record<string, { finding: "proven" | "not_proven"; reasoning: string }>
+      | undefined;
+
+    if (caseRecord.courtMode === "judge") {
+      const ballotLikes = ballots.map((item) => ({ votes: item.votes, ballotHash: item.ballotHash }));
+      for (const claim of claims) {
+        const tally = tallyClaimVotes(claim.claimId, ballotLikes);
+        if (tally.proven === tally.notProven && tally.proven > tally.insufficient) {
+          // Exact tie — invoke judge tiebreak
+          if (!judgeTiebreaks) judgeTiebreaks = {};
+          const tiebreakOutcome = await withJudgeTimeout(
+            judge.breakTiebreak(
+              caseId,
+              claim.claimId,
+              claims.map((c) => ({ claimId: c.claimId, summary: c.summary })),
+              ballots.map((b) => ({ votes: b.votes }))
+            ),
+            JUDGE_CALL_TIMEOUT_MS,
+            "breakTiebreak"
+          );
+          if (tiebreakOutcome.ok) {
+            judgeTiebreaks[claim.claimId] = tiebreakOutcome.data;
+          } else {
+            logger.warn("judge_tiebreak_timeout", {
+              caseId,
+              claimId: claim.claimId,
+              error: tiebreakOutcome.error
+            });
+            // Fallback: no tiebreak, claim becomes insufficient
+          }
+        }
+      }
+    }
+
+    const jurySize = juryMembers.length || (caseRecord.courtMode === "judge" ? 12 : config.rules.jurorPanelSize);
     const closeTime = new Date().toISOString();
     const verdict = await computeDeterministicVerdict({
       caseId,
       prosecutionAgentId: caseRecord.prosecutionAgentId,
       defenceAgentId: caseRecord.defenceAgentId,
       closedAtIso: closeTime,
-      jurySize: juryMembers.length || config.rules.jurorPanelSize,
+      jurySize,
       claims: claims.map((item) => ({
         claimId: item.claimId,
         requestedRemedy: item.requestedRemedy
@@ -545,8 +592,29 @@ async function closeCasePipeline(caseId: string): Promise<{
       submissionHashes: submissions.map((item) => item.contentHash),
       drandRound: caseRecord.drandRound ?? null,
       drandRandomness: caseRecord.drandRandomness ?? null,
-      poolSnapshotHash: caseRecord.poolSnapshotHash ?? null
+      poolSnapshotHash: caseRecord.poolSnapshotHash ?? null,
+      courtMode: caseRecord.courtMode,
+      judgeTiebreak: judgeTiebreaks
     });
+
+    // Judge mode: get remedy recommendation for prosecution wins.
+    // The remedy is advisory and stored on the case record only — it is intentionally
+    // excluded from the sealed verdict bundle so the bundle hash remains stable.
+    if (caseRecord.courtMode === "judge" && verdict.overallOutcome === "for_prosecution") {
+      const remedyOutcome = await withJudgeTimeout(
+        judge.recommendRemedy(caseId, caseRecord.summary, verdict.overallOutcome),
+        JUDGE_CALL_TIMEOUT_MS,
+        "recommendRemedy"
+      );
+      if (remedyOutcome.ok && remedyOutcome.data) {
+        setCaseRemedyRecommendation(db, caseId, remedyOutcome.data);
+      } else if (!remedyOutcome.ok) {
+        logger.warn("judge_remedy_timeout", {
+          caseId,
+          error: remedyOutcome.error
+        });
+      }
+    }
 
     if (verdict.inconclusive || !verdict.overallOutcome) {
       markCaseVoid(db, {
@@ -666,6 +734,7 @@ const sessionEngine = createSessionEngine({
   config,
   drand,
   logger,
+  judge,
   async onCaseReadyToClose(caseId: string) {
     await closeCasePipeline(caseId);
   },
@@ -845,6 +914,19 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           inviteStatus: namedDefendantCase ? "queued" : "none"
         });
 
+        // Apply global court mode to this case
+        const globalCourtMode = getRuntimeConfig(db, "court_mode") ?? "11-juror";
+        if (globalCourtMode === "judge") {
+          db.prepare(
+            `UPDATE cases SET court_mode = ?, judge_screening_status = ? WHERE case_id = ?`
+          ).run("judge", "pending", caseId);
+
+          // Override runtime stage to judge_screening
+          db.prepare(
+            `UPDATE case_runtime SET current_stage = ? WHERE case_id = ?`
+          ).run("judge_screening", caseId);
+        }
+
         saveUsedTreasuryTx(db, {
           txSig: treasuryTxSig,
           caseId,
@@ -854,11 +936,12 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
 
         persistInitialJurySelection(caseId, computedJury);
 
+        const filingStage = globalCourtMode === "judge" ? "judge_screening" : "pre_session";
         appendTranscriptEventInTransaction(db, {
           caseId,
           actorRole: "court",
           eventType: "payment_verified",
-          stage: "pre_session",
+          stage: filingStage,
           messageText: "Filing payment was verified and session scheduling has started.",
           payload: {
             treasuryTxSig,
@@ -1274,6 +1357,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    // Update soft cap mode (admin)
+    if (method === "POST" && pathname === "/api/internal/config/soft-cap-mode") {
+      assertSystemKey(req, config);
+      const body = await readJsonBody<{ mode: "warn" | "enforce" }>(req);
+      const mode = body.mode;
+      if (mode !== "warn" && mode !== "enforce") {
+        throw badRequest("MODE_INVALID", "mode must be 'warn' or 'enforce'.");
+      }
+      config.softCapMode = mode;
+      setRuntimeConfig(db, "soft_cap_mode", mode);
+      sendJson(res, 200, { softCapMode: config.softCapMode });
+      return;
+    }
+
+    // Update court mode (admin)
+    if (method === "POST" && pathname === "/api/internal/config/court-mode") {
+      assertSystemKey(req, config);
+      const body = await readJsonBody<{ mode?: string }>(req);
+      if (body.mode !== "11-juror" && body.mode !== "judge") {
+        throw badRequest("INVALID_COURT_MODE", "Court mode must be '11-juror' or 'judge'.");
+      }
+      setRuntimeConfig(db, "court_mode", body.mode);
+      sendJson(res, 200, { courtMode: body.mode });
+      return;
+    }
+
     // Admin status endpoint
     if (method === "GET" && pathname === "/api/internal/admin-status") {
       assertSystemKey(req, config);
@@ -1311,8 +1420,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         helius: { ready: heliusReady, hasApiKey: Boolean(config.heliusApiKey) },
         drand: { ready: drandReady, mode: config.drandMode },
         softDailyCaseCap: config.softDailyCaseCap,
+        softCapMode: config.softCapMode,
         jurorPanelSize: config.rules.jurorPanelSize,
-        courtMode: "11-juror",
+        courtMode: getRuntimeConfig(db, "court_mode") ?? "11-juror",
+        judgeAvailable: judge.isAvailable(),
         treasuryAddress: config.treasuryAddress,
         sealWorkerUrl: config.sealWorkerUrl,
         sealWorkerMode: config.sealWorkerMode,
@@ -1513,12 +1624,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const hydrated = await Promise.all(openRecords.map((item) => hydrateCase(item)));
       const scheduled = hydrated.filter((item) => item.status === "scheduled");
       const active = hydrated.filter((item) => item.status === "active");
+      const courtMode = getRuntimeConfig(db, "court_mode") ?? "11-juror";
+      const jurorCount = courtMode === "judge" ? 12 : config.rules.jurorPanelSize;
 
       sendJson(res, 200, {
         scheduled,
         active,
         softCapPerDay: config.softDailyCaseCap,
-        capWindowLabel: "Soft daily cap"
+        capWindowLabel: "Soft daily cap",
+        courtMode,
+        jurorCount
       });
       return;
     }

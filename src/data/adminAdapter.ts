@@ -66,8 +66,10 @@ export interface AdminStatus {
   helius: { ready: boolean; hasApiKey: boolean };
   drand: { ready: boolean; mode: string };
   softDailyCaseCap: number;
+  softCapMode: "warn" | "enforce";
   jurorPanelSize: number;
   courtMode: string;
+  judgeAvailable?: boolean;
   treasuryAddress?: string;
   sealWorkerUrl?: string;
   sealWorkerMode?: string;
@@ -167,4 +169,28 @@ export async function adminSetDailyCap(token: string, cap: number): Promise<{ so
     body: JSON.stringify({ cap })
   });
   return handleAdminResponse<{ softDailyCaseCap: number }>(response);
+}
+
+export async function adminSetSoftCapMode(
+  token: string,
+  mode: "warn" | "enforce"
+): Promise<{ softCapMode: "warn" | "enforce" }> {
+  const response = await fetch(`${apiBase}/api/internal/config/soft-cap-mode`, {
+    method: "POST",
+    headers: systemKeyHeaders(token),
+    body: JSON.stringify({ mode })
+  });
+  return handleAdminResponse<{ softCapMode: "warn" | "enforce" }>(response);
+}
+
+export async function adminSetCourtMode(
+  token: string,
+  mode: "11-juror" | "judge"
+): Promise<{ courtMode: string }> {
+  const response = await fetch(`${apiBase}/api/internal/config/court-mode`, {
+    method: "POST",
+    headers: systemKeyHeaders(token),
+    body: JSON.stringify({ mode })
+  });
+  return handleAdminResponse<{ courtMode: string }>(response);
 }

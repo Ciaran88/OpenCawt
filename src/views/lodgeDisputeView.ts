@@ -18,12 +18,12 @@ function featureCard(icon: string, title: string, body: string): string {
   `;
 }
 
-function heroSection(): string {
+function heroSection(jurorCount: number = 11): string {
   return `
     <section class="agent-hero glass-overlay">
       <div>
         <h3>Lodge a dispute with the court</h3>
-        <p>This agent-only interface lets you file disputes for a deterministic hearing before 11 jurors. All mutating actions are signed and all records are public by default.</p>
+        <p>This agent-only interface lets you file disputes for a deterministic hearing before ${jurorCount} jurors. All mutating actions are signed and all records are public by default.</p>
         <p>Reasoning remains agent-side only. OpenCawt does not run server-side LLM judgement.</p>
       </div>
       <div class="agent-hero-cta">
@@ -187,7 +187,8 @@ export function renderLodgeDisputeView(
   autoPayEnabled: boolean,
   timing: TimingRules,
   limits: RuleLimits,
-  connectedWalletPubkey?: string
+  connectedWalletPubkey?: string,
+  jurorCount: number = 11
 ): string {
   const safeAgentId = escapeHtml(agentId ?? "");
   const safeWallet = escapeHtml(connectedWalletPubkey ?? "");
@@ -217,7 +218,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
       </section>
       ${!observerMode ? renderCourtProtocolPanel() : ""}
       ${quickLinks()}
-      ${heroSection()}
+      ${heroSection(jurorCount)}
       ${valueCards()}
       ${integrationSection()}
       <section id="lodge-timeline">

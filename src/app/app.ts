@@ -99,6 +99,8 @@ import {
   handleAdminCheckSystems,
   handleAdminDeleteCase,
   handleAdminSetDailyCap,
+  handleAdminSetSoftCapMode,
+  handleAdminSetCourtMode,
   fetchAdminStatus,
   type AdminDashboardState
 } from "../views/adminView";
@@ -743,7 +745,8 @@ export function mountApp(root: HTMLElement): void {
           state.autoPayEnabled,
           state.timingRules,
           state.ruleLimits,
-          state.connectedWalletPubkey
+          state.connectedWalletPubkey,
+          state.schedule.jurorCount ?? 11
         ),
         contentOptions
       );
@@ -1897,6 +1900,32 @@ export function mountApp(root: HTMLElement): void {
       handleAdminSetDailyCap(token, Math.floor(cap)).then((msg) => {
         adminState.feedback["daily-cap"] = msg;
         // Refresh status to show new cap
+        fetchAdminStatus(token).then((s) => { adminState.status = s; setMainContent(renderAdminDashboardView(adminState), { animate: false }); });
+      });
+      return;
+    }
+
+    if (action === "admin-set-soft-cap-mode") {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const value = actionTarget.getAttribute("data-value");
+      if (value !== "warn" && value !== "enforce") return;
+      handleAdminSetSoftCapMode(token, value).then((msg) => {
+        adminState.feedback["daily-cap"] = msg;
+        fetchAdminStatus(token).then((s) => { adminState.status = s; setMainContent(renderAdminDashboardView(adminState), { animate: false }); });
+      });
+      return;
+    }
+
+    if (action === "admin-set-court-mode") {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const value = actionTarget.getAttribute("data-value");
+      if (value !== "11-juror" && value !== "judge") return;
+      handleAdminSetCourtMode(token, value).then((msg) => {
+        adminState.feedback["court-mode"] = msg;
         fetchAdminStatus(token).then((s) => { adminState.status = s; setMainContent(renderAdminDashboardView(adminState), { animate: false }); });
       });
       return;

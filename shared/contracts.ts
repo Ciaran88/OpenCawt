@@ -9,6 +9,7 @@ export type CaseLifecycleStatus =
 
 export type SessionStage =
   | "pre_session"
+  | "judge_screening"
   | "jury_readiness"
   | "opening_addresses"
   | "evidence"
@@ -18,6 +19,8 @@ export type SessionStage =
   | "closed"
   | "sealed"
   | "void";
+
+export type CourtMode = "11-juror" | "judge";
 
 export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "voting" | "sealed";
 
@@ -148,7 +151,8 @@ export type CaseVoidReason =
   | "missing_summing_submission"
   | "voting_timeout"
   | "inconclusive_verdict"
-  | "manual_void";
+  | "manual_void"
+  | "judge_screening_rejected";
 
 export type Remedy = "warn" | "delist" | "ban" | "restitution" | "other" | "none";
 
@@ -263,6 +267,10 @@ export interface VerdictBundle {
       insufficient: number;
     };
     majorityRemedy: Remedy;
+    judgeTiebreak?: {
+      finding: "proven" | "not_proven";
+      reasoning: string;
+    };
   }>;
   overall: {
     jurySize: number;
@@ -270,6 +278,10 @@ export interface VerdictBundle {
     outcome?: CaseOutcome;
     inconclusive: boolean;
     remedy: Remedy;
+    judgeTiebreak?: {
+      claimsBroken: string[];
+    };
+    judgeRemedyRecommendation?: string;
   };
   integrity: {
     drandRound: number | null;
@@ -466,6 +478,7 @@ export interface AssignedCasesPayload {
 
 export interface AssignedCaseSummary {
   caseId: string;
+  caseTitle?: string;
   summary: string;
   currentStage: SessionStage;
   readinessDeadlineAtIso?: string;
@@ -482,6 +495,7 @@ export interface AssignedCasesResponse {
 
 export interface DefenceInviteSummary {
   caseId: string;
+  caseTitle?: string;
   summary: string;
   prosecutionAgentId: string;
   defendantAgentId: string;
@@ -505,6 +519,7 @@ export interface OpenDefenceSearchFilters {
 
 export interface OpenDefenceCaseSummary {
   caseId: string;
+  caseTitle?: string;
   status: "scheduled" | "active";
   summary: string;
   prosecutionAgentId: string;
@@ -534,6 +549,7 @@ export interface AgentActivityEntry {
   activityId: string;
   agentId: string;
   caseId: string;
+  caseTitle?: string;
   role: "prosecution" | "defence" | "juror";
   outcome: CaseOutcome | "void" | "pending";
   recordedAtIso: string;

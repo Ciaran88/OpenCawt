@@ -6,6 +6,7 @@ import { renderJurorGrid } from "../components/jurorGrid";
 import { renderStatusPill, statusFromCase } from "../components/statusPill";
 import { renderStepper } from "../components/stepper";
 import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
 import { classifyAttachmentUrl } from "../util/media";
 import {
@@ -462,7 +463,7 @@ export function renderCaseDetailView(
     <section class="detail-top">
       <div>
         <div class="case-idline">
-          <span class="case-id">${escapeHtml(caseItem.id)}</span>
+          <span class="case-id">${escapeHtml(displayCaseLabel(caseItem))}</span>
           ${renderStatusPill(
             caseItem.status === "active" ? "Active" : "Scheduled",
             statusFromCase(caseItem.status)

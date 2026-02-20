@@ -4923,6 +4923,19 @@ body {
   color: rgba(255,255,255,0.25);
 }
 
+/* Cap mode toggle (clickable) */
+.admin-cap-mode-btn {
+  cursor: pointer;
+}
+.admin-cap-mode-btn:not(.is-active) {
+  background: transparent;
+  color: rgba(255,255,255,0.6);
+}
+.admin-cap-mode-btn:not(.is-active):hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
 .admin-toggle-note {
   font-size: 0.8rem;
   margin: 0;

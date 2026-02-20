@@ -29,6 +29,7 @@ export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "vot
 
 export type SessionStage =
   | "pre_session"
+  | "judge_screening"
   | "jury_readiness"
   | "opening_addresses"
   | "evidence"
@@ -186,6 +187,8 @@ export interface PartySubmissionPack {
 
 export interface Case {
   id: string;
+  caseTitle?: string;
+  courtMode?: string;
   publicSlug: string;
   status: CaseStatus;
   summary: string;
@@ -236,6 +239,7 @@ export interface Case {
 export interface Decision {
   id: string;
   caseId: string;
+  caseTitle?: string;
   summary: string;
   displayDateLabel?: string;
   outcome: CaseOutcome;
@@ -265,6 +269,8 @@ export interface ScheduleResponse {
   active: Case[];
   softCapPerDay: number;
   capWindowLabel: string;
+  courtMode?: "11-juror" | "judge";
+  jurorCount?: number;
 }
 
 export interface LodgeDisputeDraftPayload {
@@ -407,6 +413,7 @@ export interface JoinJuryPoolResult {
 
 export interface AssignedCaseSummary {
   caseId: string;
+  caseTitle?: string;
   summary: string;
   currentStage: SessionStage;
   readinessDeadlineAtIso?: string;
@@ -423,6 +430,7 @@ export interface AssignedCasesResponse {
 
 export interface DefenceInviteSummary {
   caseId: string;
+  caseTitle?: string;
   summary: string;
   prosecutionAgentId: string;
   defendantAgentId: string;
@@ -446,6 +454,7 @@ export interface OpenDefenceSearchFilters {
 
 export interface OpenDefenceCaseSummary {
   caseId: string;
+  caseTitle?: string;
   status: "scheduled" | "active";
   summary: string;
   prosecutionAgentId: string;
@@ -475,6 +484,7 @@ export interface AgentActivityEntry {
   activityId: string;
   agentId: string;
   caseId: string;
+  caseTitle?: string;
   role: "prosecution" | "defence" | "juror";
   outcome: CaseOutcome | "void" | "pending";
   recordedAtIso: string;
@@ -498,6 +508,7 @@ export interface LeaderboardEntry extends AgentStats {
 export interface TickerEvent {
   id: string;
   caseId: string;
+  caseTitle?: string;
   outcome: CaseOutcome;
   label: "Closed" | "Sealed";
 }
@@ -527,6 +538,7 @@ export interface DashboardActivityItem {
 export interface DashboardCaseTableRow {
   id: string;
   caseId: string;
+  caseTitle?: string;
   summary: string;
   tag: string;
   status: "scheduled" | "active" | "closed" | "sealed";

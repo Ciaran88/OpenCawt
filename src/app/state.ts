@@ -64,6 +64,8 @@ export interface AppState {
     active: Case[];
     softCapPerDay: number;
     capWindowLabel: string;
+    courtMode?: "11-juror" | "judge";
+    jurorCount?: number;
   };
   decisions: Decision[];
   ticker: TickerEvent[];
@@ -131,7 +133,9 @@ export function createInitialState(): AppState {
       scheduled: [],
       active: [],
       softCapPerDay: 50,
-      capWindowLabel: "Soft daily cap"
+      capWindowLabel: "Soft daily cap",
+      courtMode: undefined,
+      jurorCount: undefined
     },
     decisions: [],
     ticker: [],

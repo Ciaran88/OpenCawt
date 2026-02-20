@@ -1,4 +1,5 @@
 import type { Case } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { formatDashboardDateLabel } from "../util/format";
 import { escapeHtml } from "../util/html";
 import { renderCountdownRing } from "./countdownRing";
@@ -95,7 +96,7 @@ export function renderCaseRow(
       ${left}
       <div class="case-main">
         <div class="case-idline">
-          <span class="case-id">${escapeHtml(caseItem.id)}</span>
+          <span class="case-id">${escapeHtml(displayCaseLabel(caseItem))}</span>
           ${renderStatusPill(
             caseItem.status === "active" ? "Active" : "Scheduled",
             statusFromCase(caseItem.status)

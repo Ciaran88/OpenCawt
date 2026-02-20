@@ -18,6 +18,7 @@ import {
   markJurorReplaced,
   markJurorTimedOut,
   markSessionStarted,
+  setCaseJudgeScreeningResult,
   setJuryReadinessDeadlines,
   setVotingDeadlinesForActiveJurors,
   type CaseRecord,
@@ -26,6 +27,8 @@ import {
 import type { Db } from "../db/sqlite";
 import type { DrandClient } from "./drand";
 import { pickReplacementFromProof, selectJuryDeterministically } from "./jury";
+import type { JudgeService } from "./judge";
+import { JUDGE_CALL_TIMEOUT_MS, withJudgeTimeout } from "./judge";
 import { retrySealJob } from "./sealing";
 import type { Logger } from "./observability";
 
@@ -34,6 +37,7 @@ interface SessionEngineDeps {
   config: AppConfig;
   drand: DrandClient;
   logger: Logger;
+  judge: JudgeService;
   onCaseReadyToClose: (caseId: string) => Promise<void>;
   onCaseVoided?: (caseId: string) => Promise<void> | void;
   onDefenceInviteTick?: (caseRecord: CaseRecord, nowIso: string) => Promise<void> | void;
@@ -211,7 +215,14 @@ function setStage(
   nowIso: string,
   deadlineIso: string | null
 ): void {
-  const status = stage === "voting" ? "voting" : stage === "closed" ? "closed" : "jury_selected";
+  const status =
+    stage === "voting"
+      ? "voting"
+      : stage === "closed"
+        ? "closed"
+        : stage === "judge_screening" || stage === "pre_session"
+          ? "filed"
+          : "jury_selected";
   markCaseSessionStage(deps.db, {
     caseId: caseRecord.caseId,
     stage,
@@ -329,6 +340,80 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
     return;
   }
 
+  // ── Judge screening stage (judge mode only) ────────────────────────────────
+  if (runtime.currentStage === "judge_screening") {
+    if (caseRecord.courtMode !== "judge") {
+      // Safety: non-judge case shouldn't be in screening; advance to pre_session
+      setStage(deps, caseRecord, "pre_session", nowIso, null);
+      return;
+    }
+
+    try {
+      const screenOutcome = await withJudgeTimeout(
+        deps.judge.screenCase(caseRecord.caseId, caseRecord.summary),
+        JUDGE_CALL_TIMEOUT_MS,
+        "screenCase"
+      );
+      if (!screenOutcome.ok) {
+        // Timeout or rejection — let the outer catch handle fallback
+        throw new Error(screenOutcome.error);
+      }
+      const result = screenOutcome.data;
+
+      setCaseJudgeScreeningResult(deps.db, {
+        caseId: caseRecord.caseId,
+        status: result.approved ? "approved" : "rejected",
+        reason: result.reason,
+        caseTitle: result.caseTitle
+      });
+
+      appendTranscriptEvent(deps.db, {
+        caseId: caseRecord.caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage: "judge_screening",
+        messageText: result.approved
+          ? `Case approved by judge screening. Title: "${result.caseTitle}"`
+          : `Case rejected by judge screening: ${result.reason ?? "No reason provided."}`,
+        payload: {
+          screeningResult: result.approved ? "approved" : "rejected",
+          caseTitle: result.caseTitle,
+          reason: result.reason
+        }
+      });
+
+      if (result.approved) {
+        setStage(deps, caseRecord, "pre_session", nowIso, null);
+      } else {
+        voidCase(
+          deps,
+          caseRecord,
+          "judge_screening_rejected",
+          nowIso,
+          `Case rejected during judge screening: ${result.reason ?? "Spam or insufficient merit."}`
+        );
+      }
+    } catch (error) {
+      deps.logger.warn("judge_screening_fallback", {
+        caseId: caseRecord.caseId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      // Fallback: auto-approve and advance (graceful degradation)
+      setCaseJudgeScreeningResult(deps.db, {
+        caseId: caseRecord.caseId,
+        status: "approved",
+        reason: "Judge service unavailable; auto-approved via fallback.",
+        caseTitle: caseRecord.summary.length > 40
+          ? caseRecord.summary.slice(0, 37) + "..."
+          : caseRecord.summary || "Untitled Case"
+      });
+
+      setStage(deps, caseRecord, "pre_session", nowIso, null);
+    }
+    return;
+  }
+
   if (runtime.currentStage === "pre_session") {
     if (!caseRecord.defenceAgentId && caseRecord.defendantAgentId && deps.onDefenceInviteTick) {
       try {
@@ -402,7 +487,8 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
 
     const refreshed = listJuryPanelMembers(deps.db, caseRecord.caseId);
     const readyCount = refreshed.filter((member) => member.memberStatus === "ready").length;
-    if (readyCount >= deps.config.rules.jurorPanelSize) {
+    const requiredJurors = caseRecord.courtMode === "judge" ? 12 : deps.config.rules.jurorPanelSize;
+    if (readyCount >= requiredJurors) {
       const deadlineIso = addSeconds(nowIso, deps.config.rules.stageSubmissionSeconds);
       setStage(deps, caseRecord, "opening_addresses", nowIso, deadlineIso);
     }
@@ -450,7 +536,8 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
 
   if (runtime.currentStage === "voting") {
     const ballots = listBallotsByCase(deps.db, caseRecord.caseId);
-    if (ballots.length >= deps.config.rules.jurorPanelSize) {
+    const requiredBallots = caseRecord.courtMode === "judge" ? 12 : deps.config.rules.jurorPanelSize;
+    if (ballots.length >= requiredBallots) {
       await deps.onCaseReadyToClose(caseRecord.caseId);
       return;
     }

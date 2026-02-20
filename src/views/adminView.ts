@@ -6,7 +6,9 @@ import {
   adminCheckSystems,
   adminDeleteCase,
   adminGetStatus,
+  adminSetCourtMode,
   adminSetDailyCap,
+  adminSetSoftCapMode,
   AdminApiError,
   type AdminCheckResult,
   type AdminStatus
@@ -151,18 +153,26 @@ function renderStatusSection(
 
 // --- Court mode toggle ---
 
-function renderCourtModeSection(): string {
+function renderCourtModeSection(status: AdminStatus | null): string {
+  const current = status?.courtMode ?? "11-juror";
+  const jurorActive = current === "11-juror";
+  const judgeActive = current === "judge";
+  const judgeAvailable = status?.judgeAvailable ?? false;
+  const warning = judgeActive && !judgeAvailable
+    ? `<p class="admin-error">Warning: Judge service is not available. Cases will auto-approve screening and ties will resolve as insufficient.</p>`
+    : "";
   return `
     <div class="admin-section-body">
       <div class="admin-toggle-row">
         <label class="admin-toggle-label">Court Mode</label>
         <div class="admin-toggle-group">
-          <button class="admin-mode-btn is-active" disabled>11 Juror</button>
-          <button class="admin-mode-btn is-disabled" disabled title="Not yet implemented">Judge Mode</button>
+          <button type="button" class="admin-mode-btn ${jurorActive ? "is-active" : ""}" data-action="admin-set-court-mode" data-value="11-juror">11 Juror</button>
+          <button type="button" class="admin-mode-btn ${judgeActive ? "is-active" : ""}" data-action="admin-set-court-mode" data-value="judge">Judge Mode</button>
         </div>
       </div>
+      ${warning}
       <p class="admin-toggle-note muted">
-        Placeholder toggle for a planned 12 Juror + LLM Judge hybrid mode. Not yet implemented.
+        Mode changes only affect new cases. Existing cases retain their original court mode.
       </p>
     </div>
   `;
@@ -250,7 +260,13 @@ function renderDeleteCaseSection(feedback?: string): string {
 
 // --- Daily cap ---
 
-function renderDailyCapSection(currentCap: number | null, feedback?: string): string {
+function renderDailyCapSection(
+  currentCap: number | null,
+  softCapMode: "warn" | "enforce",
+  feedback?: string
+): string {
+  const warnActive = softCapMode === "warn";
+  const enforceActive = softCapMode === "enforce";
   return `
     <div class="admin-section-body">
       <p class="muted">Overrides the soft daily case filing cap at runtime. Takes effect immediately and persists across restarts.</p>
@@ -266,6 +282,14 @@ function renderDailyCapSection(currentCap: number | null, feedback?: string): st
         />
         <button class="btn btn-sm btn-primary" data-action="admin-set-daily-cap" data-input="admin-daily-cap-input">Update</button>
       </div>
+      <div class="admin-toggle-row">
+        <label class="admin-toggle-label">Cap mode</label>
+        <div class="admin-toggle-group admin-cap-mode-toggle">
+          <button type="button" class="admin-mode-btn admin-cap-mode-btn ${warnActive ? "is-active" : ""}" data-action="admin-set-soft-cap-mode" data-value="warn">Warn</button>
+          <button type="button" class="admin-mode-btn admin-cap-mode-btn ${enforceActive ? "is-active" : ""}" data-action="admin-set-soft-cap-mode" data-value="enforce">Enforce</button>
+        </div>
+      </div>
+      <p class="admin-toggle-note muted">Warn: allow filings past the cap with a warning; Enforce: block filings when the cap is reached.</p>
       ${currentCap !== null ? `<p class="admin-meta">Current cap: <strong>${currentCap}</strong></p>` : ""}
       ${feedback ? `<p class="admin-feedback">${escapeAdminHtml(feedback)}</p>` : ""}
     </div>
@@ -303,7 +327,7 @@ export function renderAdminDashboardView(state: AdminDashboardState): string {
 
         <div class="admin-section">
           <h3 class="admin-section-title">Court Mode</h3>
-          ${renderCourtModeSection()}
+          ${renderCourtModeSection(state.status)}
         </div>
 
         <div class="admin-section">
@@ -313,7 +337,7 @@ export function renderAdminDashboardView(state: AdminDashboardState): string {
 
         <div class="admin-section">
           <h3 class="admin-section-title">Daily Case Cap</h3>
-          ${renderDailyCapSection(cap, state.feedback["daily-cap"])}
+          ${renderDailyCapSection(cap, state.status?.softCapMode ?? "warn", state.feedback["daily-cap"])}
         </div>
 
         <div class="admin-section">
@@ -415,6 +439,30 @@ export async function handleAdminSetDailyCap(token: string, cap: number): Promis
   try {
     const result = await adminSetDailyCap(token, cap);
     return `Daily cap updated to ${result.softDailyCaseCap}.`;
+  } catch (err) {
+    return err instanceof AdminApiError ? err.message : "Action failed.";
+  }
+}
+
+export async function handleAdminSetSoftCapMode(
+  token: string,
+  mode: "warn" | "enforce"
+): Promise<string> {
+  try {
+    const result = await adminSetSoftCapMode(token, mode);
+    return `Cap mode set to ${result.softCapMode}.`;
+  } catch (err) {
+    return err instanceof AdminApiError ? err.message : "Action failed.";
+  }
+}
+
+export async function handleAdminSetCourtMode(
+  token: string,
+  mode: "11-juror" | "judge"
+): Promise<string> {
+  try {
+    const result = await adminSetCourtMode(token, mode);
+    return `Court mode set to ${result.courtMode}. New cases will use this mode.`;
   } catch (err) {
     return err instanceof AdminApiError ? err.message : "Action failed.";
   }

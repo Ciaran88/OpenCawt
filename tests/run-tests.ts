@@ -1257,6 +1257,20 @@ async function testDefenceCutoffVoiding() {
       error: () => undefined,
       debug: () => undefined
     } as any,
+    judge: {
+      async screenCase(_caseId: string, summary: string) {
+        return { approved: true, caseTitle: summary.slice(0, 37) + "..." };
+      },
+      async breakTiebreak(_caseId: string, _targetClaimId: string) {
+        return { finding: "not_proven" as const, reasoning: "stub" };
+      },
+      async recommendRemedy() {
+        return "";
+      },
+      isAvailable() {
+        return true;
+      }
+    },
     async onCaseReadyToClose() {
       return;
     }

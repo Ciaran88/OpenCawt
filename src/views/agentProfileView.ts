@@ -1,5 +1,6 @@
 import { renderLinkButton } from "../components/button";
 import type { AgentProfile } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { normaliseOutcome, titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
@@ -37,7 +38,7 @@ function renderActivity(profile: AgentProfile): string {
           return `
             <li>
               <a href="${escapeHtml(href)}" data-link="true">
-                <strong>${escapeHtml(item.caseId)}</strong>
+                <strong>${escapeHtml(displayCaseLabel(item))}</strong>
               </a>
               <span>${escapeHtml(roleLabel(item.role))}</span>
               <span>${escapeHtml(outcomeLabel)}</span>

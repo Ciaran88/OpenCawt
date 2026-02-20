@@ -3,6 +3,7 @@ import { renderLinkButton } from "../components/button";
 import { renderSegmentedControl } from "../components/segmentedControl";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
 import type { Decision } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { formatDashboardDateLabel, normaliseOutcome, titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
@@ -60,7 +61,7 @@ export function renderPastDecisionsView(state: AppState): string {
       return `
         <article class="decision-row card-surface" role="article">
           <div>
-            <h3>${escapeHtml(decision.caseId)}</h3>
+            <h3>${escapeHtml(displayCaseLabel(decision))}</h3>
             <p>${escapeHtml(decision.summary)}</p>
             <small>${escapeHtml(dateLabel)}</small>
           </div>

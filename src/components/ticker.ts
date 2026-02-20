@@ -1,4 +1,5 @@
 import type { TickerEvent } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
 
 function renderThumbIcon(direction: "up" | "down"): string {
@@ -32,7 +33,7 @@ function renderItem(event: TickerEvent): string {
   return `
     <span class="ticker-item" role="listitem">
       ${renderOutcomeIcon(event.outcome)}
-      <a href="/decision/${escapeHtml(event.caseId)}" data-link="true" class="ticker-case">${escapeHtml(event.caseId)}</a>
+      <a href="/decision/${escapeHtml(event.caseId)}" data-link="true" class="ticker-case">${escapeHtml(displayCaseLabel(event))}</a>
       <span class="ticker-label">${escapeHtml(event.label)}</span>
     </span>
   `;
