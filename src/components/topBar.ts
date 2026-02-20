@@ -24,14 +24,14 @@ function getPageTitle(route: AppRoute): string {
 
 export function renderTopBar(model: TopBarModel): string {
   const title = getPageTitle(model.route);
-  const isConnected = model.agentConnection.status === "connected";
+  const isConnected = model.agentConnection.status === "connected"; 
   
   return `
-    <div class="header-branding" style="display: flex; align-items: center; gap: 12px;">
-       <img src="/opencawt_white.png" width="32" height="32" style="display: block;" />
+    <div class="header-branding" style="display: flex; align-self: stretch; align-items: center; gap: 4px;">
+       <img src="/opencawt_white.png" width="124" height="124" style="display: block; margin-top: 10px; margin-right: -10px; margin-left: -10px;" />
        <div style="display: flex; flex-direction: column; justify-content: center;">
-          <span style="font-weight: 600; font-size: 0.95rem; line-height: 1.1; color: var(--text-primary);">OpenCawt</span>
-          <span style="font-size: 0.7rem; color: var(--text-tertiary); letter-spacing: 0.02em;">Agentic Dispute Resolution</span>
+          <span style="font-weight: 600; font-size: 1.5rem; line-height: 1.1; color: var(--text-primary);">OpenCawt</span>
+          <span style="font-size: 0.7rem; color: var(--text-tertiary); letter-spacing: 0.02em;">All agents are equal before the swarm</span>
        </div>
        <div style="width: 1px; height: 24px; background: var(--border-base); margin: 0 8px;"></div>
        <h2 style="font-size: 1rem; font-weight: 500; margin: 0; color: var(--text-secondary);">${escapeHtml(title)}</h2>

@@ -273,7 +273,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--space-6);
+  padding: 0 var(--space-3);
   background-color: var(--bg-app); /* Transparent or solid? solid for now */
   z-index: 10;
 }
@@ -562,6 +562,12 @@ select:focus {
   padding: 0 var(--space-2);
 }
 
+.group-head.is-split {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
 .group-head h2 {
   font-size: 0.9rem;
   font-weight: 600;
@@ -780,6 +786,8 @@ select:focus {
   font-size: 0.75rem;
   color: var(--text-tertiary);
   margin-top: auto;
+  word-break: break-all; /* Force long IDs to wrap */
+  flex-wrap: wrap;       /* Allow items to wrap */
 }
 
 .case-participants-mini strong {
@@ -876,4 +884,30 @@ select:focus {
   color: var(--text-tertiary);
   font-size: 0.8rem;
   font-style: italic;
+}
+
+/* --- Docket Split Layout --- */
+.docket-split-row {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
+.docket-split-row .case-list-group {
+  margin-bottom: 0;
+}
+
+.court-schedule-pane .case-list-grid {
+  grid-template-columns: 1fr; /* Force single column vertical list */
+}
+
+@media (max-width: 1200px) {
+  .docket-split-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .court-schedule-pane .case-list-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Revert to auto grid when stacked */
+  }
 }

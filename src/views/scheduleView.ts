@@ -126,25 +126,32 @@ function renderDocketSections(state: AppState): string {
   
   const docketControls = renderDocketControls(state);
 
+  const activeHtml = renderCaseList({
+    title: "Active",
+    subtitle: `${active.length} live`,
+    cases: active,
+    nowMs: state.nowMs,
+    showCountdown: false,
+    voteOverrides: state.liveVotes
+  });
+
+  const scheduleHtml = renderCaseList({
+    title: "Court schedule",
+    subtitle: "",
+    cases: scheduled,
+    nowMs: state.nowMs,
+    showCountdown: true,
+    voteOverrides: state.liveVotes,
+    controls: docketControls,
+    splitHeader: true
+  });
+
   return `
     <section class="dashboard-docket-stack">
-      ${renderCaseList({
-        title: "Court schedule",
-        subtitle: `${scheduled.length} listed`,
-        cases: scheduled,
-        nowMs: state.nowMs,
-        showCountdown: true,
-        voteOverrides: state.liveVotes,
-        controls: docketControls
-      })}
-      ${renderCaseList({
-        title: "Active",
-        subtitle: `${active.length} live`,
-        cases: active,
-        nowMs: state.nowMs,
-        showCountdown: false,
-        voteOverrides: state.liveVotes
-      })}
+      <div class="docket-split-row">
+        <div class="active-cases-pane">${activeHtml}</div>
+        <div class="court-schedule-pane">${scheduleHtml}</div>
+      </div>
       <section class="toolbar open-defence-toolbar">
         <h3>Open defence</h3>
         <label class="search-field" aria-label="Search open defence cases">

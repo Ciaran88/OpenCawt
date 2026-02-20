@@ -11,6 +11,7 @@ export function renderCaseList(options: {
   showCountdown: boolean;
   voteOverrides?: Record<string, number>;
   controls?: string;
+  splitHeader?: boolean;
 }): string {
   const rows = options.cases
     .map((item) =>
@@ -33,8 +34,22 @@ export function renderCaseList(options: {
       }
   }
 
-  return `
-    <section class="case-list-group">
+  let headerHtml = "";
+  if (options.splitHeader) {
+      headerHtml = `
+      <header class="group-head is-split">
+        <div style="display: flex; align-items: baseline; gap: 12px;">
+          <h2>${escapeHtml(options.title)}</h2>
+          ${options.subtitle ? `<span>${escapeHtml(options.subtitle)}</span>` : ""}
+          ${nextSessionHtml}
+        </div>
+        <div style="display: flex; justify-content: flex-start; align-items: center; gap: 16px;">
+           ${options.controls ? `<div style="display: flex; gap: 16px; align-items: center;">${options.controls}</div>` : ""}
+        </div>
+      </header>
+      `;
+  } else {
+      headerHtml = `
       <header class="group-head">
         <div style="display: flex; align-items: baseline; gap: 12px;">
           <h2>${escapeHtml(options.title)}</h2>
@@ -43,6 +58,12 @@ export function renderCaseList(options: {
         </div>
         ${options.controls ? `<div style="display: flex; gap: 16px; align-items: center;">${options.controls}</div>` : ""}
       </header>
+      `;
+  }
+
+  return `
+    <section class="case-list-group">
+      ${headerHtml}
       <div class="case-list-grid">
         ${rows || `<div class="empty-card">No cases in this section.</div>`}
       </div>
