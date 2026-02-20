@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, extname } from "node:path";
 import { canonicalHashHex } from "../shared/hash";
@@ -28,6 +28,7 @@ import {
   appendTranscriptEventInTransaction,
   claimDefenceAssignment,
   countActiveAgentCapabilities,
+  getAgent,
   getAgentProfile,
   getCaseIntegrityDiagnostics,
   confirmJurorReady,
@@ -66,6 +67,12 @@ import {
   revokeAgentCapabilityByHash,
   saveUsedTreasuryTx,
   setAgentBanned,
+  setAgentFilingBanned,
+  setAgentDefenceBanned,
+  setAgentJuryBanned,
+  deleteCaseById,
+  getRuntimeConfig,
+  setRuntimeConfig,
   setCaseFiled,
   setCaseSealHashes,
   setCaseJurySelected,
@@ -88,7 +95,7 @@ import {
   verifySignedMutation
 } from "./services/auth";
 import { createDrandClient } from "./services/drand";
-import { ApiError, badRequest, conflict, notFound, unauthorised } from "./services/errors";
+import { ApiError, badRequest, conflict, forbidden, notFound, unauthorised } from "./services/errors";
 import {
   completeIdempotency,
   readIdempotencyKey,
@@ -149,6 +156,18 @@ for (const historicalCase of listCasesByStatuses(db, ["closed", "sealed", "void"
   syncCaseReputation(db, historicalCase);
 }
 rebuildAllAgentStats(db);
+
+// Apply runtime config overrides (persisted daily cap, etc.)
+const savedDailyCap = getRuntimeConfig(db, "daily_cap");
+if (savedDailyCap !== null) {
+  const parsed = Number(savedDailyCap);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    config.softDailyCaseCap = parsed;
+  }
+}
+
+// In-memory rate limiter for admin auth attempts (ip -> { count, resetAt })
+const adminAuthAttempts = new Map<string, { count: number; resetAt: number }>();
 
 const closingCases = new Set<string>();
 
@@ -1141,6 +1160,149 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    // Admin panel authentication — returns systemApiKey as bearer token on success
+    if (method === "POST" && pathname === "/api/internal/admin-auth") {
+      const clientIp = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "unknown");
+      const now = Date.now();
+      const attempt = adminAuthAttempts.get(clientIp);
+      if (attempt && now < attempt.resetAt && attempt.count >= 5) {
+        throw unauthorised("ADMIN_AUTH_RATE_LIMITED", "Too many failed attempts. Try again later.");
+      }
+      const body = await readJsonBody<{ password: string }>(req);
+      const provided = String(body.password ?? "");
+      const expected = config.adminPanelPassword;
+      const match =
+        provided.length === expected.length &&
+        timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+      if (!match) {
+        const cur = adminAuthAttempts.get(clientIp);
+        adminAuthAttempts.set(clientIp, {
+          count: (cur?.count ?? 0) + 1,
+          resetAt: now + 15 * 60 * 1000
+        });
+        throw unauthorised("ADMIN_AUTH_INVALID", "Invalid admin password.");
+      }
+      adminAuthAttempts.delete(clientIp);
+      sendJson(res, 200, { token: config.systemApiKey });
+      return;
+    }
+
+    // Agent role-specific bans
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "agents" &&
+      segments[4] === "ban-filing"
+    ) {
+      assertSystemKey(req, config);
+      const agentId = decodeURIComponent(segments[3]);
+      const body = await readJsonBody<{ banned: boolean }>(req);
+      if (typeof body.banned !== "boolean") {
+        throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
+      }
+      setAgentFilingBanned(db, { agentId, banned: body.banned });
+      sendJson(res, 200, { agentId, bannedFromFiling: body.banned });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "agents" &&
+      segments[4] === "ban-defence"
+    ) {
+      assertSystemKey(req, config);
+      const agentId = decodeURIComponent(segments[3]);
+      const body = await readJsonBody<{ banned: boolean }>(req);
+      if (typeof body.banned !== "boolean") {
+        throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
+      }
+      setAgentDefenceBanned(db, { agentId, banned: body.banned });
+      sendJson(res, 200, { agentId, bannedFromDefence: body.banned });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "agents" &&
+      segments[4] === "ban-jury"
+    ) {
+      assertSystemKey(req, config);
+      const agentId = decodeURIComponent(segments[3]);
+      const body = await readJsonBody<{ banned: boolean }>(req);
+      if (typeof body.banned !== "boolean") {
+        throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
+      }
+      setAgentJuryBanned(db, { agentId, banned: body.banned });
+      sendJson(res, 200, { agentId, bannedFromJury: body.banned });
+      return;
+    }
+
+    // Delete a case by ID (admin)
+    if (
+      method === "DELETE" &&
+      segments.length === 4 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "cases"
+    ) {
+      assertSystemKey(req, config);
+      const caseId = decodeURIComponent(segments[3]);
+      deleteCaseById(db, caseId);
+      sendJson(res, 200, { caseId, deleted: true });
+      return;
+    }
+
+    // Update daily case cap (admin)
+    if (method === "POST" && pathname === "/api/internal/config/daily-cap") {
+      assertSystemKey(req, config);
+      const body = await readJsonBody<{ cap: number }>(req);
+      const cap = Number(body.cap);
+      if (!Number.isFinite(cap) || cap < 1) {
+        throw badRequest("CAP_INVALID", "cap must be a positive integer.");
+      }
+      config.softDailyCaseCap = Math.floor(cap);
+      setRuntimeConfig(db, "daily_cap", String(Math.floor(cap)));
+      sendJson(res, 200, { softDailyCaseCap: config.softDailyCaseCap });
+      return;
+    }
+
+    // Admin status endpoint
+    if (method === "GET" && pathname === "/api/internal/admin-status") {
+      assertSystemKey(req, config);
+      // DB connectivity: attempt a trivial query
+      let dbReady = false;
+      try {
+        db.prepare("SELECT 1").get();
+        dbReady = true;
+      } catch {
+        dbReady = false;
+      }
+      // Railway worker: check if seal worker URL is configured and mode is http
+      const workerReady = config.sealWorkerMode === "http" && Boolean(config.sealWorkerUrl);
+      // Helius: check if API key is present
+      const heliusReady = Boolean(config.heliusApiKey);
+      // Drand: check if mode is http (stub means not connected)
+      const drandReady = config.drandMode === "http";
+      sendJson(res, 200, {
+        db: { ready: dbReady },
+        railwayWorker: { ready: workerReady, mode: config.sealWorkerMode },
+        helius: { ready: heliusReady, hasApiKey: Boolean(config.heliusApiKey) },
+        drand: { ready: drandReady, mode: config.drandMode },
+        softDailyCaseCap: config.softDailyCaseCap,
+        jurorPanelSize: config.rules.jurorPanelSize,
+        courtMode: "11-juror"
+      });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/openclaw/tools") {
       sendJson(res, 200, {
         tools: OPENCAWT_OPENCLAW_TOOLS.map(toOpenClawParameters)
@@ -1461,6 +1623,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw badRequest("AGENT_ID_MISMATCH", "Payload agentId must match signing identity.");
           }
 
+          const juryAgent = getAgent(db, verified.agentId);
+          if (juryAgent?.bannedFromJury) {
+            throw forbidden("AGENT_BANNED_FROM_JURY", "This agent is banned from serving on the jury.");
+          }
+
           upsertAgent(db, body.agentId, true);
           setJurorAvailability(db, {
             agentId: body.agentId,
@@ -1525,6 +1692,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         async handler(verified) {
           if (body.prosecutionAgentId !== verified.agentId) {
             throw badRequest("AGENT_ID_MISMATCH", "Prosecution agent must match signing identity.");
+          }
+
+          const filingAgent = getAgent(db, verified.agentId);
+          if (filingAgent?.bannedFromFiling) {
+            throw forbidden("AGENT_BANNED_FROM_FILING", "This agent is banned from submitting disputes.");
           }
 
           if (!body.claimSummary?.trim() && (!body.claims || body.claims.length === 0)) {
@@ -1642,6 +1814,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         caseId,
         actionType: "volunteer_defence",
         async handler(verified) {
+          const defenceAgent = getAgent(db, verified.agentId);
+          if (defenceAgent?.bannedFromDefence) {
+            throw forbidden("AGENT_BANNED_FROM_DEFENCE", "This agent is banned from acting as defence.");
+          }
           upsertAgent(db, verified.agentId, true);
           ensureCaseExists(caseId);
           const claim = claimDefenceAssignment(db, {

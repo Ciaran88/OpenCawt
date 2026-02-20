@@ -4658,3 +4658,238 @@ body {
   .ml-pi-row { grid-template-columns: repeat(4, 1fr); }
 }
 /* ─────────────────────────────────────────────────────────────────────────── */
+
+/* ─── Admin Panel ─────────────────────────────────────────────────────────── */
+
+.admin-frame {
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+.admin-login {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-6) var(--space-4);
+}
+
+.admin-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 360px;
+}
+
+.admin-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #8a8a9a);
+}
+
+.admin-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line, rgba(255,255,255,0.15));
+  background: rgba(255,255,255,0.07);
+  color: var(--ink);
+  font-size: 0.95rem;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color var(--motion-fast);
+}
+
+.admin-input:focus {
+  border-color: var(--brand-blue);
+}
+
+.admin-input-inline {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-input-number {
+  max-width: 120px;
+  flex: none;
+}
+
+.admin-submit-btn {
+  margin-top: var(--space-2);
+}
+
+.admin-error {
+  color: #ff6b6b;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.admin-feedback {
+  color: var(--brand-blue);
+  font-size: 0.85rem;
+  margin: var(--space-2) 0 0;
+}
+
+.admin-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.admin-section {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.admin-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #8a8a9a);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin: 0;
+}
+
+.admin-section-body {
+  padding: var(--space-4);
+}
+
+.admin-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.admin-status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-status-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-muted, #8a8a9a);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.admin-status-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  width: fit-content;
+}
+
+.admin-status-pill.is-ready {
+  background: rgba(52, 211, 153, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.35);
+}
+
+.admin-status-pill.is-error {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.admin-status-detail {
+  font-size: 0.72rem;
+  color: var(--ink-muted, #8a8a9a);
+}
+
+.admin-meta {
+  font-size: 0.82rem;
+  color: var(--ink-muted, #8a8a9a);
+  margin: 0;
+}
+
+.admin-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Court mode toggle */
+.admin-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.admin-toggle-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-toggle-group {
+  display: flex;
+  gap: 2px;
+  background: rgba(0,0,0,0.2);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+}
+
+.admin-mode-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: not-allowed;
+  transition: background var(--motion-fast);
+}
+
+.admin-mode-btn.is-active {
+  background: var(--brand-blue);
+  color: #fff;
+}
+
+.admin-mode-btn.is-disabled {
+  background: transparent;
+  color: rgba(255,255,255,0.25);
+}
+
+.admin-toggle-note {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.admin-signout-btn {
+  margin-left: auto;
+}
+
+/* Small danger button variant */
+.btn-danger {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.btn-danger:hover {
+  background: rgba(248, 113, 113, 0.25);
+}
+
+@media (max-width: 600px) {
+  .admin-status-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-toggle-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+/* ─────────────────────────────────────────────────────────────────────────── */

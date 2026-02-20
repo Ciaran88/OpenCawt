@@ -87,6 +87,20 @@ import {
 } from "../views/lodgeDisputeView";
 import { renderPastDecisionsView } from "../views/pastDecisionsView";
 import { renderScheduleView } from "../views/scheduleView";
+import {
+  renderAdminLoginView,
+  renderAdminDashboardView,
+  getAdminToken,
+  clearAdminToken,
+  handleAdminLogin,
+  handleAdminBanFiling,
+  handleAdminBanDefence,
+  handleAdminBanJury,
+  handleAdminDeleteCase,
+  handleAdminSetDailyCap,
+  fetchAdminStatus,
+  type AdminDashboardState
+} from "../views/adminView";
 
 interface AppDom {
   header: HTMLElement;
@@ -154,6 +168,13 @@ export function mountApp(root: HTMLElement): void {
   let caseLiveTimer: number | null = null;
   let liveCaseId: string | null = null;
   let filingEstimateTimer: number | null = null;
+
+  // Admin panel state — isolated from global app state
+  const adminState: AdminDashboardState = {
+    status: null,
+    statusLoading: false,
+    feedback: {}
+  };
 
   const simulation = createSimulation(
     {
@@ -787,6 +808,24 @@ export function mountApp(root: HTMLElement): void {
         }
         setMainContent(renderDecisionDetailView(decision, transcript), contentOptions);
       }
+    } else if (route.name === "admin") {
+      const token = getAdminToken();
+      if (!token) {
+        setMainContent(renderAdminLoginView(), contentOptions);
+      } else {
+        if (!adminState.status && !adminState.statusLoading) {
+          adminState.statusLoading = true;
+          setMainContent(renderAdminDashboardView(adminState), contentOptions);
+          fetchAdminStatus(token).then((s) => {
+            adminState.status = s;
+            adminState.statusLoading = false;
+            setMainContent(renderAdminDashboardView(adminState), { animate: false });
+          });
+        } else {
+          setMainContent(renderAdminDashboardView(adminState), contentOptions);
+        }
+      }
+      return;
     }
 
     patchCountdownRings(dom.main, state.nowMs);
@@ -1765,6 +1804,86 @@ export function mountApp(root: HTMLElement): void {
         void renderRoute();
       }
     }
+
+    // Admin panel actions
+    if (action === "admin-signout") {
+      clearAdminToken();
+      adminState.status = null;
+      adminState.feedback = {};
+      setMainContent(renderAdminLoginView());
+      return;
+    }
+
+    const adminActionMap: Record<string, { key: string; banned: boolean; handler: (token: string, id: string, banned: boolean) => Promise<string> }> = {
+      "admin-ban-filing":    { key: "ban-filing",  banned: true,  handler: handleAdminBanFiling },
+      "admin-unban-filing":  { key: "ban-filing",  banned: false, handler: handleAdminBanFiling },
+      "admin-ban-defence":   { key: "ban-defence", banned: true,  handler: handleAdminBanDefence },
+      "admin-unban-defence": { key: "ban-defence", banned: false, handler: handleAdminBanDefence },
+      "admin-ban-jury":      { key: "ban-jury",    banned: true,  handler: handleAdminBanJury },
+      "admin-unban-jury":    { key: "ban-jury",    banned: false, handler: handleAdminBanJury }
+    };
+
+    if (action && action in adminActionMap) {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const cfg = adminActionMap[action];
+      const inputId = actionTarget.getAttribute("data-input");
+      const inputEl = inputId ? (document.getElementById(inputId) as HTMLInputElement | null) : null;
+      const agentId = inputEl?.value.trim() ?? "";
+      if (!agentId) {
+        adminState.feedback[cfg.key] = "Please enter an agent ID.";
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+        return;
+      }
+      cfg.handler(token, agentId, cfg.banned).then((msg) => {
+        adminState.feedback[cfg.key] = msg;
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+      });
+      return;
+    }
+
+    if (action === "admin-delete-case") {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const inputId = actionTarget.getAttribute("data-input");
+      const inputEl = inputId ? (document.getElementById(inputId) as HTMLInputElement | null) : null;
+      const caseId = inputEl?.value.trim() ?? "";
+      if (!caseId) {
+        adminState.feedback["delete-case"] = "Please enter a case ID.";
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+        return;
+      }
+      if (!window.confirm(`Permanently delete case ${caseId}? This cannot be undone.`)) {
+        return;
+      }
+      handleAdminDeleteCase(token, caseId).then((msg) => {
+        adminState.feedback["delete-case"] = msg;
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+      });
+      return;
+    }
+
+    if (action === "admin-set-daily-cap") {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const inputId = actionTarget.getAttribute("data-input");
+      const inputEl = inputId ? (document.getElementById(inputId) as HTMLInputElement | null) : null;
+      const cap = Number(inputEl?.value ?? "");
+      if (!Number.isFinite(cap) || cap < 1) {
+        adminState.feedback["daily-cap"] = "Please enter a valid positive number.";
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+        return;
+      }
+      handleAdminSetDailyCap(token, Math.floor(cap)).then((msg) => {
+        adminState.feedback["daily-cap"] = msg;
+        // Refresh status to show new cap
+        fetchAdminStatus(token).then((s) => { adminState.status = s; setMainContent(renderAdminDashboardView(adminState), { animate: false }); });
+      });
+      return;
+    }
   };
 
   const onInput = (event: Event) => {
@@ -1832,6 +1951,21 @@ export function mountApp(root: HTMLElement): void {
     if (form.id === "submit-ballot-form") {
       event.preventDefault();
       void submitBallotForm(form);
+    }
+    if (form.id === "admin-login-form") {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const password = String(formData.get("password") || "").trim();
+      handleAdminLogin(password).then((result) => {
+        if ("error" in result) {
+          setMainContent(renderAdminLoginView(result.error));
+        } else {
+          adminState.status = null;
+          adminState.statusLoading = false;
+          adminState.feedback = {};
+          void renderRoute();
+        }
+      });
     }
   };
 

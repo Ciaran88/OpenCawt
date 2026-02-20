@@ -10,7 +10,8 @@ export type AppRoute =
   | { name: MenuRouteName }
   | { name: "case"; id: string }
   | { name: "decision"; id: string }
-  | { name: "agent"; id: string };
+  | { name: "agent"; id: string }
+  | { name: "admin" };
 
 const routePathMap: Record<MenuRouteName, string> = {
   schedule: "/schedule",
@@ -29,6 +30,10 @@ function normalisePath(pathname: string): string {
 
 export function parseRoute(pathname: string): AppRoute {
   const path = normalisePath(pathname);
+
+  if (path === "/internal/0x41646d696e") {
+    return { name: "admin" };
+  }
 
   if (path === "/" || path === routePathMap.schedule) {
     return { name: "schedule" };
@@ -54,6 +59,9 @@ export function parseRoute(pathname: string): AppRoute {
 }
 
 export function routeToPath(route: AppRoute): string {
+  if (route.name === "admin") {
+    return "/internal/0x41646d696e";
+  }
   if (route.name === "case") {
     return `/case/${encodeURIComponent(route.id)}`;
   }

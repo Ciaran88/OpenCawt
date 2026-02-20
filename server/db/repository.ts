@@ -343,11 +343,29 @@ export function upsertAgent(
 export function getAgent(
   db: Db,
   agentId: string
-): { agentId: string; banned: boolean; jurorEligible: boolean; notifyUrl?: string } | null {
+): {
+  agentId: string;
+  banned: boolean;
+  jurorEligible: boolean;
+  notifyUrl?: string;
+  bannedFromFiling: boolean;
+  bannedFromDefence: boolean;
+  bannedFromJury: boolean;
+} | null {
   const row = db
-    .prepare(`SELECT agent_id, banned, juror_eligible, notify_url FROM agents WHERE agent_id = ?`)
+    .prepare(
+      `SELECT agent_id, banned, juror_eligible, notify_url, banned_from_filing, banned_from_defence, banned_from_jury FROM agents WHERE agent_id = ?`
+    )
     .get(agentId) as
-    | { agent_id: string; banned: number; juror_eligible: number; notify_url: string | null }
+    | {
+        agent_id: string;
+        banned: number;
+        juror_eligible: number;
+        notify_url: string | null;
+        banned_from_filing: number;
+        banned_from_defence: number;
+        banned_from_jury: number;
+      }
     | undefined;
   if (!row) {
     return null;
@@ -356,7 +374,10 @@ export function getAgent(
     agentId: row.agent_id,
     banned: row.banned === 1,
     jurorEligible: row.juror_eligible === 1,
-    notifyUrl: row.notify_url ?? undefined
+    notifyUrl: row.notify_url ?? undefined,
+    bannedFromFiling: row.banned_from_filing === 1,
+    bannedFromDefence: row.banned_from_defence === 1,
+    bannedFromJury: row.banned_from_jury === 1
   };
 }
 
@@ -367,6 +388,74 @@ export function setAgentBanned(db: Db, input: { agentId: string; banned: boolean
     now,
     input.agentId
   );
+}
+
+export function setAgentFilingBanned(db: Db, input: { agentId: string; banned: boolean }): void {
+  const now = nowIso();
+  db.prepare(`UPDATE agents SET banned_from_filing = ?, updated_at = ? WHERE agent_id = ?`).run(
+    input.banned ? 1 : 0,
+    now,
+    input.agentId
+  );
+}
+
+export function setAgentDefenceBanned(db: Db, input: { agentId: string; banned: boolean }): void {
+  const now = nowIso();
+  db.prepare(`UPDATE agents SET banned_from_defence = ?, updated_at = ? WHERE agent_id = ?`).run(
+    input.banned ? 1 : 0,
+    now,
+    input.agentId
+  );
+}
+
+export function setAgentJuryBanned(db: Db, input: { agentId: string; banned: boolean }): void {
+  const now = nowIso();
+  db.prepare(`UPDATE agents SET banned_from_jury = ?, updated_at = ? WHERE agent_id = ?`).run(
+    input.banned ? 1 : 0,
+    now,
+    input.agentId
+  );
+}
+
+export function deleteCaseById(db: Db, caseId: string): void {
+  // Delete in foreign-key-safe order (children before parents)
+  db.prepare(`DELETE FROM case_transcript_events WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM case_runtime WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM seal_jobs WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM ballots WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM submissions WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM evidence_items WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM claims WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM verdicts WHERE case_id = ?`).run(caseId);
+  const panelIds = (
+    db.prepare(`SELECT panel_id FROM jury_panels WHERE case_id = ?`).all(caseId) as Array<{
+      panel_id: string;
+    }>
+  ).map((r) => r.panel_id);
+  for (const panelId of panelIds) {
+    db.prepare(`DELETE FROM jury_panel_members WHERE panel_id = ?`).run(panelId);
+  }
+  db.prepare(`DELETE FROM jury_selection_runs WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM jury_panels WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM agent_case_activity WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM ml_case_features WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM ml_juror_features WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM cases WHERE case_id = ?`).run(caseId);
+}
+
+export function getRuntimeConfig(db: Db, key: string): string | null {
+  const row = db
+    .prepare(`SELECT value FROM runtime_config WHERE key = ?`)
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setRuntimeConfig(db: Db, key: string, value: string): void {
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO runtime_config (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(key, value, now);
 }
 
 export function countActiveAgentCapabilities(db: Db, agentId: string, atIso = nowIso()): number {
@@ -1944,6 +2033,7 @@ export function listEligibleJurors(
       INNER JOIN juror_availability j ON j.agent_id = a.agent_id
       WHERE a.banned = 0
       AND a.juror_eligible = 1
+      AND a.banned_from_jury = 0
       AND j.availability IN ('available', 'limited')
       ORDER BY a.agent_id ASC
       `

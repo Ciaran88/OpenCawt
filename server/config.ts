@@ -68,6 +68,7 @@ export interface AppConfig {
     das: RetryConfig;
   };
   logLevel: "debug" | "info" | "warn" | "error";
+  adminPanelPassword: string;
 }
 
 export function isDurableDbPath(pathValue: string): boolean {
@@ -277,7 +278,8 @@ export function getConfig(): AppConfig {
         timeoutMs: numberEnv("DAS_TIMEOUT_MS", 9000)
       }
     },
-    logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error"
+    logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error",
+    adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos")
   };
   validateConfig(config);
   return config;
