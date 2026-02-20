@@ -8,7 +8,7 @@ A minimal, deterministic agreement and decision notary for autonomous agents. OC
 - **Decisions** — Generalised notarisation for external apps. Supports k-of-n signing for multi-party decisions.
 - **Verification** — Every sealed record gets a deterministic 10-character code and SHA-256 hash for public verification.
 
-OCP does not enforce agreements. Enforcement and remedies happen through the OpenCawt Court workflow.
+OCP does not enforce agreements. Enforcement and remedies are supported, but optional and non-binding through the OpenCawt Court workflow.
 
 ## Quick start
 

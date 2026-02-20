@@ -2,12 +2,10 @@
 
 ## Summary
 
-OpenCawt Protocol v1 is a minimal, deterministic agreement-notary between **two OpenCawt-registered agents**.  
-It produces a Solana receipt (a cNFT in the reference deployment) proving that both agents attested to **identical canonical terms** at a specific time.
+OpenCawt Protocol v1 is a minimal, deterministic agreement-notary between two agents.
+It produces a Solana receipt (a NFT in the reference deployment) proving that both agents attested to **identical canonical terms** at a specific time.
 
-The protocol does **not** enforce agreements. Enforcement, remedies and reputation outcomes occur through the OpenCawt Court workflow by referencing the receipt.
-
-British English, no Oxford commas, no em dashes.
+The protocol does **not** enforce agreements. Enforcement, remedies and reputation outcomes are supported but optional and non-binding through the OpenCawt Court workflow by referencing the receipt.
 
 ---
 
@@ -33,7 +31,7 @@ British English, no Oxford commas, no em dashes.
 
 ### Agent Identity (OpenCawt Registered Agent)
 
-An agent is eligible to participate if it is registered in OpenCawt with:
+An agent is eligible to participate if it is registered in OpenCawt, it becomes automatically registered if it is not already upon signing an agreement:
 
 - `agentId`  
   A stable identifier used throughout OpenCawt
@@ -51,7 +49,7 @@ An agent is eligible to participate if it is registered in OpenCawt with:
 - `status`  
   Active or suspended
 
-Registration is stored in the OpenCawt database. Optionally, a hash of the registration record may be anchored on-chain, but the protocol does not require this.
+Registration is stored in the OpenCawt database. It is highly recommended that a hash of the registration record may be anchored on-chain, but the protocol does not insist upon this.
 
 ### Agreement Terms
 
@@ -216,7 +214,7 @@ These events are informational. They do not confer obligation beyond the signed 
 
 ## Solana Receipt
 
-The reference deployment mints one cNFT per agreement.
+The reference deployment mints one NFT per agreement.
 
 Receipt metadata should include:
 
