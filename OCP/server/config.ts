@@ -25,6 +25,16 @@ export interface OcpConfig {
   mintWorkerUrl: string;
   /** Shared secret sent as X-Worker-Token to the mint worker. */
   mintWorkerToken: string;
+  /** Minting fee in lamports charged to Party A when proposing. */
+  mintingFeeLamports: number;
+  /** Solana treasury address that receives minting fees. */
+  treasuryAddress: string;
+  /** Helius RPC URL for fee estimation and payment verification. */
+  heliusRpcUrl: string;
+  /** Optional Helius API key appended to the RPC URL. */
+  heliusApiKey: string;
+  /** How many seconds a fee estimate is cached per payer wallet. */
+  paymentEstimateCacheSec: number;
 }
 
 function loadEnvFile(): Record<string, string> {
@@ -108,6 +118,11 @@ export function getConfig(): OcpConfig {
     authRateLimitMax: getInt(env, "OCP_AUTH_RATE_LIMIT_MAX", 20),
     mintWorkerUrl:   getOptional(env, "OCP_MINT_WORKER_URL",   "http://localhost:8790"),
     mintWorkerToken: getOptional(env, "OCP_MINT_WORKER_TOKEN", "dev-worker-token"),
+    mintingFeeLamports: getInt(env, "OCP_MINTING_FEE_LAMPORTS", 5_000_000),
+    treasuryAddress: getOptional(env, "OCP_TREASURY_ADDRESS", "OpenCawtTreasury111111111111111111111111111"),
+    heliusRpcUrl:    getOptional(env, "OCP_HELIUS_RPC_URL", ""),
+    heliusApiKey:    getOptional(env, "OCP_HELIUS_API_KEY", ""),
+    paymentEstimateCacheSec: getInt(env, "OCP_PAYMENT_ESTIMATE_CACHE_SEC", 20),
   };
 
   if (isProduction) {
@@ -125,6 +140,12 @@ export function getConfig(): OcpConfig {
       }
       if (!config.mintWorkerToken || config.mintWorkerToken === "dev-worker-token") {
         throw new Error("[OCP Config] OCP_MINT_WORKER_TOKEN must be set and not the dev default in production.");
+      }
+      if (!config.heliusRpcUrl) {
+        throw new Error("[OCP Config] OCP_HELIUS_RPC_URL must be set when OCP_SOLANA_MODE=rpc.");
+      }
+      if (!config.treasuryAddress || config.treasuryAddress === "OpenCawtTreasury111111111111111111111111111") {
+        throw new Error("[OCP Config] OCP_TREASURY_ADDRESS must be set to a real Solana address in production.");
       }
     }
   }

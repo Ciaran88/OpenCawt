@@ -38,6 +38,8 @@ import {
   revokeApiKey,
   getIdempotentResponse,
   storeIdempotentResponse,
+  saveUsedTreasuryTx,
+  isTreasuryTxUsed,
   type DecisionType,
 } from "./db/repository";
 import {
@@ -54,9 +56,17 @@ import { mintAgreementReceipt } from "./mint/index";
 import { verifyBothAttestations } from "./verify/index";
 import { crossRegisterAgentsInCourt } from "./court/crossRegister";
 import { decodeBase58 } from "../shared/base58";
+import { createOcpHeliusClient } from "./services/ocpHeliusClient";
+import { createOcpFeeEstimator, isValidSolanaPubkey } from "./services/ocpFeeEstimator";
+import { createOcpSolanaVerifier } from "./services/ocpSolanaVerifier";
 
 const config = getConfig();
 const db = openDatabase(config.dbPath);
+
+// ── Fee services ──
+const ocpHelius = createOcpHeliusClient(config);
+const ocpFeeEstimator = createOcpFeeEstimator(config, ocpHelius);
+const ocpSolanaVerifier = createOcpSolanaVerifier(config, ocpHelius);
 
 // ---- HTTP helpers ----
 
@@ -634,6 +644,23 @@ async function handleRequest(
 
       // ==== Agreements API ====
 
+      // GET /v1/agreements/fee-estimate
+      if (req.method === "GET" && segments.length === 3 && segments[1] === "agreements" && segments[2] === "fee-estimate") {
+        const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+        const payerWallet = url.searchParams.get("payer_wallet")?.trim() || undefined;
+        if (payerWallet && !isValidSolanaPubkey(payerWallet)) {
+          sendError(res, 400, "INVALID_PAYER_WALLET", "payer_wallet must be a valid Solana base58 public key."); return;
+        }
+        try {
+          const estimate = await ocpFeeEstimator.estimateMintingFee({ payerWallet });
+          sendJson(res, 200, estimate);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          sendError(res, 502, "FEE_ESTIMATE_FAILED", msg);
+        }
+        return;
+      }
+
       // POST /v1/agreements/propose
       if (req.method === "POST" && segments.length === 3 && segments[1] === "agreements" && segments[2] === "propose") {
         let raw = "", parsed: unknown;
@@ -648,12 +675,14 @@ async function handleRequest(
         const idem = checkIdempotency(req, res, partyAAgentId, "propose");
         if (idem.cached) return;
 
-        const { partyBAgentId, mode, terms, expiresInHours, sigA } = parsed as {
+        const { partyBAgentId, mode, terms, expiresInHours, sigA, treasuryTxSig, payerWallet } = parsed as {
           partyBAgentId?: string;
           mode?: string;
           terms?: CanonicalTerms;
           expiresInHours?: number;
           sigA?: string;
+          treasuryTxSig?: string;
+          payerWallet?: string;
         };
 
         if (!partyBAgentId || typeof partyBAgentId !== "string") {
@@ -707,12 +736,47 @@ async function handleRequest(
           sendError(res, 401, "SIG_A_INVALID", "sigA is not a valid Ed25519 signature over the attestation payload."); return;
         }
 
+        // ── Minting fee verification ──
+        let feeAmountLamports: number | undefined;
+        if (config.solanaMode === "rpc") {
+          if (!treasuryTxSig || typeof treasuryTxSig !== "string") {
+            sendError(res, 400, "MISSING_TREASURY_TX", "treasuryTxSig is required for agreement proposals."); return;
+          }
+          if (isTreasuryTxUsed(db, treasuryTxSig)) {
+            sendError(res, 409, "TX_ALREADY_USED", "This treasury transaction has already been used."); return;
+          }
+          try {
+            const verification = await ocpSolanaVerifier.verifyMintingFeeTx(treasuryTxSig, payerWallet);
+            if (!verification.finalised) {
+              sendError(res, 400, "TX_NOT_FINALISED", "Treasury transaction is not yet finalised."); return;
+            }
+            feeAmountLamports = verification.amountLamports;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            sendError(res, 400, "FEE_VERIFICATION_FAILED", msg); return;
+          }
+        } else if (treasuryTxSig && typeof treasuryTxSig === "string") {
+          // Stub mode: accept treasuryTxSig but don't verify on-chain
+          feeAmountLamports = config.mintingFeeLamports + 1000;
+        }
+
         createAgreement(db, {
           proposalId, partyAAgentId, partyBAgentId,
           mode: mode as "public" | "private",
           canonicalTermsJson: canonicalJson, termsHash, agreementCode, expiresAtIso,
+          treasuryTxSig: treasuryTxSig || undefined,
         });
         storeSignature(db, { proposalId, party: "party_a", agentId: partyAAgentId, sig: sigA });
+
+        // Record the used treasury TX for replay protection
+        if (treasuryTxSig && feeAmountLamports !== undefined) {
+          saveUsedTreasuryTx(db, {
+            txSig: treasuryTxSig,
+            proposalId,
+            agentId: partyAAgentId,
+            amountLamports: feeAmountLamports,
+          });
+        }
 
         void dispatchNotification(db, config, {
           notifyUrl: agentB.notifyUrl, agentId: partyBAgentId, proposalId, agreementCode,

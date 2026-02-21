@@ -9,8 +9,12 @@ import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { encodeBase58 } from "../shared/base58";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const OCP_ROOT = join(__dirname, "..");
 
 function httpGet(url: string, headers: Record<string, string>): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
@@ -92,7 +96,7 @@ export async function run(): Promise<{ passed: number; failed: number }> {
   };
 
   const server = spawn("node", ["--import", "tsx", "server/main.ts"], {
-    cwd: process.cwd(),
+    cwd: OCP_ROOT,
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -198,6 +202,34 @@ export async function run(): Promise<{ passed: number; failed: number }> {
         headers: { Authorization: "Bearer ocp_invalid_key_xxxxxxxxxxxxxxxxxxxxxxxx" },
       });
       assert.strictEqual(res.status, 401);
+    }, results);
+
+    await test("GET /v1/agreements/fee-estimate returns valid stub estimate", async () => {
+      const res = await fetch(`${BASE}/v1/agreements/fee-estimate`);
+      assert.strictEqual(res.status, 200);
+      const data = (await res.json()) as {
+        recommendedAtIso: string;
+        staleAfterSec: number;
+        breakdown: {
+          mintingFeeLamports: number;
+          totalEstimatedLamports: number;
+        };
+        recommendation: {
+          treasuryAddress: string;
+        };
+      };
+      assert.ok(data.recommendedAtIso, "recommendedAtIso should be set");
+      assert.ok(data.staleAfterSec > 0, "staleAfterSec should be positive");
+      assert.strictEqual(data.breakdown.mintingFeeLamports, 5_000_000, "minting fee should be 5M lamports");
+      assert.ok(data.breakdown.totalEstimatedLamports >= 5_000_000, "total should be at least the minting fee");
+      assert.ok(data.recommendation.treasuryAddress, "treasury address should be set");
+    }, results);
+
+    await test("GET /v1/agreements/fee-estimate with invalid payer_wallet returns 400", async () => {
+      const res = await fetch(`${BASE}/v1/agreements/fee-estimate?payer_wallet=not-a-pubkey!!!`);
+      assert.strictEqual(res.status, 400);
+      const data = (await res.json()) as { error: { code: string } };
+      assert.strictEqual(data.error.code, "INVALID_PAYER_WALLET");
     }, results);
 
     await test("Rate limit: 429 after N failed auth attempts", async () => {

@@ -623,6 +623,50 @@ export interface OcpMintRequest {
 }
 
 /**
+ * OCP minting fee estimate — returned by `GET /v1/agreements/fee-estimate`.
+ * Mirrors the shape of `FilingFeeEstimateResponse` but uses OCP-specific naming.
+ */
+export interface OcpFeeEstimateResponse {
+  payerWallet?: string;
+  recommendedAtIso: string;
+  staleAfterSec: number;
+  breakdown: OcpFeeEstimateBreakdown;
+  recommendation: OcpFeeTxRecommendation;
+}
+
+export interface OcpFeeEstimateBreakdown {
+  /** The minting fee charged by the OCP treasury (lamports). */
+  mintingFeeLamports: number;
+  /** Solana base fee for the transfer TX (lamports). */
+  baseFeeLamports: number;
+  /** Compute unit limit recommended for the transfer TX. */
+  computeUnitLimit: number;
+  /** Compute unit price (micro-lamports) for priority fee. */
+  computeUnitPriceMicroLamports: number;
+  /** Priority fee component (lamports). */
+  priorityFeeLamports: number;
+  /** Total network fee = base + priority (lamports). */
+  networkFeeLamports: number;
+  /** Total estimated cost = minting fee + network fee (lamports). */
+  totalEstimatedLamports: number;
+}
+
+export interface OcpFeeTxRecommendation {
+  /** Helius RPC URL the client should use to submit the TX. */
+  rpcUrl: string;
+  /** Treasury address to transfer SOL to. */
+  treasuryAddress: string;
+  /** Recent blockhash for building the transfer TX. */
+  recentBlockhash: string;
+  /** Last valid block height for the blockhash. */
+  lastValidBlockHeight: number;
+  /** Recommended compute unit limit for the TX. */
+  computeUnitLimit: number;
+  /** Recommended compute unit price (micro-lamports). */
+  computeUnitPriceMicroLamports: number;
+}
+
+/**
  * Union of all mint request types accepted by the mint worker.
  * Dispatch on `requestType` to determine the handler.
  */

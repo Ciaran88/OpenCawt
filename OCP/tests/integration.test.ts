@@ -20,6 +20,8 @@ import {
   createReceipt,
   getReceipt,
   isTermsHashDuplicate,
+  saveUsedTreasuryTx,
+  isTreasuryTxUsed,
 } from "../server/db/repository";
 import {
   buildCanonicalTerms,
@@ -84,6 +86,13 @@ function makeMockConfig(): OcpConfig {
     systemApiKey: "test-system-key",
     authRateLimitWindowMs: 900_000,
     authRateLimitMax: 20,
+    mintWorkerUrl: "http://localhost:8790",
+    mintWorkerToken: "dev-worker-token",
+    mintingFeeLamports: 5_000_000,
+    treasuryAddress: "OpenCawtTreasury111111111111111111111111111",
+    heliusRpcUrl: "",
+    heliusApiKey: "",
+    paymentEstimateCacheSec: 20,
   };
 }
 
@@ -331,6 +340,79 @@ export async function run(): Promise<Result> {
     assert.strictEqual(agentB.juror_eligible, 0, "juror_eligible should default to 0");
 
     mainDb.close();
+  }, results);
+
+  // ── Treasury TX tests (minting fee replay protection) ──
+
+  await test("isTreasuryTxUsed: false for unused tx", () => {
+    assert.strictEqual(isTreasuryTxUsed(db, "unused_tx_sig_abc123"), false);
+  }, results);
+
+  await test("saveUsedTreasuryTx + isTreasuryTxUsed: true after saving", () => {
+    const txSig = "test_treasury_tx_" + Date.now();
+    saveUsedTreasuryTx(db, {
+      txSig,
+      proposalId,
+      agentId: keyA.agentId,
+      amountLamports: 5_000_000,
+    });
+    assert.strictEqual(isTreasuryTxUsed(db, txSig), true);
+  }, results);
+
+  await test("saveUsedTreasuryTx: rejects duplicate tx sig", () => {
+    const txSig = "test_dup_tx_" + Date.now();
+    saveUsedTreasuryTx(db, {
+      txSig,
+      proposalId,
+      agentId: keyA.agentId,
+      amountLamports: 5_000_000,
+    });
+    // Second insert with the same txSig should throw (PRIMARY KEY constraint)
+    assert.throws(() => {
+      saveUsedTreasuryTx(db, {
+        txSig,
+        proposalId,
+        agentId: keyB.agentId,
+        amountLamports: 5_000_000,
+      });
+    });
+  }, results);
+
+  await test("createAgreement with treasuryTxSig stores it", () => {
+    const pid = createOcpId("prop");
+    const code = deriveAgreementCode(termsHash + "fee_test");
+    createAgreement(db, {
+      proposalId: pid,
+      partyAAgentId: keyA.agentId,
+      partyBAgentId: keyB.agentId,
+      mode: "public",
+      canonicalTermsJson: canonicalJson,
+      termsHash: termsHash + "_fee",
+      agreementCode: code,
+      expiresAtIso,
+      treasuryTxSig: "test_treasury_stored_tx",
+    });
+    const agreement = getAgreement(db, pid);
+    assert.ok(agreement, "Agreement should exist");
+    assert.strictEqual(agreement.treasuryTxSig, "test_treasury_stored_tx");
+  }, results);
+
+  await test("createAgreement without treasuryTxSig leaves it null", () => {
+    const pid = createOcpId("prop");
+    const code = deriveAgreementCode(termsHash + "no_fee_test");
+    createAgreement(db, {
+      proposalId: pid,
+      partyAAgentId: keyA.agentId,
+      partyBAgentId: keyB.agentId,
+      mode: "public",
+      canonicalTermsJson: canonicalJson,
+      termsHash: termsHash + "_nofee",
+      agreementCode: code,
+      expiresAtIso,
+    });
+    const agreement = getAgreement(db, pid);
+    assert.ok(agreement, "Agreement should exist");
+    assert.strictEqual(agreement.treasuryTxSig, null);
   }, results);
 
   db.close();

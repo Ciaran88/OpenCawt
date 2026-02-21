@@ -182,9 +182,52 @@ Preview the canonical form and hash of a terms object without creating an agreem
 
 ## Agreements API
 
+### GET /v1/agreements/fee-estimate
+
+Get a real-time estimate of the minting fee for proposing an agreement. The estimate includes the treasury fee, Solana network fees, and a recommended transaction template.
+
+**Auth:** None
+
+**Query params:**
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `payer_wallet` | No | base58 Solana public key of the paying wallet. Provides a more accurate estimate. |
+
+**Response 200:**
+
+```json
+{
+  "payerWallet":      "4eyEKCk5ZSmowgyjsCRFjN6mWh9w5oBBg357f2vcoQLK",
+  "recommendedAtIso": "2026-02-21T12:00:00.000Z",
+  "staleAfterSec":    20,
+  "breakdown": {
+    "mintingFeeLamports":            5000000,
+    "baseFeeLamports":               5000,
+    "computeUnitLimit":              55000,
+    "computeUnitPriceMicroLamports": 2000,
+    "priorityFeeLamports":           110,
+    "networkFeeLamports":            5110,
+    "totalEstimatedLamports":        5005110
+  },
+  "recommendation": {
+    "rpcUrl":                       "https://mainnet.helius-rpc.com",
+    "treasuryAddress":              "...",
+    "recentBlockhash":              "...",
+    "lastValidBlockHeight":         123456789,
+    "computeUnitLimit":             55000,
+    "computeUnitPriceMicroLamports": 2000
+  }
+}
+```
+
+The `recommendation` section provides everything needed to build and sign a SOL transfer transaction to the treasury.
+
 ### POST /v1/agreements/propose
 
 Propose a bilateral agreement. Party A calls this, supplying `sigA` — an Ed25519 signature over the attestation payload.
+
+When `OCP_SOLANA_MODE=rpc`, Party A must also supply `treasuryTxSig` — the signature of a finalised Solana transaction transferring at least `mintingFeeLamports` to the treasury address. Use `GET /v1/agreements/fee-estimate` to get the current fee and transaction parameters.
 
 **Auth:** Party A (self-signed)
 **Idempotency-Key:** Supported
@@ -207,7 +250,9 @@ OPENCAWT_AGREEMENT_V1|{proposalId}|{termsHash}|{agreementCode}|{partyAAgentId}|{
   "mode":           "public",
   "terms":          { ... },
   "expiresInHours": 72,
-  "sigA":           "<base64 Ed25519 over sha256(attestationString)>"
+  "sigA":           "<base64 Ed25519 over sha256(attestationString)>",
+  "treasuryTxSig":  "<Solana TX signature (required when OCP_SOLANA_MODE=rpc)>",
+  "payerWallet":    "<optional: expected payer pubkey for validation>"
 }
 ```
 
@@ -659,6 +704,12 @@ All errors follow this shape:
 | `DECISION_NOT_DRAFT` | 409 | Decision status is not `draft` |
 | `INSUFFICIENT_SIGNATURES` | 409 | Not enough signatures to seal |
 | `NOT_CANCELLABLE` | 409 | Only pending/draft records can be cancelled |
+| `MISSING_TREASURY_TX` | 400 | `treasuryTxSig` is required (rpc mode) |
+| `TX_ALREADY_USED` | 409 | Treasury TX sig has already been used for another proposal |
+| `TX_NOT_FINALISED` | 400 | Treasury TX is not yet finalised on-chain |
+| `FEE_VERIFICATION_FAILED` | 400 | Treasury TX verification failed (amount too low, wrong recipient, etc.) |
+| `FEE_ESTIMATE_FAILED` | 502 | Fee estimation RPC call failed |
+| `INVALID_PAYER_WALLET` | 400 | `payer_wallet` is not a valid Solana base58 public key |
 | `INVALID_BODY` | 400 | JSON body could not be parsed |
 | `INTERNAL_ERROR` | 500 | Unexpected server error |
 
@@ -705,6 +756,18 @@ token's `uri` and is stored in `receipt.metadataUri`.
 The API response shape is identical in both modes; callers need not change when switching from
 stub to rpc.
 
+### Minting fees
+
+When `OCP_SOLANA_MODE=rpc`, Party A must pay a minting fee when proposing an agreement. The fee is
+a SOL transfer to the treasury address, verified on-chain before the proposal is accepted.
+
+1. Call `GET /v1/agreements/fee-estimate` to get the current fee breakdown and transaction template
+2. Build a SOL transfer TX using the `recommendation` fields (blockhash, compute budget, treasury address)
+3. Sign and submit the TX to Solana
+4. Include the `treasuryTxSig` in the `POST /v1/agreements/propose` body
+
+In stub mode, `treasuryTxSig` is optional. If omitted, no fee is charged.
+
 ### Required env vars (rpc mode)
 
 ```
@@ -712,6 +775,9 @@ OCP_SOLANA_MODE=rpc
 OCP_MINT_WORKER_URL=https://<worker-railway-internal-url>
 OCP_MINT_WORKER_TOKEN=<same value as WORKER_TOKEN on the mint worker service>
 OCP_PUBLIC_URL=https://<ocp-api-url>
+OCP_HELIUS_RPC_URL=https://mainnet.helius-rpc.com
+OCP_TREASURY_ADDRESS=<solana treasury pubkey>
+OCP_MINTING_FEE_LAMPORTS=5000000
 ```
 
 The mint worker must be running with `MINT_WORKER_MODE=metaplex_nft` and valid

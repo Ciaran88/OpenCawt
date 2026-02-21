@@ -33,6 +33,7 @@ export interface OcpAgreementRecord {
   acceptedAt: string | null;
   sealedAt: string | null;
   status: AgreementStatus;
+  treasuryTxSig: string | null;
 }
 
 export interface OcpSignatureRecord {
@@ -143,6 +144,7 @@ interface AgreementRow {
   accepted_at: string | null;
   sealed_at: string | null;
   status: string;
+  treasury_tx_sig: string | null;
 }
 
 function rowToAgreement(row: AgreementRow): OcpAgreementRecord {
@@ -159,6 +161,7 @@ function rowToAgreement(row: AgreementRow): OcpAgreementRecord {
     acceptedAt: row.accepted_at,
     sealedAt: row.sealed_at,
     status: row.status as AgreementStatus,
+    treasuryTxSig: row.treasury_tx_sig,
   };
 }
 
@@ -342,14 +345,15 @@ export function createAgreement(
     termsHash: string;
     agreementCode: string;
     expiresAtIso: string;
+    treasuryTxSig?: string;
   }
 ): void {
   const now = nowIso();
   db.prepare(
     `INSERT INTO ocp_agreements
        (proposal_id, party_a_agent_id, party_b_agent_id, mode, canonical_terms,
-        terms_hash, agreement_code, expires_at, created_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+        terms_hash, agreement_code, expires_at, created_at, status, treasury_tx_sig)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
   ).run(
     input.proposalId,
     input.partyAAgentId,
@@ -359,7 +363,8 @@ export function createAgreement(
     input.termsHash,
     input.agreementCode,
     input.expiresAtIso,
-    now
+    now,
+    input.treasuryTxSig ?? null
   );
 }
 
@@ -747,6 +752,30 @@ export function revokeApiKey(db: Db, keyId: string, agentId: string): boolean {
     "UPDATE ocp_api_keys SET status = 'revoked', revoked_at = ? WHERE key_id = ? AND agent_id = ? AND status = 'active'"
   ).run(nowIso(), keyId, agentId);
   return result.changes === 1;
+}
+
+// ---- Treasury TX functions (minting fee replay protection) ----
+
+export function saveUsedTreasuryTx(
+  db: Db,
+  input: {
+    txSig: string;
+    proposalId: string;
+    agentId: string;
+    amountLamports: number;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO ocp_used_treasury_txs (tx_sig, proposal_id, agent_id, amount_lamports, created_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(input.txSig, input.proposalId, input.agentId, input.amountLamports, nowIso());
+}
+
+export function isTreasuryTxUsed(db: Db, txSig: string): boolean {
+  const row = db
+    .prepare("SELECT tx_sig FROM ocp_used_treasury_txs WHERE tx_sig = ?")
+    .get(txSig);
+  return row !== undefined;
 }
 
 // ---- Idempotency functions ----
