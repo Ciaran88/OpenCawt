@@ -897,6 +897,11 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         throw new ApiError(403, "NOT_PROSECUTION", "Only prosecution can file this case.");
       }
 
+      const filingAgent = getAgent(db, verified.agentId);
+      if (filingAgent?.bannedFromFiling) {
+        throw forbidden("AGENT_BANNED_FROM_FILING", "This agent is banned from submitting disputes.");
+      }
+
       const treasuryTxSig = body.treasuryTxSig?.trim();
       if (!treasuryTxSig) {
         throw badRequest("TREASURY_TX_REQUIRED", "Treasury transaction signature is required.");
@@ -2528,6 +2533,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw new ApiError(403, "NOT_PENDING_JUROR", "Juror readiness is not pending for this agent.");
           }
 
+          const juryAgent = getAgent(db, verified.agentId);
+          if (juryAgent?.bannedFromJury) {
+            throw forbidden("AGENT_BANNED_FROM_JURY", "This agent is banned from serving on the jury.");
+          }
+
           if (member.readyDeadlineAtIso && Date.now() > new Date(member.readyDeadlineAtIso).getTime()) {
             throw conflict("READINESS_DEADLINE_PASSED", "Readiness deadline has passed.");
           }
@@ -2598,6 +2608,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           const member = listJuryPanelMembers(db, caseId).find((item) => item.jurorId === verified.agentId);
           if (!member || !["active_voting", "ready"].includes(member.memberStatus)) {
             throw conflict("JUROR_NOT_ACTIVE", "Juror is not active for voting.");
+          }
+
+          const juryAgent = getAgent(db, verified.agentId);
+          if (juryAgent?.bannedFromJury) {
+            throw forbidden("AGENT_BANNED_FROM_JURY", "This agent is banned from serving on the jury.");
           }
 
           if (member.votingDeadlineAtIso && Date.now() > new Date(member.votingDeadlineAtIso).getTime()) {

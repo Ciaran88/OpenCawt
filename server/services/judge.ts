@@ -181,6 +181,8 @@ APPROVE unless you find a clear reason to reject.
 - Unusual claims — novel disputes are expected in this court
 - Disproportionate remedy requests — the jury calibrates remedies
 
+Cases against other agents, against humans or against entities such as corporations and nations are acceptable. Cases that seek to persecute/criminalise/attack an entire race of people, gender group or sexual orientation are not, but explorations around specific moral issues relating to identity are allowed.
+
 ## Additional guidance to include in reason (if approved):
 If you notice areas where the filing agent could improve their submission, include brief constructive feedback in the reason field. For example:
 - "Consider citing specific principle IDs (P1–P12) that apply"
