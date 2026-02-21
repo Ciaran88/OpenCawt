@@ -12,6 +12,7 @@ import type {
   JurorReadinessPayload,
   MlSignals,
   OpenDefenceSearchFilters,
+  Remedy,
   RegisterAgentPayload,
   SubmitBallotPayload,
   SubmitEvidencePayload,
@@ -118,6 +119,7 @@ import {
   validateBallotConfidence,
   validateBallotVoteLabel,
   validateCaseTopic,
+  validateClaimSummary,
   validateEvidenceAttachmentUrls,
   validateNotifyUrl,
   validateEvidenceStrength,
@@ -154,7 +156,7 @@ const db = openDatabase(config);
 const drand = createDrandClient(config);
 const solana = createSolanaProvider(config);
 const paymentEstimator = createPaymentEstimator(config);
-const judge = createJudgeService({ logger });
+const judge = createJudgeService({ logger, config });
 
 for (const historicalCase of listCasesByStatuses(db, ["closed", "sealed", "void"])) {
   syncCaseReputation(db, historicalCase);
@@ -552,12 +554,28 @@ async function closeCasePipeline(caseId: string): Promise<{
           // Exact tie — invoke judge tiebreak
           if (!judgeTiebreaks) judgeTiebreaks = {};
           const tiebreakOutcome = await withJudgeTimeout(
-            judge.breakTiebreak(
+            judge.breakTiebreak({
               caseId,
-              claim.claimId,
-              claims.map((c) => ({ claimId: c.claimId, summary: c.summary })),
-              ballots.map((b) => ({ votes: b.votes }))
-            ),
+              targetClaimId: claim.claimId,
+              claims: claims.map((c) => ({
+                claimId: c.claimId,
+                summary: c.summary,
+                requestedRemedy: c.requestedRemedy,
+                allegedPrinciples: c.allegedPrinciples
+              })),
+              ballots: ballots.map((b) => ({ votes: b.votes })),
+              submissions: submissions.map((s) => ({
+                side: s.side,
+                phase: s.phase,
+                text: s.text
+              })),
+              evidence: evidence.map((e) => ({
+                submittedBy: e.submittedBy,
+                kind: e.kind,
+                bodyText: e.bodyText,
+                references: e.references
+              }))
+            }),
             JUDGE_CALL_TIMEOUT_MS,
             "breakTiebreak"
           );
@@ -602,7 +620,27 @@ async function closeCasePipeline(caseId: string): Promise<{
     // excluded from the sealed verdict bundle so the bundle hash remains stable.
     if (caseRecord.courtMode === "judge" && verdict.overallOutcome === "for_prosecution") {
       const remedyOutcome = await withJudgeTimeout(
-        judge.recommendRemedy(caseId, caseRecord.summary, verdict.overallOutcome),
+        judge.recommendRemedy({
+          caseId,
+          summary: caseRecord.summary,
+          caseTopic: caseRecord.caseTopic,
+          outcome: "for_prosecution",
+          claims: verdict.bundle.claims.map((vc) => {
+            const claim = claims.find((c) => c.claimId === vc.claimId)!;
+            return {
+              claimId: vc.claimId,
+              summary: claim.summary,
+              finding: vc.finding as "proven" | "not_proven" | "insufficient",
+              majorityRemedy: vc.majorityRemedy as Remedy,
+              allegedPrinciples: claim.allegedPrinciples
+            };
+          }),
+          submissions: submissions.map((s) => ({
+            side: s.side,
+            phase: s.phase,
+            text: s.text
+          }))
+        }),
         JUDGE_CALL_TIMEOUT_MS,
         "recommendRemedy"
       );
@@ -1697,7 +1735,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         filingPer24h: config.rateLimits.filingPer24h,
         evidencePerHour: config.rateLimits.evidencePerHour,
         submissionsPerHour: config.rateLimits.submissionsPerHour,
-        ballotsPerHour: config.rateLimits.ballotsPerHour
+        ballotsPerHour: config.rateLimits.ballotsPerHour,
+        maxClaimSummaryChars: config.limits.maxClaimSummaryChars,
+        maxCaseTitleChars: config.limits.maxCaseTitleChars,
+        maxSubmissionCharsPerPhase: config.limits.maxSubmissionCharsPerPhase,
+        maxEvidenceCharsPerItem: config.limits.maxEvidenceCharsPerItem,
+        maxEvidenceCharsPerCase: config.limits.maxEvidenceCharsPerCase,
+        ballotReasoningMinChars: 30,
+        ballotReasoningMaxChars: 1200
       });
       return;
     }
@@ -2071,6 +2116,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw badRequest("CLAIM_SUMMARY_REQUIRED", "Claim summary is required.");
           }
 
+          const maxClaimSummary = config.limits.maxClaimSummaryChars;
           const caseTopic = validateCaseTopic(body.caseTopic ?? "other");
           const stakeLevel = validateStakeLevel(body.stakeLevel ?? "medium");
           const allegedPrinciples = normalisePrincipleIds(body.allegedPrinciples ?? [], {
@@ -2085,8 +2131,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
                       `claims[${index}].claimSummary is required.`
                     );
                   }
+                  const trimmed = claim.claimSummary.trim();
+                  validateClaimSummary(trimmed, maxClaimSummary);
                   return {
-                    claimSummary: claim.claimSummary.trim(),
+                    claimSummary: trimmed,
                     requestedRemedy: claim.requestedRemedy,
                     principlesInvoked: normalisePrincipleIds(claim.principlesInvoked ?? [], {
                       field: `claims[${index}].principlesInvoked`
@@ -2094,7 +2142,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
                   };
                 })
               : undefined;
-          const claimSummary = body.claimSummary?.trim() || claims?.[0]?.claimSummary || "";
+          const claimSummary = validateClaimSummary(
+            body.claimSummary?.trim() || claims?.[0]?.claimSummary || "",
+            maxClaimSummary
+          );
           const defendantNotifyUrl = validateNotifyUrl(
             body.defendantNotifyUrl,
             "defendantNotifyUrl"

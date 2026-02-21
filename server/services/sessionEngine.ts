@@ -10,6 +10,7 @@ import {
   incrementReplacementCount,
   listBallotsByCase,
   listCasesByStatuses,
+  listClaims,
   listEligibleJurors,
   listJuryPanelMembers,
   listQueuedSealJobs,
@@ -28,6 +29,7 @@ import type { Db } from "../db/sqlite";
 import type { DrandClient } from "./drand";
 import { pickReplacementFromProof, selectJuryDeterministically } from "./jury";
 import type { JudgeService } from "./judge";
+import { truncateCaseTitle } from "./validation";
 import { JUDGE_CALL_TIMEOUT_MS, withJudgeTimeout } from "./judge";
 import { retrySealJob } from "./sealing";
 import type { Logger } from "./observability";
@@ -349,8 +351,23 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
     }
 
     try {
+      const claims = listClaims(deps.db, caseRecord.caseId);
       const screenOutcome = await withJudgeTimeout(
-        deps.judge.screenCase(caseRecord.caseId, caseRecord.summary),
+        deps.judge.screenCase({
+          caseId: caseRecord.caseId,
+          summary: caseRecord.summary,
+          caseTopic: caseRecord.caseTopic,
+          stakeLevel: caseRecord.stakeLevel,
+          requestedRemedy: caseRecord.requestedRemedy,
+          prosecutionAgentId: caseRecord.prosecutionAgentId,
+          defendantAgentId: caseRecord.defendantAgentId,
+          openDefence: caseRecord.openDefence,
+          claims: claims.map((c) => ({
+            summary: c.summary,
+            requestedRemedy: c.requestedRemedy,
+            allegedPrinciples: c.allegedPrinciples
+          }))
+        }),
         JUDGE_CALL_TIMEOUT_MS,
         "screenCase"
       );
@@ -359,12 +376,14 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
         throw new Error(screenOutcome.error);
       }
       const result = screenOutcome.data;
+      const maxCaseTitleChars = deps.config.limits.maxCaseTitleChars;
+      const caseTitle = truncateCaseTitle(result.caseTitle, maxCaseTitleChars);
 
       setCaseJudgeScreeningResult(deps.db, {
         caseId: caseRecord.caseId,
         status: result.approved ? "approved" : "rejected",
         reason: result.reason,
-        caseTitle: result.caseTitle
+        caseTitle
       });
 
       appendTranscriptEvent(deps.db, {
@@ -373,11 +392,11 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
         eventType: "notice",
         stage: "judge_screening",
         messageText: result.approved
-          ? `Case approved by judge screening. Title: "${result.caseTitle}"`
+          ? `Case approved by judge screening. Title: "${caseTitle}"`
           : `Case rejected by judge screening: ${result.reason ?? "No reason provided."}`,
         payload: {
           screeningResult: result.approved ? "approved" : "rejected",
-          caseTitle: result.caseTitle,
+          caseTitle,
           reason: result.reason
         }
       });
@@ -400,13 +419,13 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
       });
 
       // Fallback: auto-approve and advance (graceful degradation)
+      const maxCaseTitleChars = deps.config.limits.maxCaseTitleChars;
+      const fallbackCaseTitle = truncateCaseTitle(caseRecord.summary, maxCaseTitleChars);
       setCaseJudgeScreeningResult(deps.db, {
         caseId: caseRecord.caseId,
         status: "approved",
         reason: "Judge service unavailable; auto-approved via fallback.",
-        caseTitle: caseRecord.summary.length > 40
-          ? caseRecord.summary.slice(0, 37) + "..."
-          : caseRecord.summary || "Untitled Case"
+        caseTitle: fallbackCaseTitle
       });
 
       setStage(deps, caseRecord, "pre_session", nowIso, null);

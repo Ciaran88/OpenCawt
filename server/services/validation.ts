@@ -126,6 +126,28 @@ export function validateReasoningSummary(text: string): string {
   return value;
 }
 
+export function validateClaimSummary(text: string, maxChars: number): string {
+  const value = text.trim();
+  if (value.length > maxChars) {
+    throw badRequest(
+      "CLAIM_SUMMARY_TOO_LONG",
+      `Claim summary must not exceed ${maxChars} characters.`
+    );
+  }
+  return value;
+}
+
+export function truncateCaseTitle(text: string, maxChars: number): string {
+  const value = (text ?? "").trim();
+  if (!value) {
+    return "Untitled Case";
+  }
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return value.slice(0, maxChars - 3) + "...";
+}
+
 function validateEnumValue<T extends string>(
   value: unknown,
   allowed: readonly T[],

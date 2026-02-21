@@ -5,7 +5,7 @@ import { renderEvidenceCard } from "../components/evidenceCard";
 import { renderJurorGrid } from "../components/jurorGrid";
 import { renderStatusPill, statusFromCase } from "../components/statusPill";
 import { renderStepper } from "../components/stepper";
-import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from "../data/types";
+import type { Case, PartySubmissionPack, RuleLimits, SessionStage, TranscriptEvent } from "../data/types";
 import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
 import { classifyAttachmentUrl } from "../util/media";
@@ -199,7 +199,8 @@ function renderTranscript(events: TranscriptEvent[]): string {
 function renderEvidenceSubmissionForm(
   caseId: string,
   stage: SessionStage | undefined,
-  disabled: boolean
+  disabled: boolean,
+  limits: RuleLimits
 ): string {
   if (stage !== "evidence") {
     return "";
@@ -224,7 +225,8 @@ function renderEvidenceSubmissionForm(
         </label>
         <label>
           <span>Evidence text</span>
-          <textarea name="bodyText" rows="3" placeholder="Describe this evidence item"></textarea>
+          <textarea name="bodyText" rows="3" placeholder="Describe this evidence item" maxlength="${limits.maxEvidenceCharsPerItem}" data-max-chars="${limits.maxEvidenceCharsPerItem}"></textarea>
+          <small class="char-limit" data-char-counter-for="bodyText">0 / ${limits.maxEvidenceCharsPerItem} characters</small>
         </label>
         <label>
           <span>Attachment URLs (https only, comma or newline separated)</span>
@@ -267,7 +269,8 @@ function renderEvidenceSubmissionForm(
 function renderStageMessageForm(
   caseId: string,
   stage: SessionStage | undefined,
-  disabled: boolean
+  disabled: boolean,
+  limits: RuleLimits
 ): string {
   const allowed = stage && ["opening_addresses", "evidence", "closing_addresses", "summing_up"].includes(stage);
   if (!allowed) {
@@ -290,7 +293,8 @@ function renderStageMessageForm(
         </label>
         <label>
           <span>Message</span>
-          <textarea name="text" rows="3" placeholder="Stage message"></textarea>
+          <textarea name="text" rows="3" placeholder="Stage message" maxlength="${limits.maxSubmissionCharsPerPhase}" data-max-chars="${limits.maxSubmissionCharsPerPhase}"></textarea>
+          <small class="char-limit" data-char-counter-for="text">0 / ${limits.maxSubmissionCharsPerPhase} characters</small>
         </label>
         <label>
           <span>Principle citations (comma separated)</span>
@@ -521,8 +525,8 @@ export function renderCaseDetailView(
           votesCast: liveVotes
         })}
         ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
-        ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
-        ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
+        ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode, state.ruleLimits)}
+        ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode, state.ruleLimits)}
         ${
           caseItem.status === "active"
             ? `
@@ -543,7 +547,8 @@ export function renderCaseDetailView(
               </label>
               <label>
                 <span>Reasoning summary</span>
-                <textarea name="reasoningSummary" rows="4" placeholder="Provide two to three sentences for your reasoning"></textarea>
+                <textarea name="reasoningSummary" rows="4" placeholder="Provide two to three sentences for your reasoning" minlength="${state.ruleLimits.ballotReasoningMinChars}" maxlength="${state.ruleLimits.ballotReasoningMaxChars}" data-max-chars="${state.ruleLimits.ballotReasoningMaxChars}" data-min-chars="${state.ruleLimits.ballotReasoningMinChars}"></textarea>
+                <small class="char-limit" data-char-counter-for="reasoningSummary">0 / ${state.ruleLimits.ballotReasoningMaxChars} characters (min ${state.ruleLimits.ballotReasoningMinChars})</small>
               </label>
               <label>
                 <span>Principles relied on</span>

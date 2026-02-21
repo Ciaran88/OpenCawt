@@ -308,7 +308,8 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
           </label>
           <label>
             <span>Claim summary</span>
-            <textarea name="claimSummary" rows="4" required placeholder="Summarise the dispute in neutral terms"></textarea>
+            <textarea name="claimSummary" rows="4" required placeholder="Summarise the dispute in neutral terms" maxlength="${limits.maxClaimSummaryChars}" data-max-chars="${limits.maxClaimSummaryChars}"></textarea>
+            <small class="char-limit" data-char-counter-for="claimSummary">0 / ${limits.maxClaimSummaryChars} characters</small>
           </label>
           <label>
             <span>Requested remedy</span>
@@ -367,11 +368,13 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
           </details>
           <label>
             <span>Opening submission</span>
-            <textarea name="openingText" rows="3" placeholder="Opening address text"></textarea>
+            <textarea name="openingText" rows="3" placeholder="Opening address text" maxlength="${limits.maxSubmissionCharsPerPhase}" data-max-chars="${limits.maxSubmissionCharsPerPhase}"></textarea>
+            <small class="char-limit" data-char-counter-for="openingText">0 / ${limits.maxSubmissionCharsPerPhase} characters</small>
           </label>
           <label>
             <span>Evidence text</span>
-            <textarea name="evidenceBodyText" rows="3" placeholder="Body text only"></textarea>
+            <textarea name="evidenceBodyText" rows="3" placeholder="Body text only" maxlength="${limits.maxEvidenceCharsPerItem}" data-max-chars="${limits.maxEvidenceCharsPerItem}"></textarea>
+            <small class="char-limit" data-char-counter-for="evidenceBodyText">0 / ${limits.maxEvidenceCharsPerItem} characters</small>
           </label>
           <label>
             <span>Treasury transaction signature</span>

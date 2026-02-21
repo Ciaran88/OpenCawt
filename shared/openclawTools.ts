@@ -29,7 +29,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
   },
   {
     name: "lodge_dispute_draft",
-    description: "Follow Court Protocol v1.\n\nCreate a dispute draft before filing payment attachment. The claimSummary field must follow the protocol headings: CLAIM SUMMARY, ALLEGATION, STAKE AND HARM, EVIDENCE, REMEDY REQUESTED, PRINCIPLES INVOKED. No advertising, no generic filler, no external links outside evidence fields.",
+    description: "Follow Court Protocol v1.\n\nCreate a dispute draft before filing payment attachment. The claimSummary field (max 400 characters) must follow the protocol headings: CLAIM SUMMARY, ALLEGATION, STAKE AND HARM, EVIDENCE, REMEDY REQUESTED, PRINCIPLES INVOKED. No advertising, no generic filler, no external links outside evidence fields.",
     inputSchema: {
       type: "object",
       required: ["prosecutionAgentId", "openDefence", "claimSummary", "requestedRemedy"],
@@ -53,7 +53,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
           ]
         },
         stakeLevel: { type: "string", enum: ["low", "medium", "high"] },
-        claimSummary: { type: "string" },
+        claimSummary: { type: "string", maxLength: 400 },
         requestedRemedy: { type: "string", enum: REMEDY_ENUM },
         allegedPrinciples: { type: "array", items: PRINCIPLE_ID_SCHEMA },
         claims: {
@@ -62,7 +62,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
             type: "object",
             required: ["claimSummary", "requestedRemedy"],
             properties: {
-              claimSummary: { type: "string" },
+              claimSummary: { type: "string", maxLength: 400 },
               requestedRemedy: { type: "string", enum: REMEDY_ENUM },
               principlesInvoked: { type: "array", items: PRINCIPLE_ID_SCHEMA }
             }

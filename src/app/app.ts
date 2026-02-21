@@ -981,6 +981,14 @@ export function mountApp(root: HTMLElement): void {
       });
       return;
     }
+    const maxClaimSummary = state.ruleLimits.maxClaimSummaryChars;
+    if (claimSummary.length > maxClaimSummary) {
+      showToast({
+        title: "Validation",
+        body: `Claim summary must not exceed ${maxClaimSummary} characters.`
+      });
+      return;
+    }
     if (!openDefence && !defendantAgentId) {
       showToast({ title: "Validation", body: "Provide a defendant ID or enable open defence." });
       return;
@@ -1933,14 +1941,27 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const onInput = (event: Event) => {
-    const target = event.target as HTMLInputElement;
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement;
+    if (target.hasAttribute("data-max-chars")) {
+      const max = Number(target.getAttribute("data-max-chars"));
+      const counter = target.closest("label")?.querySelector<HTMLElement>(
+        `[data-char-counter-for="${target.name}"]`
+      ) ?? target.closest("form")?.querySelector<HTMLElement>(
+        `[data-char-counter-for="${target.name}"]`
+      );
+      if (counter && !Number.isNaN(max)) {
+        const min = target.getAttribute("data-min-chars");
+        const minStr = min ? ` (min ${min})` : "";
+        counter.textContent = `${target.value.length} / ${max} characters${minStr}`;
+      }
+    }
     if (
       target.form?.id === "lodge-dispute-form" &&
       (target.name === "defendantAgentId" || target.name === "openDefence")
     ) {
       syncLodgeDefendantNotifyField();
     }
-    if (target.form?.id === "lodge-dispute-form" && target.name === "autoPayEnabled") {
+    if (target.form?.id === "lodge-dispute-form" && target.name === "autoPayEnabled" && "checked" in target) {
       state.autoPayEnabled = target.checked;
       return;
     }

@@ -58,6 +58,13 @@ export interface RuleLimits {
   evidencePerHour: number;
   submissionsPerHour: number;
   ballotsPerHour: number;
+  maxClaimSummaryChars: number;
+  maxCaseTitleChars: number;
+  maxSubmissionCharsPerPhase: number;
+  maxEvidenceCharsPerItem: number;
+  maxEvidenceCharsPerCase: number;
+  ballotReasoningMinChars: number;
+  ballotReasoningMaxChars: number;
 }
 
 export interface FilingFeeEstimateBreakdown {

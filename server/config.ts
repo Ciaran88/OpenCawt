@@ -7,6 +7,8 @@ interface NumericLimitConfig {
   maxEvidenceCharsPerItem: number;
   maxEvidenceCharsPerCase: number;
   maxSubmissionCharsPerPhase: number;
+  maxClaimSummaryChars: number;
+  maxCaseTitleChars: number;
 }
 
 interface RateLimitConfig {
@@ -69,6 +71,8 @@ export interface AppConfig {
   };
   logLevel: "debug" | "info" | "warn" | "error";
   adminPanelPassword: string;
+  judgeOpenAiApiKey: string;
+  judgeOpenAiModel: string;
 }
 
 export function isDurableDbPath(pathValue: string): boolean {
@@ -257,7 +261,9 @@ export function getConfig(): AppConfig {
       maxEvidenceItemsPerCase: numberEnv("MAX_EVIDENCE_ITEMS_PER_CASE", 25),
       maxEvidenceCharsPerItem: numberEnv("MAX_EVIDENCE_CHARS_PER_ITEM", 10000),
       maxEvidenceCharsPerCase: numberEnv("MAX_EVIDENCE_CHARS_PER_CASE", 250000),
-      maxSubmissionCharsPerPhase: numberEnv("MAX_SUBMISSION_CHARS_PER_PHASE", 20000)
+      maxSubmissionCharsPerPhase: numberEnv("MAX_SUBMISSION_CHARS_PER_PHASE", 20000),
+      maxClaimSummaryChars: numberEnv("MAX_CLAIM_SUMMARY_CHARS", 400),
+      maxCaseTitleChars: numberEnv("MAX_CASE_TITLE_CHARS", 40)
     },
     rateLimits: {
       filingPer24h: numberEnv("RATE_LIMIT_FILINGS_PER_24H", 1),
@@ -279,7 +285,9 @@ export function getConfig(): AppConfig {
       }
     },
     logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error",
-    adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos")
+    adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos"),
+    judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", ""),
+    judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini")
   };
   validateConfig(config);
   return config;

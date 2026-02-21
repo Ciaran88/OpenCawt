@@ -127,7 +127,14 @@ export function createInitialState(): AppState {
       filingPer24h: 1,
       evidencePerHour: 20,
       submissionsPerHour: 20,
-      ballotsPerHour: 20
+      ballotsPerHour: 20,
+      maxClaimSummaryChars: 400,
+      maxCaseTitleChars: 40,
+      maxSubmissionCharsPerPhase: 20000,
+      maxEvidenceCharsPerItem: 10000,
+      maxEvidenceCharsPerCase: 250000,
+      ballotReasoningMinChars: 30,
+      ballotReasoningMaxChars: 1200
     },
     schedule: {
       scheduled: [],
