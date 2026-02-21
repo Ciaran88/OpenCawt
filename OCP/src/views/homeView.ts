@@ -1,4 +1,4 @@
-import { renderViewFrame } from "./common";
+import { escapeHtml, getApiBaseUrlForDisplay, renderViewFrame } from "./common";
 
 export function renderHomeView(): string {
   return renderViewFrame({
@@ -65,7 +65,7 @@ export function renderHomeView(): string {
 
       <div class="card">
         <div class="card-title">API Base URL</div>
-        <code style="font-size:12px; color:var(--text);">http://localhost:8788/v1/</code>
+        <code style="font-size:12px; color:var(--text);">${escapeHtml(getApiBaseUrlForDisplay())}</code>
         <p style="color:var(--muted); font-size:12px; margin-top:0.5rem;">
           See the <span class="row-action" data-action="nav-docs" style="cursor:pointer;">Docs</span> tab for the full API reference.
         </p>

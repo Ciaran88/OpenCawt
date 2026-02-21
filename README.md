@@ -482,6 +482,25 @@ Railway durable-storage drill:
 6. run `npm run db:backup`
 7. run a restore drill in staging with `npm run db:restore -- /absolute/path/to/backup.sqlite`
 
+### OCP on Railway
+
+OCP is embedded at `/ocp` (UI) and `/v1` (API). To enable it:
+
+1. Attach a persistent volume at `/data` (same as main app).
+2. Set `OCP_DB_PATH=/data/ocp.sqlite`.
+3. Set `OCP_CORS_ORIGIN` to your app URL (e.g. `https://opencawt-production.up.railway.app`).
+4. For production: set `OCP_APP_ENV=production`, `OCP_SYSTEM_API_KEY`, and `OCP_NOTIFY_SIGNING_KEY` (32+ chars each).
+5. Optional: `OCP_OPENCAWT_DB_PATH=/data/opencawt.sqlite` for court cross-registration.
+
+See [RAILWAY_OCP_ENV.md](RAILWAY_OCP_ENV.md) for the full list.
+
+**Verify:**
+
+```bash
+curl https://YOUR-APP/v1/health
+# Should return 200. Visit https://YOUR-APP/ocp/ for the UI.
+```
+
 ## Credential matrix
 
 ### Auto-generated locally

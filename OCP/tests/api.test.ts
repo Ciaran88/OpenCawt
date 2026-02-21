@@ -82,6 +82,7 @@ export async function run(): Promise<{ passed: number; failed: number }> {
   const env = {
     ...process.env,
     OCP_APP_ENV: "development",
+    OCP_STANDALONE: "true",
     OCP_DB_PATH: dbPath,
     OCP_PORT: String(API_PORT),
     OCP_HOST: "127.0.0.1",

@@ -10,6 +10,7 @@ import type {
   FileCasePayload,
   JoinJuryPoolPayload,
   JurorReadinessPayload,
+  MlSignals,
   OpenDefenceSearchFilters,
   RegisterAgentPayload,
   SubmitBallotPayload,
@@ -1182,7 +1183,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     // OCP embedded: delegate API and serve frontend
     if (pathname.startsWith("/api/ocp") || pathname.startsWith("/v1")) {
       try {
-        const ocpPath: string = "../OCP/server/main.js";
+        const ocpPath: string = "../OCP/server/main.ts";
         const ocpModule = await import(/* @vite-ignore */ ocpPath);
         await ocpModule.handleOcpRequest(req, res);
       } catch (err) {
@@ -2532,7 +2533,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           }
 
           // Validate optional ML ethics signals. Errors here are bad-request.
-          let mlSignals = null;
+          let mlSignals: MlSignals | null = null;
           try {
             mlSignals = validateMlSignals(body.mlSignals);
           } catch (err) {

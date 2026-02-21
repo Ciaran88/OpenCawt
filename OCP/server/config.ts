@@ -8,6 +8,7 @@ export interface OcpConfig {
   apiHost: string;
   apiPort: number;
   corsOrigin: string;
+  publicBaseUrl: string;
   dbPath: string;
   opencawtDbPath: string;
   notifySigningKey: string;
@@ -20,6 +21,10 @@ export interface OcpConfig {
   systemApiKey: string;
   authRateLimitWindowMs: number;
   authRateLimitMax: number;
+  /** URL of the OpenCawt mint worker — required when solanaMode === "rpc". */
+  mintWorkerUrl: string;
+  /** Shared secret sent as X-Worker-Token to the mint worker. */
+  mintWorkerToken: string;
 }
 
 function loadEnvFile(): Record<string, string> {
@@ -66,6 +71,15 @@ function getInt(
   return n;
 }
 
+function getOptional(
+  env: Record<string, string>,
+  key: string,
+  fallback: string
+): string {
+  const val = process.env[key] ?? env[key];
+  return val !== undefined ? val : fallback;
+}
+
 export function getConfig(): OcpConfig {
   const env = loadEnvFile();
   const appEnv = get(env, "OCP_APP_ENV", "development");
@@ -79,6 +93,7 @@ export function getConfig(): OcpConfig {
     apiHost: get(env, "OCP_HOST", "0.0.0.0"),
     apiPort: getInt(env, "OCP_PORT", 8788),
     corsOrigin: get(env, "OCP_CORS_ORIGIN", "http://localhost:5174"),
+    publicBaseUrl: getOptional(env, "OCP_PUBLIC_URL", getOptional(env, "OCP_CORS_ORIGIN", "http://localhost:8788")).replace(/\/$/, ""),
     dbPath: get(env, "OCP_DB_PATH", "./runtime/ocp.sqlite"),
     opencawtDbPath: get(env, "OCP_OPENCAWT_DB_PATH", ""),
     notifySigningKey: get(env, "OCP_NOTIFY_SIGNING_KEY", isDevelopment ? "dev-ocp-notify-key" : ""),
@@ -91,6 +106,8 @@ export function getConfig(): OcpConfig {
     systemApiKey: get(env, "OCP_SYSTEM_API_KEY", isDevelopment ? "dev-ocp-system-key" : ""),
     authRateLimitWindowMs: getInt(env, "OCP_AUTH_RATE_LIMIT_WINDOW_MS", 900_000),
     authRateLimitMax: getInt(env, "OCP_AUTH_RATE_LIMIT_MAX", 20),
+    mintWorkerUrl:   getOptional(env, "OCP_MINT_WORKER_URL",   "http://localhost:8790"),
+    mintWorkerToken: getOptional(env, "OCP_MINT_WORKER_TOKEN", "dev-worker-token"),
   };
 
   if (isProduction) {
@@ -101,6 +118,14 @@ export function getConfig(): OcpConfig {
     }
     if (config.notifySigningKey === "dev-ocp-notify-key" || config.notifySigningKey.length < 32) {
       throw new Error("[OCP Config] OCP_NOTIFY_SIGNING_KEY must be at least 32 characters and not the dev default in production.");
+    }
+    if (config.solanaMode === "rpc") {
+      if (!config.mintWorkerUrl || config.mintWorkerUrl === "http://localhost:8790") {
+        throw new Error("[OCP Config] OCP_MINT_WORKER_URL must be set to the remote mint worker URL in production.");
+      }
+      if (!config.mintWorkerToken || config.mintWorkerToken === "dev-worker-token") {
+        throw new Error("[OCP Config] OCP_MINT_WORKER_TOKEN must be set and not the dev default in production.");
+      }
     }
   }
 

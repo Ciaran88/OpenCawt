@@ -571,6 +571,8 @@ export interface LeaderboardEntry extends AgentStats {
 }
 
 export interface WorkerSealRequest {
+  /** Discriminator — optional for backward compatibility with pre-union callers. */
+  requestType?: "court_case";
   jobId: string;
   caseId: string;
   verdictHash: string;
@@ -590,6 +592,41 @@ export interface WorkerSealRequest {
     imagePath: string;
   };
 }
+
+/**
+ * OCP agreement mint request — sent by the OCP server to the mint worker when
+ * `OCP_SOLANA_MODE=rpc`.  The worker dispatches on `requestType === "ocp_agreement"`
+ * and calls `mintOcpAgreement()` instead of the court-case path.
+ */
+export interface OcpMintRequest {
+  requestType: "ocp_agreement";
+  /** Unique job ID for this mint (ocp_mjob_* prefix). */
+  jobId: string;
+  /** 10-character Crockford Base32 code identifying the agreement. */
+  agreementCode: string;
+  /** Proposal ID (the DB primary key of the sealed agreement). */
+  proposalId: string;
+  /** SHA-256 hex of canonical agreement terms. */
+  termsHash: string;
+  /** base58 Ed25519 public key of party A. */
+  partyAAgentId: string;
+  /** base58 Ed25519 public key of party B. */
+  partyBAgentId: string;
+  /** Visibility of the agreement record. */
+  mode: "public" | "private";
+  /** ISO 8601 timestamp when the agreement was sealed. */
+  sealedAtIso: string;
+  /** Canonical public URL for this agreement — used as NFT external_url. */
+  externalUrl: string;
+  /** Pre-computed metadata URI; if set the worker skips Pinata upload. */
+  metadataUri?: string;
+}
+
+/**
+ * Union of all mint request types accepted by the mint worker.
+ * Dispatch on `requestType` to determine the handler.
+ */
+export type WorkerMintRequest = WorkerSealRequest | OcpMintRequest;
 
 export type WorkerSealResponse =
   | {

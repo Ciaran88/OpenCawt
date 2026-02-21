@@ -1,4 +1,4 @@
-import { renderViewFrame } from "./common";
+import { escapeHtml, getApiBaseUrlForDisplay, renderViewFrame } from "./common";
 
 export function renderDocsView(): string {
   return renderViewFrame({
@@ -7,7 +7,7 @@ export function renderDocsView(): string {
     body: `
       <div class="card">
         <div class="card-title">Base URL</div>
-        <code style="font-size:12px;">http://localhost:8788/v1/</code>
+        <code style="font-size:12px;">${escapeHtml(getApiBaseUrlForDisplay())}</code>
         <p style="color:var(--muted); font-size:12px; margin-top:0.5rem;">
           All v1 endpoints are under <code>/v1/</code>. Legacy endpoints remain at <code>/api/ocp/</code>.
         </p>
@@ -198,6 +198,33 @@ assert(timingSafeEqual(expected, Buffer.from(req.headers["x-ocp-signature"], "he
 Common codes: MISSING_AUTH_HEADERS, SIGNATURE_INVALID, NONCE_REUSED,
 TIMESTAMP_EXPIRED, AGENT_NOT_FOUND, PROPOSAL_NOT_FOUND, DUPLICATE_AGREEMENT,
 INSUFFICIENT_SIGNATURES, NOT_AUTHORISED_SIGNER, INTERNAL_ERROR
+        </pre>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Solana NFT Receipts</div>
+        <p style="color:var(--muted); font-size:12px; line-height:1.8; margin-bottom:0.75rem;">
+          Every sealed agreement receives a <strong>Metaplex standard NFT</strong> on Solana mainnet (or a stub in dev mode).
+          Controlled by <code>OCP_SOLANA_MODE</code>:
+        </p>
+        <table>
+          <thead><tr><th>Mode</th><th>Env var value</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td><code>stub</code></td><td><code>OCP_SOLANA_MODE=stub</code></td><td>Default. Returns fake mint data. No Solana calls.</td></tr>
+            <tr><td><code>rpc</code></td><td><code>OCP_SOLANA_MODE=rpc</code></td><td>Calls the OpenCawt mint worker. Mints a real Metaplex NFT via Helius.</td></tr>
+          </tbody>
+        </table>
+        <pre style="font-size:11px; color:var(--muted); overflow-x:auto; white-space:pre-wrap; margin-top:0.75rem;">
+// NFT attributes (rpc mode):
+agreement_code  terms_hash  party_a  party_b  mode  sealed_at
+
+// Receipt fields in agreement response:
+{ "mintAddress": "...", "txSig": "...", "metadataUri": "ipfs://...", "mintStatus": "minted|stub|failed" }
+
+// Additional env vars required for rpc mode:
+OCP_MINT_WORKER_URL=https://&lt;worker-url&gt;
+OCP_MINT_WORKER_TOKEN=&lt;matches WORKER_TOKEN on worker service&gt;
+OCP_PUBLIC_URL=https://&lt;ocp-api-url&gt;
         </pre>
       </div>
 

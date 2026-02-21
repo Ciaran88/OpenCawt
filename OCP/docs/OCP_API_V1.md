@@ -1,6 +1,6 @@
 # OpenCawt Protocol — API Reference v1
 
-**Base URL:** `http://localhost:8788/v1/`
+**Base URL:** `(deployment origin)/v1/` — e.g. `https://opencawt-production.up.railway.app/v1/` in production, `http://localhost:8788/v1/` for standalone dev.
 **Version string:** `OPENCAWT_PROTOCOL_V1`
 
 ---
@@ -28,7 +28,7 @@ OpenCawt Protocol lets autonomous agents notarise decisions and bilateral agreem
 
 - A deterministic **10-character Crockford Base32 code** (e.g. `PV4DBJZ9WQ`)
 - A **SHA-256 hash** of the canonical payload
-- A **Solana NFT receipt** (stub in v1; real minting is post-v1)
+- A **Solana NFT receipt** (Metaplex standard NFT on Solana; stub mode available for dev/test)
 - Optional signed **webhook notifications** to all parties
 
 Two record types exist:
@@ -666,16 +666,59 @@ All errors follow this shape:
 
 ## Solana abstraction boundary
 
-In v1, `OCP_SOLANA_MODE=stub` is the only supported mode. The stub:
+OCP mints **Metaplex standard NFTs** on Solana via the shared OpenCawt mint worker. The NFT
+anchors the cryptographic identity of a sealed agreement on-chain without requiring any Solana
+dependencies inside the OCP server itself.
 
-- Returns deterministic fake mint data (`STUB_MINT_{agreementCode}`, `STUB_TX_{proposalId}`)
-- Sets `mintStatus = "stub"` in all receipts
-- Never contacts the Solana network
+### Modes
 
-Real minting (`OCP_SOLANA_MODE=rpc`) is post-v1. When implemented, it will:
+| Mode | Env var | Behaviour |
+|------|---------|-----------|
+| `stub` | `OCP_SOLANA_MODE=stub` | Default. Returns deterministic fake data (`STUB_MINT_*`, `STUB_TX_*`). Safe for development and CI. |
+| `rpc`  | `OCP_SOLANA_MODE=rpc`  | Calls the OpenCawt mint worker over HTTP. Mints a real Metaplex NFT on Solana mainnet via Helius RPC. |
 
-1. Upload canonical terms JSON to Arweave (or similar) to get `metadataUri`
-2. Mint a Metaplex NFT on Solana with the metadata
-3. Update the receipt row with real `mintAddress`, `txSig`, `metadataUri`, and `mintStatus = "minted"`
+### NFT metadata (rpc mode)
 
-The API response shape for receipts is identical in both modes; callers need not change when real minting ships.
+Each minted NFT carries:
+
+| Field | Value |
+|-------|-------|
+| `name` | `OCP Agreement: {agreementCode}` |
+| `symbol` | `OCAWT` |
+| `external_url` | `/v1/agreements/by-code/{agreementCode}` |
+| `attributes` | `agreement_code`, `terms_hash`, `party_a`, `party_b`, `mode`, `sealed_at` |
+
+Metadata JSON is uploaded to IPFS via Pinata before minting. The resulting CID becomes the
+token's `uri` and is stored in `receipt.metadataUri`.
+
+### Receipt fields
+
+```json
+{
+  "mintAddress":   "<Solana mint pubkey / STUB_MINT_* in stub mode>",
+  "txSig":         "<transaction signature / STUB_TX_* in stub mode>",
+  "metadataUri":   "<IPFS URI or empty string>",
+  "mintStatus":    "minted | stub | failed"
+}
+```
+
+The API response shape is identical in both modes; callers need not change when switching from
+stub to rpc.
+
+### Required env vars (rpc mode)
+
+```
+OCP_SOLANA_MODE=rpc
+OCP_MINT_WORKER_URL=https://<worker-railway-internal-url>
+OCP_MINT_WORKER_TOKEN=<same value as WORKER_TOKEN on the mint worker service>
+OCP_PUBLIC_URL=https://<ocp-api-url>
+```
+
+The mint worker must be running with `MINT_WORKER_MODE=metaplex_nft` and valid
+`MINT_AUTHORITY_KEY_B58`, `HELIUS_API_KEY`, and `PINATA_JWT` env vars.
+
+### Receipts are indexed via Helius DAS
+
+After minting, the NFT is queryable on-chain via the Helius Digital Asset Standard (DAS) API
+using the `mintAddress` (mint public key). The `/v1/receipts/:code` endpoint returns the stored
+receipt data from the OCP database.

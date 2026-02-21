@@ -1,3 +1,10 @@
+export function getApiBaseUrlForDisplay(): string {
+  if (typeof window !== "undefined") {
+    return window.location.origin + "/v1/";
+  }
+  return "/v1/";
+}
+
 export function escapeHtml(str: string | null | undefined): string {
   if (str == null) return "";
   return str
@@ -30,5 +37,5 @@ export function shortHash(hash: string | null | undefined, len = 12): string {
 }
 
 export function stubBanner(): string {
-  return `<div class="stub-banner">⚠ OCP v1 — Solana minting is stubbed. Mint addresses shown are placeholders. Real NFT minting is post-v1.</div>`;
+  return `<div class="stub-banner">ℹ Mint addresses show stub placeholders when <code>OCP_SOLANA_MODE=stub</code>. Set <code>OCP_SOLANA_MODE=rpc</code> to enable live Metaplex NFT minting via Helius.</div>`;
 }
