@@ -65,6 +65,7 @@ export interface AdminStatus {
   railwayWorker: { ready: boolean; mode: string };
   helius: { ready: boolean; hasApiKey: boolean };
   drand: { ready: boolean; mode: string };
+  ocp: { ready: boolean };
   softDailyCaseCap: number;
   softCapMode: "warn" | "enforce";
   jurorPanelSize: number;
@@ -86,6 +87,8 @@ export interface AdminCheckResult {
   };
   helius: { ready: boolean; error?: string };
   drand: { ready: boolean; error?: string };
+  ocp: { ready: boolean; error?: string };
+  treasuryBalanceSol?: string | null;
 }
 
 export async function adminGetStatus(token: string): Promise<AdminStatus> {

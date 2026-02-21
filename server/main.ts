@@ -1452,6 +1452,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       // Drand: check if mode is http (stub means not connected)
       const drandReady = config.drandMode === "http";
 
+      // OCP API: live check to /v1/health
+      let ocpReady = false;
+      try {
+        const ocpRes = await Promise.race([
+          fetch(`http://127.0.0.1:${config.apiPort}/v1/health`, { method: "GET" }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("OCP timeout")), 3000)
+          )
+        ]);
+        if (ocpRes.ok) {
+          const ocpJson = (await ocpRes.json()) as { status?: string; dbOk?: boolean };
+          ocpReady = ocpJson.status === "ok" && ocpJson.dbOk === true;
+        }
+      } catch {
+        ocpReady = false;
+      }
+
       const workflowParts: string[] = [
         "Filing fee: prosecution pays SOL to treasury.",
         "Case close: verdict computed, seal job enqueued.",
@@ -1470,6 +1487,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         railwayWorker: { ready: workerReady, mode: config.sealWorkerMode },
         helius: { ready: heliusReady, hasApiKey: Boolean(config.heliusApiKey) },
         drand: { ready: drandReady, mode: config.drandMode },
+        ocp: { ready: ocpReady },
         softDailyCaseCap: config.softDailyCaseCap,
         softCapMode: config.softCapMode,
         jurorPanelSize: config.rules.jurorPanelSize,
@@ -1581,12 +1599,57 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             ).then((r) => (r.ok ? { ready: r.data } : { ready: false as const, error: r.error }))
           : Promise.resolve({ ready: false, error: "stub mode" });
 
-      const [dbResult, workerResult, heliusResult, drandResult] = await Promise.all([
-        dbCheck,
-        workerCheck,
-        heliusCheck,
-        drandCheck
-      ]);
+      const ocpCheck = withTimeout(
+        fetch(`http://127.0.0.1:${config.apiPort}/v1/health`, { method: "GET" }).then(async (r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const json = (await r.json()) as { status?: string; dbOk?: boolean };
+          if (json.status !== "ok" || json.dbOk !== true) {
+            throw new Error(json.dbOk === false ? "OCP DB unreachable" : "Invalid health response");
+          }
+          return true;
+        }),
+        "OCP API"
+      ).then((r) => (r.ok ? { ready: r.data } : { ready: false as const, error: r.error }));
+
+      const treasuryBalanceCheck =
+        config.treasuryAddress && config.heliusApiKey
+          ? withTimeout(
+              (async () => {
+                let url = (config.heliusRpcUrl || "").trim();
+                if (!url.includes("api-key=")) {
+                  url += url.includes("?") ? "&" : "?";
+                  url += `api-key=${encodeURIComponent(config.heliusApiKey!)}`;
+                }
+                const res = await fetch(url, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Accept: "application/json" },
+                  body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "getBalance",
+                    params: [config.treasuryAddress, { commitment: "finalized" }]
+                  })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const envelope = (await res.json()) as { result?: { value?: number }; error?: { message?: string } };
+                if (envelope.error) throw new Error(envelope.error.message ?? "RPC error");
+                const lamports = envelope.result?.value ?? 0;
+                if (typeof lamports !== "number") throw new Error("Invalid balance response");
+                return (lamports / 1e9).toFixed(4);
+              })(),
+              "Treasury balance"
+            ).then((r) => (r.ok ? r.data : null))
+          : Promise.resolve(null);
+
+      const [dbResult, workerResult, heliusResult, drandResult, ocpResult, treasuryBalanceSol] =
+        await Promise.all([
+          dbCheck,
+          workerCheck,
+          heliusCheck,
+          drandCheck,
+          ocpCheck,
+          treasuryBalanceCheck
+        ]);
 
       sendJson(res, 200, {
         db: { ready: dbResult.ready, error: dbResult.error },
@@ -1597,7 +1660,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           mintAuthorityPubkey: workerResult.mintAuthorityPubkey
         },
         helius: { ready: heliusResult.ready, error: heliusResult.error },
-        drand: { ready: drandResult.ready, error: drandResult.error }
+        drand: { ready: drandResult.ready, error: drandResult.error },
+        ocp: { ready: ocpResult.ready, error: ocpResult.error },
+        treasuryBalanceSol
       });
       return;
     }

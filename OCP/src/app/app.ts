@@ -127,7 +127,7 @@ function render(): void {
   if (!app) return;
   app.innerHTML = `
     <nav class="sidebar">
-      <div class="sidebar-logo">OpenCawt<span> Protocol</span></div>
+      <div class="sidebar-logo"><img src="/opencawt_white.png" alt="" class="sidebar-logo-img" />OpenCawt<span> Protocol</span></div>
       ${renderSidebar()}
     </nav>
     <main class="main">

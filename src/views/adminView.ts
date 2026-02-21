@@ -141,14 +141,38 @@ function renderStatusSection(
   const drandReady = useCheck ? checkResults.drand.ready : status.drand.ready;
   const drandDetail = useCheck ? (checkResults.drand.error ?? status.drand.mode) : status.drand.mode;
 
+  const ocpReady = useCheck ? checkResults.ocp?.ready ?? false : status.ocp?.ready ?? false;
+  const ocpDetail = useCheck && checkResults.ocp?.error ? checkResults.ocp.error : "v1/health + DB";
+
+  const treasuryBalanceDisplay = status?.treasuryAddress
+    ? (checkLoading ? "Checking…" : (checkResults?.treasuryBalanceSol ?? "—"))
+    : null;
+
+  const heliusTone = checking ? "checking" : heliusReady ? "ready" : "error";
+  const heliusText = checking ? "Checking…" : heliusReady ? "Ready" : "Error";
+  const heliusDisplayDetail = checking ? undefined : (useCheck ? checkResults.helius.error : heliusDetail);
+  const heliusWithTreasury = `
+    <div class="admin-status-item admin-status-item-with-sub">
+      <span class="admin-status-label">Helius API</span>
+      <span class="admin-status-pill is-${heliusTone}">${heliusText}</span>
+      ${heliusDisplayDetail ? `<span class="admin-status-detail">${escapeAdminHtml(heliusDisplayDetail)}</span>` : ""}
+      ${treasuryBalanceDisplay !== null ? `
+      <div class="admin-treasury-pill">
+        <span class="admin-status-label">Treasury Wallet balance (SOL):</span>
+        <span class="admin-treasury-value">${escapeAdminHtml(treasuryBalanceDisplay)}</span>
+      </div>` : ""}
+    </div>
+  `;
+
   return `
     <div class="admin-section-body">
       <div class="admin-status-row">
         <div class="admin-status-grid">
           ${statusPill("SQL Database", dbReady, dbDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.db.error : undefined) })}
           ${statusPill("Railway Worker", workerReady, workerDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.railwayWorker.error : undefined) })}
-          ${statusPill("Helius API", heliusReady, heliusDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.helius.error : undefined) })}
+          ${heliusWithTreasury}
           ${statusPill("Drand API", drandReady, drandDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.drand.error : undefined) })}
+          ${statusPill("OCP API", ocpReady, ocpDetail, { checking, error: checking ? undefined : (useCheck ? checkResults.ocp?.error : undefined) })}
         </div>
         <button
           type="button"

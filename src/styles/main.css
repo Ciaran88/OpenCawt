@@ -4832,6 +4832,31 @@ body {
   color: var(--ink-muted, #8a8a9a);
 }
 
+.admin-status-item-with-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-treasury-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  color: var(--ink-muted, #8a8a9a);
+}
+
+.admin-treasury-pill .admin-status-label {
+  font-size: 0.7rem;
+}
+
+.admin-treasury-value {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  color: var(--ink, #e8eaf2);
+}
+
 .admin-meta {
   font-size: 0.82rem;
   color: var(--ink-muted, #8a8a9a);
