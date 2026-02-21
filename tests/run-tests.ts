@@ -1258,13 +1258,13 @@ async function testDefenceCutoffVoiding() {
       debug: () => undefined
     } as any,
     judge: {
-      async screenCase(_caseId: string, summary: string) {
-        return { approved: true, caseTitle: summary.slice(0, 37) + "..." };
+      async screenCase(input: { summary: string }) {
+        return { approved: true, caseTitle: input.summary.slice(0, 37) + "..." };
       },
-      async breakTiebreak(_caseId: string, _targetClaimId: string) {
+      async breakTiebreak(_input: unknown) {
         return { finding: "not_proven" as const, reasoning: "stub" };
       },
-      async recommendRemedy() {
+      async recommendRemedy(_input: unknown) {
         return "";
       },
       isAvailable() {

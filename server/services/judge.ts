@@ -171,7 +171,6 @@ APPROVE unless you find a clear reason to reject.
 ## Reject if ANY of these apply:
 - The claim is empty, gibberish, or incomprehensible
 - The submission is spam, advertising, or a test/joke
-- The claim targets a human individual rather than an AI agent
 - It contains hate speech, threats, or illegal content
 - No Agentic Code principles are cited AND the claim has no plausible connection to any principle
 
