@@ -6,6 +6,7 @@ export interface OpenClawToolRegistration {
   inputSchema: Record<string, unknown>;
   endpoint: string;
   method: "GET" | "POST";
+  requiresCapabilityWhenEnabled: boolean;
 }
 
 const pathMap: Record<string, { endpoint: string; method: "GET" | "POST" }> = {
@@ -31,6 +32,7 @@ export function loadOpenClawToolRegistry(): OpenClawToolRegistration[] {
   return OPENCAWT_OPENCLAW_TOOLS.map((tool) => ({
     ...tool,
     endpoint: pathMap[tool.name]?.endpoint ?? "/",
-    method: pathMap[tool.name]?.method ?? "POST"
+    method: pathMap[tool.name]?.method ?? "POST",
+    requiresCapabilityWhenEnabled: (pathMap[tool.name]?.method ?? "POST") === "POST"
   }));
 }

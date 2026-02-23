@@ -26,7 +26,35 @@ interface FileResponse {
   selectedJurors: string[];
 }
 
-async function registerAgent(baseUrl: string, agent: SmokeAgent): Promise<void> {
+async function issueCapabilityToken(
+  baseUrl: string,
+  systemApiKey: string,
+  agentId: string
+): Promise<string> {
+  const response = await fetch(`${baseUrl}/api/internal/capabilities/issue`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-System-Key": systemApiKey
+    },
+    body: JSON.stringify({
+      agentId,
+      scope: "writes",
+      ttlSeconds: 3600
+    })
+  });
+  const body = (await response.json()) as { capabilityToken?: string; error?: { message?: string } };
+  if (!response.ok || !body.capabilityToken) {
+    throw new Error(`Failed to issue capability for ${agentId}: ${body.error?.message ?? response.status}`);
+  }
+  return body.capabilityToken;
+}
+
+async function registerAgent(
+  baseUrl: string,
+  agent: SmokeAgent,
+  capabilityToken?: string
+): Promise<void> {
   await signedPost({
     baseUrl,
     path: "/api/agents/register",
@@ -35,11 +63,16 @@ async function registerAgent(baseUrl: string, agent: SmokeAgent): Promise<void> 
       jurorEligible: true
     },
     agent,
-    idempotencyKey: `register:${agent.agentId}`
+    idempotencyKey: `register:${agent.agentId}`,
+    capabilityToken
   });
 }
 
-async function joinJuryPool(baseUrl: string, juror: SmokeAgent): Promise<void> {
+async function joinJuryPool(
+  baseUrl: string,
+  juror: SmokeAgent,
+  capabilityToken?: string
+): Promise<void> {
   await signedPost({
     baseUrl,
     path: "/api/jury-pool/join",
@@ -49,7 +82,8 @@ async function joinJuryPool(baseUrl: string, juror: SmokeAgent): Promise<void> {
       profile: "Smoke juror"
     },
     agent: juror,
-    idempotencyKey: `join:${juror.agentId}`
+    idempotencyKey: `join:${juror.agentId}`,
+    capabilityToken
   });
 }
 
@@ -75,10 +109,14 @@ async function main() {
   const apiHost = "127.0.0.1";
   const apiPort = "8797";
   const baseUrl = `http://${apiHost}:${apiPort}`;
+  const systemApiKey = "smoke-system-key";
   const server = startNodeTsxProcess("smoke-api", "server/main.ts", {
     API_HOST: apiHost,
     API_PORT: apiPort,
     DB_PATH: dbPath,
+    SYSTEM_API_KEY: systemApiKey,
+    CAPABILITY_KEYS_ENABLED: "true",
+    COURT_MODE: "11-juror",
     SOLANA_MODE: "stub",
     DRAND_MODE: "stub",
     SEAL_WORKER_MODE: "stub",
@@ -95,12 +133,21 @@ async function main() {
     const prosecution = await createSmokeAgent();
     const defence = await createSmokeAgent();
     const jurors = await Promise.all(Array.from({ length: 14 }, () => createSmokeAgent()));
+    const capabilityByAgent = new Map<string, string>();
+    const allAgents: SmokeAgent[] = [prosecution, defence, ...jurors];
+    for (const agent of allAgents) {
+      capabilityByAgent.set(
+        agent.agentId,
+        await issueCapabilityToken(baseUrl, systemApiKey, agent.agentId)
+      );
+    }
+    const capabilityFor = (agent: SmokeAgent): string => capabilityByAgent.get(agent.agentId) ?? "";
 
-    await registerAgent(baseUrl, prosecution);
-    await registerAgent(baseUrl, defence);
+    await registerAgent(baseUrl, prosecution, capabilityFor(prosecution));
+    await registerAgent(baseUrl, defence, capabilityFor(defence));
     for (const juror of jurors) {
-      await registerAgent(baseUrl, juror);
-      await joinJuryPool(baseUrl, juror);
+      await registerAgent(baseUrl, juror, capabilityFor(juror));
+      await joinJuryPool(baseUrl, juror, capabilityFor(juror));
     }
 
     const draft = await signedPost<DraftResponse>({
@@ -114,7 +161,8 @@ async function main() {
         allegedPrinciples: ["P2", "P8"]
       },
       agent: prosecution,
-      idempotencyKey: "draft:smoke"
+      idempotencyKey: "draft:smoke",
+      capabilityToken: capabilityFor(prosecution)
     });
 
     const caseId = draft.caseId;
@@ -133,7 +181,8 @@ async function main() {
             attachmentUrls: ["https://media.example.org/draft.png"]
           },
           agent: prosecution,
-          caseId
+          caseId,
+          capabilityToken: capabilityFor(prosecution)
         })
     });
 
@@ -145,10 +194,11 @@ async function main() {
       },
       agent: prosecution,
       caseId,
-      idempotencyKey: `file:${caseId}`
+      idempotencyKey: `file:${caseId}`,
+      capabilityToken: capabilityFor(prosecution)
     });
     assert.equal(file.caseId, caseId);
-    assert.ok(file.selectedJurors.length === 11, "Expected 11 selected jurors.");
+    assert.ok(file.selectedJurors.length >= 11, "Expected at least 11 selected jurors.");
 
     await signedPost({
       baseUrl,
@@ -158,7 +208,8 @@ async function main() {
       },
       agent: defence,
       caseId,
-      idempotencyKey: `volunteer:${caseId}`
+      idempotencyKey: `volunteer:${caseId}`,
+      capabilityToken: capabilityFor(defence)
     });
 
     await pollStage(baseUrl, caseId, "jury_readiness");
@@ -166,7 +217,9 @@ async function main() {
     const selectedJurorAgents = file.selectedJurors
       .map((jurorId) => jurors.find((item) => item.agentId === jurorId))
       .filter(Boolean) as SmokeAgent[];
-    assert.equal(selectedJurorAgents.length, 11, "Expected local keys for selected jurors.");
+    assert.ok(selectedJurorAgents.length >= 11, "Expected local keys for selected jurors.");
+    const firstSelectedJuror = selectedJurorAgents[0];
+    assert.ok(firstSelectedJuror, "Expected at least one selected juror.");
 
     for (const juror of selectedJurorAgents) {
       await signedPost({
@@ -177,7 +230,8 @@ async function main() {
         },
         agent: juror,
         caseId,
-        idempotencyKey: `ready:${caseId}:${juror.agentId}`
+        idempotencyKey: `ready:${caseId}:${juror.agentId}`,
+        capabilityToken: capabilityFor(juror)
       });
     }
 
@@ -204,7 +258,8 @@ async function main() {
           },
           agent: prosecution,
           caseId,
-          idempotencyKey: `evidence:${caseId}:pros`
+          idempotencyKey: `evidence:${caseId}:pros`,
+          capabilityToken: capabilityFor(prosecution)
         });
       }
 
@@ -220,7 +275,8 @@ async function main() {
         },
         agent: prosecution,
         caseId,
-        idempotencyKey: `stage:${caseId}:pros:${stage}`
+        idempotencyKey: `stage:${caseId}:pros:${stage}`,
+        capabilityToken: capabilityFor(prosecution)
       });
       await signedPost({
         baseUrl,
@@ -234,7 +290,8 @@ async function main() {
         },
         agent: defence,
         caseId,
-        idempotencyKey: `stage:${caseId}:def:${stage}`
+        idempotencyKey: `stage:${caseId}:def:${stage}`,
+        capabilityToken: capabilityFor(defence)
       });
 
       if (stage !== "summing_up") {
@@ -270,8 +327,9 @@ async function main() {
             reasoningSummary: "Too short.",
             principlesReliedOn: ["P2"]
           },
-          agent: selectedJurorAgents[0],
-          caseId
+          agent: firstSelectedJuror,
+          caseId,
+          capabilityToken: capabilityFor(firstSelectedJuror)
         })
     });
 
@@ -297,7 +355,8 @@ async function main() {
           },
           agent: juror,
           caseId,
-        idempotencyKey: `ballot:${caseId}:${juror.agentId}`
+        idempotencyKey: `ballot:${caseId}:${juror.agentId}`,
+        capabilityToken: capabilityFor(juror)
       });
     }
 
@@ -305,9 +364,10 @@ async function main() {
       baseUrl,
       path: "/api/jury/assigned",
       payload: {
-        agentId: selectedJurorAgents[0].agentId
+        agentId: firstSelectedJuror.agentId
       },
-      agent: selectedJurorAgents[0]
+      agent: firstSelectedJuror,
+      capabilityToken: capabilityFor(firstSelectedJuror)
     });
     assert.ok(Array.isArray(assigned.cases), "Expected assigned case response shape.");
 

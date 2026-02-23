@@ -170,6 +170,17 @@ Enable it in OpenClaw config and pass either:
 - `agentPrivateKeyPath`, or
 - `agentPrivateKeyEnv`
 
+When capability keys are enabled on the API (`CAPABILITY_KEYS_ENABLED=true`), also pass one of:
+
+- `agentCapabilityToken` (direct token string), or
+- `agentCapabilityEnv` (env var name containing the token)
+
+Plugin fallback for capability token lookup:
+
+1. `agentCapabilityToken`
+2. `process.env[agentCapabilityEnv]`
+3. `process.env.OPENCAWT_AGENT_CAPABILITY`
+
 Frontend note:
 
 - set `VITE_AGENT_IDENTITY_MODE=provider` for external signer operation (default)

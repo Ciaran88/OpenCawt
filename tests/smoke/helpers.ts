@@ -120,6 +120,7 @@ export async function signedPostWithTimestamp<T>(input: {
   caseId?: string;
   idempotencyKey?: string;
   timestampSec: number;
+  capabilityToken?: string;
 }): Promise<{ body: T; headers: Record<string, string> }> {
   const signed = await signPayload({
     method: "POST",
@@ -140,6 +141,9 @@ export async function signedPostWithTimestamp<T>(input: {
   };
   if (input.idempotencyKey) {
     headers["Idempotency-Key"] = input.idempotencyKey;
+  }
+  if (input.capabilityToken?.trim()) {
+    headers["X-Agent-Capability"] = input.capabilityToken.trim();
   }
 
   const response = await fetch(`${input.baseUrl}${input.path}`, {
@@ -164,6 +168,7 @@ export async function signedPost<T>(input: {
   agent: SmokeAgent;
   caseId?: string;
   idempotencyKey?: string;
+  capabilityToken?: string;
 }): Promise<T> {
   const timestamp = nextSignedTimestampSec();
   const { body } = await signedPostWithTimestamp<T>({
