@@ -20,8 +20,15 @@ import { signPayload } from "../shared/signing";
 
 const BASE = process.env.OPENCAWT_BASE_URL?.trim() || "http://127.0.0.1:8787";
 const ADMIN_PASSWORD = process.env.ADMIN_PANEL_PASSWORD?.trim() || "";
+const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL?.trim() || "";
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY?.trim() || "";
+const TREASURY_ADDRESS = process.env.TREASURY_ADDRESS?.trim() || "";
+const PROVIDED_TREASURY_TX_SIG = process.env.TREASURY_TX_SIG?.trim() || "";
+const TARGET_COURT_MODE = (process.env.JUDGE_SIM_COURT_MODE?.trim() || "judge") as
+  | "judge"
+  | "11-juror";
 const POLL_MS = 2000;
-const MAX_WAIT_MS = 90_000;
+const MAX_WAIT_MS = Number(process.env.JUDGE_SIM_MAX_WAIT_MS ?? "180000");
 
 // ---------------------------------------------------------------------------
 // Keypair helpers
@@ -122,6 +129,102 @@ async function adminPost(path: string, body: unknown, adminToken: string): Promi
     body: JSON.stringify(body)
   });
   return res.json();
+}
+
+async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
+  if (!HELIUS_RPC_URL) {
+    throw new Error("HELIUS_RPC_URL is required for production judge simulation filing.");
+  }
+  const rpcUrl = new URL(HELIUS_RPC_URL);
+  if (!rpcUrl.searchParams.has("api-key") && HELIUS_API_KEY) {
+    rpcUrl.searchParams.set("api-key", HELIUS_API_KEY);
+  }
+  const res = await fetch(rpcUrl.toString(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "judge-sim",
+      method,
+      params
+    })
+  });
+  const json = (await res.json()) as {
+    result?: T;
+    error?: { code?: number; message?: string };
+  };
+  if (json.error) {
+    throw new Error(
+      `Helius RPC ${method} failed (${json.error.code ?? "unknown"}): ${json.error.message ?? "unknown"}`
+    );
+  }
+  return json.result as T;
+}
+
+async function discoverTreasuryTxCandidates(limit = 200): Promise<string[]> {
+  if (!TREASURY_ADDRESS) {
+    return [];
+  }
+  const signatures = await heliusRpc<Array<{ signature?: string; err?: unknown }>>(
+    "getSignaturesForAddress",
+    [TREASURY_ADDRESS, { limit }]
+  );
+  return signatures
+    .filter((entry) => !entry.err && typeof entry.signature === "string")
+    .map((entry) => String(entry.signature))
+    .filter((value) => value.length > 30);
+}
+
+function extractApiErrorCode(payload: any): string {
+  return String(payload?.error?.code ?? payload?.code ?? "UNKNOWN");
+}
+
+async function fileCaseWithDiscovery(
+  prosecution: Agent,
+  caseId: string
+): Promise<{ selectedJurors: string[]; txSigUsed: string }> {
+  const candidateTxs = PROVIDED_TREASURY_TX_SIG
+    ? [PROVIDED_TREASURY_TX_SIG]
+    : await discoverTreasuryTxCandidates(300);
+  if (candidateTxs.length === 0) {
+    throw new Error(
+      "No treasury transaction candidates found. Set TREASURY_TX_SIG explicitly or ensure HELIUS_RPC_URL/TREASURY_ADDRESS are configured."
+    );
+  }
+
+  for (const txSig of candidateTxs) {
+    const { status, data } = await signedPost(
+      prosecution,
+      `/api/cases/${caseId}/file`,
+      { treasuryTxSig: txSig },
+      caseId
+    );
+    if (status === 200) {
+      return {
+        selectedJurors: (data.selectedJurors as string[]) ?? [],
+        txSigUsed: txSig
+      };
+    }
+    const code = extractApiErrorCode(data);
+    if (
+      code === "TREASURY_TX_REPLAY" ||
+      code === "FEE_TOO_LOW" ||
+      code === "TREASURY_MISMATCH" ||
+      code === "SOLANA_TX_NOT_FOUND" ||
+      code === "SOLANA_TX_FAILED" ||
+      code === "TREASURY_TX_NOT_FINALISED" ||
+      code === "HELIUS_RPC_ERROR"
+    ) {
+      continue;
+    }
+    throw new Error(`Case filing failed with non-retriable code ${code}: ${JSON.stringify(data)}`);
+  }
+
+  throw new Error(
+    "Unable to file case using discovered treasury signatures. Provide TREASURY_TX_SIG for an unused, valid transfer to the treasury."
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -278,10 +381,10 @@ async function main() {
   console.log(`  Defence:     ${defence.agentId.slice(0, 12)}...`);
   console.log(`  Jurors:      ${jurors.length} generated`);
 
-  // ── Ensure judge mode ──
-  log("PHASE 2: Switch to judge mode");
+  // ── Ensure requested court mode ──
+  log(`PHASE 2: Switch to ${TARGET_COURT_MODE} mode`);
   const adminToken = await createAdminSessionToken();
-  const modeResult = await adminPost("/api/internal/config/court-mode", { mode: "judge" }, adminToken);
+  const modeResult = await adminPost("/api/internal/config/court-mode", { mode: TARGET_COURT_MODE }, adminToken);
   console.log(`  Court mode set: ${JSON.stringify(modeResult)}`);
 
   // ── Register agents ──
@@ -359,35 +462,31 @@ async function main() {
   );
   console.log(`  Opening submission: ${openStatus === 201 ? "✓" : "✗"} (${openStatus})`);
 
-  // ── File the case (stub treasury TX) ──
-  log("PHASE 7: File case (stub Solana payment)");
-  const { status: fileStatus, data: fileData } = await signedPost(
-    prosecution,
-    `/api/cases/${caseId}/file`,
-    { treasuryTxSig: `stub_tx_sim_${Date.now()}` },
-    caseId
-  );
-  if (fileStatus !== 200) {
-    console.error("  ✗ Filing failed:", fileStatus, fileData);
-    process.exit(1);
-  }
-  const selectedJurors = fileData.selectedJurors as string[];
+  // ── File the case (RPC-compatible tx discovery) ──
+  log("PHASE 7: File case (discover valid treasury TX)");
+  const filingResult = await fileCaseWithDiscovery(prosecution, caseId);
+  const selectedJurors = filingResult.selectedJurors;
   console.log(`  ✓ Case filed. Jury selected: ${selectedJurors.length} jurors`);
+  console.log(`  Filing tx used: ${filingResult.txSigUsed}`);
   console.log(`  Selected juror IDs: ${selectedJurors.map((j: string) => j.slice(0, 8) + "...").join(", ")}`);
 
-  // ── Wait for judge screening ──
-  log("PHASE 8: Judge screening (GPT 5 mini)");
-  console.log("  Waiting for judge_screening → pre_session transition...");
-  console.log("  (This triggers the OpenAI API call for case screening)");
-  await waitForStage(caseId, ["pre_session", "jury_readiness"], "Judge screening passed");
+  if (TARGET_COURT_MODE === "judge") {
+    // ── Wait for judge screening ──
+    log("PHASE 8: Judge screening");
+    console.log("  Waiting for judge_screening → pre_session transition...");
+    await waitForStage(caseId, ["pre_session", "jury_readiness"], "Judge screening passed");
 
-  // Check screening result
-  const caseAfterScreening = await getJson(`/api/cases/${caseId}`);
-  console.log(`  Case title: "${caseAfterScreening.caseTitle ?? "not set"}"`);
-  if (caseAfterScreening.status === "void") {
-    console.error("  ✗ Case was rejected by judge screening!");
-    console.error(`    Reason: ${caseAfterScreening.summary}`);
-    process.exit(1);
+    // Check screening result
+    const caseAfterScreening = await getJson(`/api/cases/${caseId}`);
+    console.log(`  Case title: "${caseAfterScreening.caseTitle ?? "not set"}"`);
+    if (caseAfterScreening.status === "void") {
+      console.error("  ✗ Case was rejected by judge screening!");
+      console.error(`    Reason: ${caseAfterScreening.summary}`);
+      process.exit(1);
+    }
+  } else {
+    log("PHASE 8: Pre-session transition");
+    await waitForStage(caseId, ["pre_session", "jury_readiness"], "Reached pre-session pipeline");
   }
 
   // ── Volunteer defence ──
@@ -570,7 +669,11 @@ async function main() {
   console.log(`  Defence summing up: ${dSumStatus === 201 ? "✓" : "✗"} (${dSumStatus})`);
 
   // ── Voting ──
-  log("PHASE 16: Jury voting (6–6 split)");
+  log(
+    TARGET_COURT_MODE === "judge"
+      ? "PHASE 16: Jury voting (6–6 split)"
+      : "PHASE 16: Jury voting (majority vote)"
+  );
   await waitForStage(caseId, ["voting"], "Reached voting stage");
 
   // Get claim IDs from voteSummary.claimTallies
@@ -583,14 +686,19 @@ async function main() {
   }
   const claimId = claimIds[0];
   console.log(`  Claim ID: ${claimId}`);
-  console.log(`  Submitting 12 ballots (6 proven, 6 not_proven)...`);
+  const targetBallots = TARGET_COURT_MODE === "judge" ? 12 : 11;
+  console.log(
+    TARGET_COURT_MODE === "judge"
+      ? "  Submitting 12 ballots (6 proven, 6 not_proven)..."
+      : "  Submitting 11 ballots (6 proven, 5 not_proven)..."
+  );
 
-  // Submit 6 proven + 6 not_proven
+  // Submit split ballots. Judge mode intentionally ties 6-6.
   let provenCount = 0;
   let notProvenCount = 0;
-  for (let i = 0; i < selectedJurorAgents.length && i < 12; i++) {
+  for (let i = 0; i < selectedJurorAgents.length && i < targetBallots; i++) {
     const juror = selectedJurorAgents[i];
-    const isProven = i < 6;
+    const isProven = TARGET_COURT_MODE === "judge" ? i < 6 : i < 6;
     const finding = isProven ? "proven" : "not_proven";
     const rationale = isProven
       ? JUROR_RATIONALES_PROVEN[provenCount]
@@ -630,9 +738,15 @@ async function main() {
   console.log(`  ✓ Ballots submitted: ${provenCount} proven, ${notProvenCount} not_proven`);
 
   // ── Wait for case closure (tiebreak + remedy) ──
-  log("PHASE 17: Case closure — Judge tiebreak & remedy (GPT 5 mini)");
+  log(
+    TARGET_COURT_MODE === "judge"
+      ? "PHASE 17: Case closure — Judge tiebreak & remedy"
+      : "PHASE 17: Case closure"
+  );
   console.log("  Waiting for case to close...");
-  console.log("  (This triggers: tiebreak for 6-6 split + remedy recommendation)");
+  if (TARGET_COURT_MODE === "judge") {
+    console.log("  (This may trigger judge tiebreak and remedy recommendation)");
+  }
 
   const decision = await waitForDecision(caseId, "Case closed");
 

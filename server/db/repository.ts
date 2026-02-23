@@ -1353,8 +1353,12 @@ export function claimDefenceAssignment(
       return { status: "already_taken", caseRecord: refreshed };
     }
 
-    // For named-defendant filings, session scheduling starts one hour after defence acceptance.
-    if (!caseRecord.scheduledForIso && caseRecord.status === "filed") {
+    // For named-defendant filings, session scheduling starts after defence acceptance.
+    // Initial jury selection immediately moves status to "jury_selected", so include both states.
+    if (
+      !caseRecord.scheduledForIso &&
+      (caseRecord.status === "filed" || caseRecord.status === "jury_selected")
+    ) {
       const scheduleAtIso = new Date(
         new Date(input.nowIso).getTime() + input.scheduleDelaySec * 1000
       ).toISOString();
