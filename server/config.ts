@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import type { TimingRules } from "../shared/contracts";
+import type { CourtMode, TimingRules } from "../shared/contracts";
 
 interface NumericLimitConfig {
   maxEvidenceItemsPerCase: number;
@@ -75,6 +75,7 @@ export interface AppConfig {
   adminSessionTtlSec: number;
   judgeOpenAiApiKey: string;
   judgeOpenAiModel: string;
+  defaultCourtMode: CourtMode;
 }
 
 export function isDurableDbPath(pathValue: string): boolean {
@@ -159,6 +160,14 @@ function resolveAppEnv(): string {
   return (process.env.APP_ENV || process.env.NODE_ENV || "development").trim().toLowerCase();
 }
 
+function resolveDefaultCourtMode(): CourtMode {
+  const mode = (process.env.COURT_MODE ?? "judge").trim().toLowerCase();
+  if (mode === "judge" || mode === "11-juror") {
+    return mode;
+  }
+  throw new Error("COURT_MODE must be either 'judge' or '11-juror'.");
+}
+
 function validateConfig(config: AppConfig): void {
   let parsedPublicAppUrl: URL;
   try {
@@ -229,10 +238,9 @@ function validateConfig(config: AppConfig): void {
     if (parsedPublicAppUrl.protocol !== "https:") {
       throw new Error("PUBLIC_APP_URL must use https in production.");
     }
-    const courtMode = (process.env.COURT_MODE ?? "").trim().toLowerCase();
-    if (courtMode === "judge" && !config.judgeOpenAiApiKey) {
+    if (config.defaultCourtMode === "judge" && !config.judgeOpenAiApiKey) {
       throw new Error(
-        "JUDGE_OPENAI_API_KEY must be set when COURT_MODE=judge in production."
+        "JUDGE_OPENAI_API_KEY must be set when Judge Mode is the default in production."
       );
     }
   }
@@ -247,6 +255,7 @@ function validateConfig(config: AppConfig): void {
 export function getConfig(): AppConfig {
   loadEnvFile();
   const appEnv = resolveAppEnv();
+  const defaultCourtMode = resolveDefaultCourtMode();
   const isDevelopment = ["development", "dev", "test"].includes(appEnv);
   const isProduction = ["production", "prod"].includes(appEnv);
   const port = process.env.PORT ? Number(process.env.PORT) : numberEnv("API_PORT", 8787);
@@ -334,7 +343,8 @@ export function getConfig(): AppConfig {
     adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos"),
     adminSessionTtlSec: numberEnv("ADMIN_SESSION_TTL_SEC", 900),
     judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", ""),
-    judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini")
+    judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini"),
+    defaultCourtMode
   };
   validateConfig(config);
   return config;
