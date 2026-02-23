@@ -773,6 +773,7 @@ function testConfigFailFastGuards() {
           SYSTEM_API_KEY: "dev-system-key",
           WORKER_TOKEN: "worker-prod-token",
           ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-prod-strong-1234",
           SOLANA_MODE: "rpc",
           DRAND_MODE: "http",
           SEAL_WORKER_MODE: "http",
@@ -793,6 +794,7 @@ function testConfigFailFastGuards() {
           SYSTEM_API_KEY: "system-prod-token",
           WORKER_TOKEN: "worker-prod-token",
           ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-prod-strong-1234",
           SOLANA_MODE: "stub",
           DRAND_MODE: "http",
           SEAL_WORKER_MODE: "http",
@@ -813,6 +815,7 @@ function testConfigFailFastGuards() {
           SYSTEM_API_KEY: "system-stage-token",
           WORKER_TOKEN: "worker-stage-token",
           ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-stage-strong-5678",
           HELIUS_WEBHOOK_ENABLED: "false",
           HELIUS_WEBHOOK_TOKEN: undefined
         },
@@ -830,6 +833,7 @@ function testConfigFailFastGuards() {
           SYSTEM_API_KEY: "system-stage-token",
           WORKER_TOKEN: "worker-stage-token",
           ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-stage-strong-5678",
           HELIUS_WEBHOOK_ENABLED: "true",
           HELIUS_WEBHOOK_TOKEN: undefined
         },
@@ -847,6 +851,7 @@ function testConfigFailFastGuards() {
           SYSTEM_API_KEY: "system-prod-token",
           WORKER_TOKEN: "worker-prod-token",
           ADMIN_PANEL_PASSWORD: "gringos",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-prod-strong-1234",
           SOLANA_MODE: "rpc",
           DRAND_MODE: "http",
           SEAL_WORKER_MODE: "http",
@@ -858,6 +863,27 @@ function testConfigFailFastGuards() {
     /ADMIN_PANEL_PASSWORD/
   );
 
+  assert.throws(
+    () =>
+      withEnv(
+        {
+          APP_ENV: "production",
+          CORS_ORIGIN: "https://app.example.com",
+          SYSTEM_API_KEY: "system-prod-token",
+          WORKER_TOKEN: "worker-prod-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "dev-defence-invite-signing-key",
+          SOLANA_MODE: "rpc",
+          DRAND_MODE: "http",
+          SEAL_WORKER_MODE: "http",
+          HELIUS_WEBHOOK_ENABLED: "false",
+          HELIUS_WEBHOOK_TOKEN: undefined
+        },
+        () => getConfig()
+      ),
+    /DEFENCE_INVITE_SIGNING_KEY/
+  );
+
   const cfg = withEnv(
     {
       APP_ENV: "production",
@@ -866,6 +892,7 @@ function testConfigFailFastGuards() {
       WORKER_TOKEN: "worker-prod-token",
       ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
       ADMIN_SESSION_TTL_SEC: "1200",
+      DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-prod-strong-1234",
       SOLANA_MODE: "rpc",
       DRAND_MODE: "http",
       SEAL_WORKER_MODE: "http",

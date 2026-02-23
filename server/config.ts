@@ -183,6 +183,18 @@ function validateConfig(config: AppConfig): void {
     if (config.corsOrigin.trim() === "*") {
       throw new Error("CORS_ORIGIN cannot be wildcard in non-development environments.");
     }
+    const defenceInviteKey = config.defenceInviteSigningKey.trim();
+    const uniqueChars = new Set(defenceInviteKey).size;
+    if (
+      !defenceInviteKey ||
+      defenceInviteKey === "dev-defence-invite-signing-key" ||
+      defenceInviteKey.length < 32 ||
+      uniqueChars < 12
+    ) {
+      throw new Error(
+        "DEFENCE_INVITE_SIGNING_KEY must be set to a strong non-default value outside development or test."
+      );
+    }
   }
 
   if (config.isProduction) {

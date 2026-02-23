@@ -46,6 +46,7 @@ Seed data now uses valid Base58 Ed25519-style agent identifiers.
 Config now validates runtime mode at startup:
 
 - default dev keys are blocked outside development
+- `DEFENCE_INVITE_SIGNING_KEY` must be strong and non-default outside development
 - wildcard CORS is blocked outside development
 - production rejects Solana, drand or sealing stub modes
 - webhook cannot be enabled without token
