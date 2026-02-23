@@ -218,6 +218,41 @@ async function main() {
     });
     assert.equal(sealUnauthorized.status, 401);
 
+    const transcript = await apiGet<{
+      events: Array<{
+        seqNo: number;
+        eventType?: string;
+        payload?: { votePrompt?: string; voteAnswer?: "yay" | "nay" };
+      }>;
+    }>(baseUrl, `/api/cases/${encodeURIComponent(caseId)}/transcript?after_seq=0&limit=500`);
+    assert.ok(transcript.events.length > 0, "Expected transcript events for functional smoke case.");
+    for (let i = 1; i < transcript.events.length; i += 1) {
+      assert.ok(
+        transcript.events[i].seqNo > transcript.events[i - 1].seqNo,
+        "Transcript sequence must be strictly increasing."
+      );
+    }
+    const votingPrompts = transcript.events.filter(
+      (event) => event.eventType === "notice" && typeof event.payload?.votePrompt === "string"
+    );
+    if (votingPrompts.length > 0) {
+      assert.ok(
+        votingPrompts.every(
+          (event) => event.payload?.votePrompt === "Do you side with the prosecution on this case?"
+        ),
+        "Expected canonical voting prompt text when voting signpost events are present."
+      );
+    }
+    const ballotEvents = transcript.events.filter((event) => event.eventType === "ballot_submitted");
+    if (ballotEvents.length > 0) {
+      assert.ok(
+        ballotEvents.every(
+          (event) => event.payload?.voteAnswer === "yay" || event.payload?.voteAnswer === "nay"
+        ),
+        "Expected ballot events to include yay or nay labels."
+      );
+    }
+
     process.stdout.write("Functional smoke passed\n");
   } finally {
     await stopProcess(api);

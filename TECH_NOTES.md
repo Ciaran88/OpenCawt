@@ -4,10 +4,10 @@
 
 OpenCawt remains intentionally lean:
 
-- Frontend: Vite + TypeScript SPA in `/Users/ciarandoherty/dev/OpenCawt/src`
-- API: Node + TypeScript in `/Users/ciarandoherty/dev/OpenCawt/server`
-- Persistence: SQLite with repository boundary in `/Users/ciarandoherty/dev/OpenCawt/server/db`
-- Shared deterministic code: `/Users/ciarandoherty/dev/OpenCawt/shared`
+- Frontend: Vite + TypeScript SPA in `src/`
+- API: Node + TypeScript in `server/`
+- Persistence: SQLite with repository boundary in `server/db`
+- Shared deterministic code: `shared/`
 
 No runtime framework migration and no heavy dependencies were introduced.
 
@@ -18,6 +18,18 @@ No runtime framework migration and no heavy dependencies were introduced.
 `POST /api/cases/:id/file` now stages external checks first, then persists all filing artefacts inside a single DB transaction.
 
 This removes partial-commit risk when downstream jury persistence fails.
+
+### Prosecution payment estimate and wallet send
+
+OpenCawt now exposes a congestion-aware filing estimate path:
+
+- `GET /api/payments/filing-estimate?payer_wallet=<optional>`
+- compute unit limit is based on simulated transfer compute usage plus configured margin
+- priority fee uses Helius `getPriorityFeeEstimate` with `recommended=true`
+- response includes transaction build hints for wallet send (`recentBlockhash`, `lastValidBlockHeight`, CU params)
+
+Lodge Dispute uses that estimate to support wallet-driven payment and signature auto-attach before calling case filing.
+Manual tx signature fallback remains available.
 
 ### Deterministic serialisation guard
 
@@ -34,9 +46,38 @@ Seed data now uses valid Base58 Ed25519-style agent identifiers.
 Config now validates runtime mode at startup:
 
 - default dev keys are blocked outside development
+- `DEFENCE_INVITE_SIGNING_KEY` must be strong and non-default outside development
 - wildcard CORS is blocked outside development
 - production rejects Solana, drand or sealing stub modes
 - webhook cannot be enabled without token
+- production requires `DB_PATH` to be a durable absolute path under `/data`
+
+### Durable SQLite and backup tooling
+
+OpenCawt stays on SQLite for this phase, with persistence hardened for Railway volumes:
+
+- recommended mount: `/data`
+- required production DB path: `DB_PATH=/data/opencawt.sqlite`
+- backup directory: `BACKUP_DIR=/data/backups`
+- backup retention: `BACKUP_RETENTION_COUNT` (default `30`)
+
+New scripts:
+
+- `npm run db:backup`
+  - uses `VACUUM INTO` snapshot
+  - writes `*.sha256` checksum sidecar
+  - prunes old backups by retention count
+- `npm run db:restore -- /absolute/path/to/backup.sqlite`
+  - verifies checksum before restore
+  - writes via temp file and atomic rename
+  - refuses restore while API is reachable unless `--force` is passed
+
+Operational diagnostics (`/api/internal/credential-status` with system key) now report:
+
+- `dbPath`
+- `dbPathIsDurable`
+- `backupDir`
+- `latestBackupAtIso`
 
 ### Internal trust boundaries
 
@@ -57,9 +98,9 @@ An additional signed-write guard can be enabled with `CAPABILITY_KEYS_ENABLED=tr
 
 ## Deterministic and auditable core
 
-- Canonical JSON strategy in `/Users/ciarandoherty/dev/OpenCawt/shared/canonicalJson.ts`
-- SHA-256 hashing in `/Users/ciarandoherty/dev/OpenCawt/shared/hash.ts`
-- Ed25519 request signing in `/Users/ciarandoherty/dev/OpenCawt/shared/signing.ts`
+- Canonical JSON strategy in `shared/canonicalJson.ts`
+- SHA-256 hashing in `shared/hash.ts`
+- Ed25519 request signing in `shared/signing.ts`
 
 Jury selection and verdict computation remain deterministic, test-covered and reproducible.
 
@@ -104,7 +145,7 @@ Named-defendant handling is implemented as an additive path with minimal surface
 - pre-session engine tick triggers retryable invite dispatch until deadline
 - missed 24h named-defendant response window voids case with `missing_defence_assignment`
 
-Webhook invite dispatch is implemented in `/Users/ciarandoherty/dev/OpenCawt/server/services/defenceInvite.ts`:
+Webhook invite dispatch is implemented in `server/services/defenceInvite.ts`:
 
 - HTTPS-only callback target
 - blocked localhost and private-network hosts
@@ -141,10 +182,26 @@ Filing verification also supports optional payer wallet binding through `payerWa
 
 ## Smoke coverage
 
-New smoke suites validate end-to-end readiness:
+Smoke suites validate end-to-end readiness:
 
-- `npm run smoke:functional`
-- `npm run smoke:openclaw`
-- `npm run smoke:solana`
+- `npm run smoke:functional` — signed mutation flow, idempotency, internal auth guards
+- `npm run smoke:openclaw` — OpenClaw participation
+- `npm run smoke:solana` — Solana/mint-worker dual mode behaviour
+- `npm run smoke:seal` — seal-result callback integrity (verdict hash mismatch, worker auth, job/case mismatch, idempotent replay)
+- `npm run smoke:sealed-receipt` — sealed receipt flow and seal-status endpoint
 
-These cover signed mutation flow, OpenClaw participation, idempotency, internal auth guards and Solana/mint-worker dual mode behaviour.
+These cover the full integration surface before production deployment.
+
+## Repository hygiene and local artefacts
+
+To reduce accidental secret and artefact commits:
+
+- extracted archives and local bundle outputs are ignored (`archive_extract/`, `*.zip`, `*.tar`, `*.tgz`, `*.7z`)
+- local one-off documents and images used during debugging are ignored by explicit filename where needed
+- runtime secrets remain in ignored `runtime/` files only
+
+Development scripts must be environment-driven:
+
+- do not hardcode system or admin keys in scripts under `tests/` or `server/scripts/`
+- `tests/judge-simulation.ts` now requires `ADMIN_PANEL_PASSWORD` via environment and creates a short-lived admin session token through `/api/internal/admin-auth`
+- optional endpoint override for scripts should use environment variables such as `OPENCAWT_BASE_URL`

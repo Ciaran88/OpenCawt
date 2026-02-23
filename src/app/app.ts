@@ -18,10 +18,12 @@ import {
   getCaseSealStatus,
   getCaseTranscript,
   getDecision,
+  getFilingFeeEstimate,
   getDashboardSnapshot,
   getAgentProfile,
   getPastDecisions,
   getLeaderboard,
+  searchAgents,
   getOpenDefenceCases,
   getRuleLimits,
   getSchedule,
@@ -43,6 +45,7 @@ import type {
   Case,
   JoinJuryPoolPayload,
   LodgeDisputeDraftPayload,
+  MlSignals,
   OpenDefenceSearchFilters,
   SubmitBallotPayload,
   SubmitEvidencePayload,
@@ -52,7 +55,8 @@ import type {
 import {
   computeCountdownState,
   computeRingDashOffset,
-  formatDurationLabel
+  formatDurationLabel,
+  ringColourFromRatio
 } from "../util/countdown";
 import { escapeHtml } from "../util/html";
 import { parseRoute, routeToPath, type AppRoute } from "../util/router";
@@ -63,7 +67,12 @@ import {
   storeJuryRegistration
 } from "../util/storage";
 import { getAgentId, resolveAgentConnection } from "../util/agentIdentity";
-import { connectInjectedWallet, hasInjectedWallet } from "../util/wallet";
+import {
+  connectInjectedWallet,
+  hasInjectedWallet,
+  signAndSendFilingTransfer,
+  supportsSignAndSendTransaction
+} from "../util/wallet";
 import { createSimulation } from "./simulation";
 import { createInitialState } from "./state";
 import { renderAboutView } from "../views/aboutView";
@@ -72,9 +81,29 @@ import { renderCaseDetailView, renderMissingCaseView } from "../views/caseDetail
 import { renderDecisionDetailView, renderMissingDecisionView } from "../views/decisionDetailView";
 import { renderAgentProfileView, renderMissingAgentProfileView } from "../views/agentProfileView";
 import { renderJoinJuryPoolView } from "../views/joinJuryPoolView";
-import { renderLodgeDisputeView } from "../views/lodgeDisputeView";
+import {
+  renderLodgeDisputeView,
+  renderLodgeFilingEstimatePanel
+} from "../views/lodgeDisputeView";
 import { renderPastDecisionsView } from "../views/pastDecisionsView";
 import { renderScheduleView } from "../views/scheduleView";
+import {
+  renderAdminLoginView,
+  renderAdminDashboardView,
+  getAdminToken,
+  clearAdminToken,
+  handleAdminLogin,
+  handleAdminBanFiling,
+  handleAdminBanDefence,
+  handleAdminBanJury,
+  handleAdminCheckSystems,
+  handleAdminDeleteCase,
+  handleAdminSetDailyCap,
+  handleAdminSetSoftCapMode,
+  handleAdminSetCourtMode,
+  fetchAdminStatus,
+  type AdminDashboardState
+} from "../views/adminView";
 
 interface AppDom {
   sidebarNav: HTMLElement;
@@ -141,6 +170,16 @@ export function mountApp(root: HTMLElement): void {
   let activeRenderedCase: Case | null = null;
   let caseLiveTimer: number | null = null;
   let liveCaseId: string | null = null;
+  let filingEstimateTimer: number | null = null;
+
+  // Admin panel state — isolated from global app state
+  const adminState: AdminDashboardState = {
+    status: null,
+    statusLoading: false,
+    checkResults: null,
+    checkLoading: false,
+    feedback: {}
+  };
 
   const simulation = createSimulation(
     {
@@ -174,6 +213,21 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const mapErrorToToast = (error: unknown, fallbackTitle: string, fallbackBody: string) => {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      if (message.includes("reject") || message.includes("declin") || message.includes("denied")) {
+        return {
+          title: "Payment cancelled",
+          body: "Wallet transaction was cancelled. You can retry or submit manually."
+        };
+      }
+      if (message.includes("blockhash")) {
+        return {
+          title: "Payment expired",
+          body: "The payment transaction expired before confirmation. Refresh estimate and retry."
+        };
+      }
+    }
     if (!(error instanceof ApiClientError)) {
       return {
         title: fallbackTitle,
@@ -216,6 +270,17 @@ export function mountApp(root: HTMLElement): void {
         return {
           title: "Payer mismatch",
           body: "The supplied payer wallet does not match the payer in the verified transaction."
+        };
+      case "PAYMENT_ESTIMATE_UNAVAILABLE":
+      case "HELIUS_PRIORITY_ESTIMATE_FAILED":
+        return {
+          title: "Estimate unavailable",
+          body: `Network fee estimate is currently unavailable. You can retry or use manual transaction signature flow.${retrySuffix}`
+        };
+      case "WALLET_SEND_UNAVAILABLE":
+        return {
+          title: "Wallet send unavailable",
+          body: "This wallet cannot sign and send directly. Use manual transaction signature fallback."
         };
       case "IDEMPOTENCY_IN_PROGRESS":
         return {
@@ -269,7 +334,99 @@ export function mountApp(root: HTMLElement): void {
     liveCaseId = null;
   };
 
+  const stopFilingEstimatePolling = () => {
+    if (filingEstimateTimer !== null) {
+      window.clearInterval(filingEstimateTimer);
+      filingEstimateTimer = null;
+    }
+  };
+
+  const patchLodgeFilingEstimatePanel = () => {
+    if (state.route.name !== "lodge-dispute") {
+      return;
+    }
+    const panel = dom.main.querySelector<HTMLElement>("#lodge-filing-estimate-panel");
+    if (!panel) {
+      return;
+    }
+    panel.innerHTML = renderLodgeFilingEstimatePanel(state.filingEstimate);
+  };
+
+  const refreshFilingEstimate = async (options?: { showToastOnError?: boolean }) => {
+    const payerWallet = state.connectedWalletPubkey;
+    state.filingEstimate = {
+      ...state.filingEstimate,
+      loading: true,
+      error: undefined
+    };
+    try {
+      const estimate = await getFilingFeeEstimate(payerWallet);
+      state.filingEstimate = {
+        loading: false,
+        value: estimate,
+        error: undefined
+      };
+      patchLodgeFilingEstimatePanel();
+    } catch (error) {
+      const mapped = mapErrorToToast(
+        error,
+        "Estimate unavailable",
+        "Unable to fetch filing fee estimate."
+      );
+      state.filingEstimate = {
+        loading: false,
+        value: state.filingEstimate.value,
+        error: mapped.body
+      };
+      if (options?.showToastOnError) {
+        showToast({
+          title: mapped.title,
+          body: mapped.body
+        });
+      }
+      patchLodgeFilingEstimatePanel();
+    }
+  };
+
+  const ensureFilingEstimatePolling = () => {
+    if (filingEstimateTimer !== null) {
+      return;
+    }
+    filingEstimateTimer = window.setInterval(() => {
+      if (state.route.name !== "lodge-dispute") {
+        return;
+      }
+      void refreshFilingEstimate();
+    }, 30000);
+  };
+
+  const patchCaseLiveDom = (caseItem: Case) => {
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(
+      renderCaseDetailView(state, caseItem, state.agentConnection),
+      "text/html"
+    );
+    const dynamicBlocks = [
+      "case-detail-top",
+      "case-transcript-block",
+      "case-session-controls"
+    ];
+    for (const id of dynamicBlocks) {
+      const current = dom.main.querySelector<HTMLElement>(`#${id}`);
+      const next = parsed.querySelector<HTMLElement>(`#${id}`);
+      if (current && next) {
+        current.outerHTML = next.outerHTML;
+      }
+    }
+  };
+
   const refreshCaseLive = async (caseId: string, rerender = true) => {
+    const transcriptBefore = dom.main.querySelector<HTMLElement>("#session-transcript-window");
+    const transcriptScrollTop = transcriptBefore?.scrollTop ?? 0;
+    const transcriptWasNearBottom = transcriptBefore
+      ? transcriptBefore.scrollHeight - (transcriptBefore.scrollTop + transcriptBefore.clientHeight) < 40
+      : false;
+
     const [session, transcript] = await Promise.all([
       getCaseSession(caseId),
       getCaseTranscript(caseId)
@@ -277,7 +434,21 @@ export function mountApp(root: HTMLElement): void {
     state.caseSessions[caseId] = session ?? undefined;
     state.transcripts[caseId] = transcript;
     if (rerender && state.route.name === "case" && state.route.id === caseId) {
-      await renderRoute();
+      const caseItem = activeRenderedCase ?? (await resolveCaseById(caseId));
+      if (!caseItem) {
+        return;
+      }
+      activeRenderedCase = caseItem;
+      patchCaseLiveDom(caseItem);
+      const transcriptAfter = dom.main.querySelector<HTMLElement>("#session-transcript-window");
+      if (transcriptAfter) {
+        transcriptAfter.scrollTop = transcriptWasNearBottom
+          ? transcriptAfter.scrollHeight
+          : transcriptScrollTop;
+      }
+      patchCountdownRings(dom.main, state.nowMs);
+      patchVoteViews(dom.main, state.liveVotes);
+      syncVoteSimulation();
     }
   };
 
@@ -487,7 +658,8 @@ export function mountApp(root: HTMLElement): void {
     dom.sidebarNav.innerHTML = renderSideNav(state.route);
     dom.topbar.innerHTML = renderTopBar({
       route: state.route,
-      agentConnection: state.agentConnection
+      agentConnection: state.agentConnection,
+      tickerEvents: state.ticker
     });
   };
 
@@ -510,11 +682,12 @@ export function mountApp(root: HTMLElement): void {
     return getCase(id);
   };
 
-  const setMainContent = (html: string) => {
+  const setMainContent = (html: string, options?: { animate?: boolean }) => {
     const pane = dom.main.querySelector<HTMLElement>(".route-view");
     if (!pane) return;
     pane.innerHTML = html;
-    if (prefersReducedMotion) return;
+    const shouldAnimate = options?.animate ?? true;
+    if (prefersReducedMotion || !shouldAnimate) return;
     pane.classList.add("is-enter");
     window.requestAnimationFrame(() => {
       pane.classList.add("is-enter-active");
@@ -549,32 +722,46 @@ export function mountApp(root: HTMLElement): void {
     notifyLabel.classList.toggle("is-hidden", !hasDefendant || openDefenceEnabled);
   };
 
-  const renderRouteContent = async (token: number) => {
+  const renderRouteContent = async (token: number, background = false) => {
     activeRenderedCase = null;
     const route = state.route;
+    // When rendering in the background (poll-triggered, not user navigation) we
+    // suppress the enter animation to avoid a visible flash on every 15-second tick.
+    const contentOptions = background ? { animate: false } : undefined;
 
     if (route.name !== "case") {
       stopCaseLivePolling();
     }
+    if (route.name !== "lodge-dispute") {
+      stopFilingEstimatePolling();
+    }
 
     if (route.name === "schedule") {
-      setMainContent(renderScheduleView(state));
+      setMainContent(renderScheduleView(state), contentOptions);
     } else if (route.name === "past-decisions") {
-      setMainContent(renderPastDecisionsView(state));
+      setMainContent(renderPastDecisionsView(state), contentOptions);
     } else if (route.name === "about") {
-      setMainContent(renderAboutView(state.leaderboard));
+      setMainContent(renderAboutView(state.leaderboard), contentOptions);
     } else if (route.name === "agentic-code") {
-      setMainContent(renderAgenticCodeView(state.principles, state.caseMetrics.closedCasesCount));
+      setMainContent(renderAgenticCodeView(state.principles, state.caseMetrics.closedCasesCount), contentOptions);
     } else if (route.name === "lodge-dispute") {
+      if (!state.filingEstimate.value && !state.filingEstimate.loading) {
+        await refreshFilingEstimate();
+      }
+      ensureFilingEstimatePolling();
       setMainContent(
         renderLodgeDisputeView(
           state.agentId,
           state.agentConnection,
           state.filingLifecycle,
+          state.filingEstimate,
+          state.autoPayEnabled,
           state.timingRules,
           state.ruleLimits,
-          state.connectedWalletPubkey
-        )
+          state.connectedWalletPubkey,
+          state.schedule.jurorCount ?? 11
+        ),
+        contentOptions
       );
       syncLodgeDefendantNotifyField();
     } else if (route.name === "join-jury-pool") {
@@ -587,7 +774,8 @@ export function mountApp(root: HTMLElement): void {
           state.leaderboard,
           state.timingRules,
           state.ruleLimits
-        )
+        ),
+        contentOptions
       );
     } else if (route.name === "agent") {
       const existing = state.agentProfiles[route.id];
@@ -596,10 +784,10 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       if (!profile) {
-        setMainContent(renderMissingAgentProfileView());
+        setMainContent(renderMissingAgentProfileView(), contentOptions);
       } else {
         state.agentProfiles[route.id] = profile as AgentProfile;
-        setMainContent(renderAgentProfileView(profile));
+        setMainContent(renderAgentProfileView(profile), contentOptions);
       }
     } else if (route.name === "case") {
       const caseItem = await resolveCaseById(route.id);
@@ -607,12 +795,21 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       if (!caseItem) {
-        setMainContent(renderMissingCaseView());
+        setMainContent(renderMissingCaseView(), contentOptions);
       } else {
         activeRenderedCase = caseItem;
-        await refreshCaseLive(route.id, false);
-        setMainContent(renderCaseDetailView(state, caseItem, state.agentConnection));
-        ensureCaseLivePolling(route.id);
+        if (
+          state.caseSessions[route.id] === undefined ||
+          state.transcripts[route.id] === undefined
+        ) {
+          await refreshCaseLive(route.id, false);
+        }
+        setMainContent(renderCaseDetailView(state, caseItem, state.agentConnection), contentOptions);
+        if (caseItem.status === "scheduled" || caseItem.status === "active") {
+          ensureCaseLivePolling(route.id);
+        } else {
+          stopCaseLivePolling();
+        }
       }
     } else if (route.name === "decision") {
       const inMemory =
@@ -630,6 +827,24 @@ export function mountApp(root: HTMLElement): void {
       } else {
         setMainContent(renderMissingDecisionView());
       }
+    } else if (route.name === "admin") {
+      const token = getAdminToken();
+      if (!token) {
+        setMainContent(renderAdminLoginView(), contentOptions);
+      } else {
+        if (!adminState.status && !adminState.statusLoading) {
+          adminState.statusLoading = true;
+          setMainContent(renderAdminDashboardView(adminState), contentOptions);
+          fetchAdminStatus(token).then((s) => {
+            adminState.status = s;
+            adminState.statusLoading = false;
+            setMainContent(renderAdminDashboardView(adminState), { animate: false });
+          });
+        } else {
+          setMainContent(renderAdminDashboardView(adminState), contentOptions);
+        }
+      }
+      return;
     }
 
     patchCountdownRings(dom.main, state.nowMs);
@@ -641,7 +856,7 @@ export function mountApp(root: HTMLElement): void {
     syncVoteSimulation();
   };
 
-  const renderRoute = async () => {
+  const renderRoute = async (background = false) => {
     routeToken += 1;
     const currentToken = routeToken;
     state.route = parseRoute(window.location.pathname);
@@ -664,7 +879,7 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
-    await renderRouteContent(currentToken);
+    await renderRouteContent(currentToken, background);
   };
 
   const syncVoteSimulation = () => {
@@ -730,7 +945,13 @@ export function mountApp(root: HTMLElement): void {
       state.liveVotes[activeCase.id] = activeCase.voteSummary.votesCast;
     }
     if (renderAfter) {
-      await renderRoute();
+      // Preserve scroll position across background data refreshes so the page
+      // does not jump to the top while the user is reading.
+      const savedScrollY = window.scrollY;
+      await renderRoute(true);
+      if (savedScrollY > 0) {
+        window.scrollTo({ top: savedScrollY, left: 0, behavior: "auto" });
+      }
     }
   };
 
@@ -759,6 +980,8 @@ export function mountApp(root: HTMLElement): void {
     const evidenceStrength = String(formData.get("evidenceStrength") || "").trim();
     const treasuryTxSig = String(formData.get("treasuryTxSig") || "").trim();
     const payerWallet = String(formData.get("payerWallet") || "").trim();
+    const autoPayEnabled = formData.get("autoPayEnabled") === "on";
+    state.autoPayEnabled = autoPayEnabled;
     const requestedRemedy = String(
       formData.get("requestedRemedy") || "warn"
     ) as LodgeDisputeDraftPayload["requestedRemedy"];
@@ -771,6 +994,14 @@ export function mountApp(root: HTMLElement): void {
       showToast({
         title: "Validation",
         body: "Claim summary should be at least twelve characters."
+      });
+      return;
+    }
+    const maxClaimSummary = state.ruleLimits.maxClaimSummaryChars;
+    if (claimSummary.length > maxClaimSummary) {
+      showToast({
+        title: "Validation",
+        body: `Claim summary must not exceed ${maxClaimSummary} characters.`
       });
       return;
     }
@@ -841,6 +1072,44 @@ export function mountApp(root: HTMLElement): void {
         filedCopy = fileResult.warning
           ? `Case filed with warning: ${fileResult.warning}`
           : "Case filed successfully after treasury payment verification.";
+      } else if (autoPayEnabled) {
+        if (!supportsSignAndSendTransaction()) {
+          throw new ApiClientError(
+            400,
+            "WALLET_SEND_UNAVAILABLE",
+            "Connected wallet does not support sign and send transaction."
+          );
+        }
+        const estimate = await getFilingFeeEstimate(payerWallet || state.connectedWalletPubkey);
+        state.filingEstimate = {
+          loading: false,
+          value: estimate
+        };
+        state.filingLifecycle = {
+          status: "submitting",
+          message: "Submitting wallet payment transaction."
+        };
+        if (state.route.name === "lodge-dispute") {
+          await renderRoute();
+        }
+        const signed = await signAndSendFilingTransfer({
+          rpcUrl: estimate.recommendation.rpcUrl,
+          treasuryAddress: estimate.recommendation.treasuryAddress,
+          filingFeeLamports: estimate.breakdown.filingFeeLamports,
+          computeUnitLimit: estimate.recommendation.computeUnitLimit,
+          computeUnitPriceMicroLamports: estimate.recommendation.computeUnitPriceMicroLamports,
+          recentBlockhash: estimate.recommendation.recentBlockhash,
+          lastValidBlockHeight: estimate.recommendation.lastValidBlockHeight,
+          expectedPayerWallet: payerWallet || state.connectedWalletPubkey
+        });
+        const fileResult = await fileCase(result.draftId, signed.txSig, signed.payerWallet);
+        state.filingLifecycle = {
+          status: "verified_filed",
+          message: "Wallet payment verified. Case filed."
+        };
+        filedCopy = fileResult.warning
+          ? `Case filed with warning: ${fileResult.warning}`
+          : "Case filed successfully after wallet payment verification.";
       } else {
         state.filingLifecycle = {
           status: "awaiting_tx_sig",
@@ -1121,6 +1390,42 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    // Collect optional ML ethics signals from the Advanced drawer (agent-only, all optional)
+    const mlSignals: MlSignals = {};
+    const piValues = [1,2,3,4,5,6,7,8,9,10,11,12].map((n) => {
+      const raw = String(formData.get(`ml_pi_${n}`) ?? "").trim();
+      return raw === "" ? null : Number(raw);
+    });
+    if (piValues.some((v) => v !== null)) {
+      mlSignals.principleImportance = piValues.map((v) => (v === null ? 0 : v));
+    }
+    const dpRaw = String(formData.get("ml_decisive_principle") ?? "").trim();
+    if (dpRaw !== "") mlSignals.decisivePrincipleIndex = Number(dpRaw) - 1; // UI is 1-12, API is 0-11
+    const mlConf = String(formData.get("ml_confidence") ?? "").trim();
+    if (mlConf !== "") mlSignals.mlConfidence = Number(mlConf);
+    const uncertaintyType = String(formData.get("ml_uncertainty_type") ?? "").trim();
+    if (uncertaintyType) mlSignals.uncertaintyType = uncertaintyType;
+    const mlSeverity = String(formData.get("ml_severity") ?? "").trim();
+    if (mlSeverity !== "") mlSignals.severity = Number(mlSeverity);
+    const harmDomains = formData.getAll("ml_harm_domains").map(String).filter(Boolean);
+    if (harmDomains.length > 0) mlSignals.harmDomains = harmDomains;
+    const primaryBasis = String(formData.get("ml_primary_basis") ?? "").trim();
+    if (primaryBasis) mlSignals.primaryBasis = primaryBasis;
+    const evQuality = String(formData.get("ml_evidence_quality") ?? "").trim();
+    if (evQuality !== "") mlSignals.evidenceQuality = Number(evQuality);
+    const missingEv = String(formData.get("ml_missing_evidence_type") ?? "").trim();
+    if (missingEv) mlSignals.missingEvidenceType = missingEv;
+    const remedy = String(formData.get("ml_recommended_remedy") ?? "").trim();
+    if (remedy) mlSignals.recommendedRemedy = remedy;
+    const prop = String(formData.get("ml_proportionality") ?? "").trim();
+    if (prop) mlSignals.proportionality = prop;
+    const decisiveEv = String(formData.get("ml_decisive_evidence_id") ?? "").trim();
+    if (decisiveEv) mlSignals.decisiveEvidenceId = decisiveEv;
+    const processFlags = formData.getAll("ml_process_flags").map(String).filter(Boolean);
+    if (processFlags.length > 0) mlSignals.processFlags = processFlags;
+
+    const hasMlSignals = Object.keys(mlSignals).length > 0;
+
     const payload: SubmitBallotPayload = {
       reasoningSummary,
       principlesReliedOn,
@@ -1135,7 +1440,8 @@ export function mountApp(root: HTMLElement): void {
           rationale: reasoningSummary,
           citations: []
         }
-      ]
+      ],
+      ...(hasMlSignals ? { mlSignals } : {})
     };
 
     try {
@@ -1250,6 +1556,13 @@ export function mountApp(root: HTMLElement): void {
         try {
           const key = await connectInjectedWallet();
           state.connectedWalletPubkey = key ?? undefined;
+          if (key) {
+            state.autoPayEnabled = true;
+          }
+          if (state.route.name === "lodge-dispute") {
+            await refreshFilingEstimate();
+            await renderRoute();
+          }
           showToast({
             title: "Wallet connected",
             body: key
@@ -1266,7 +1579,15 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "refresh-filing-estimate") {
+      void (async () => {
+        await refreshFilingEstimate({ showToastOnError: true });
+      })();
+      return;
+    }
+
     if (action === "open-verify-seal") {
+      state.ui.moreSheetOpen = false;
       const seedCaseId = activeRenderedCase?.id ?? "";
       setVerifySealModal({
         caseId: seedCaseId,
@@ -1275,6 +1596,144 @@ export function mountApp(root: HTMLElement): void {
       if (seedCaseId) {
         void verifySealCase(seedCaseId);
       }
+      return;
+    }
+
+    if (action === "open-whitepaper-modal") {
+      state.ui.moreSheetOpen = false;
+      state.ui.modal = {
+        title: "Download Whitepaper",
+        html: `
+          <p>Download the OpenCawt whitepaper to learn more about the protocol.</p>
+          <a href="/OpenCawt_Whitepaper.pdf" download="OpenCawt_Whitepaper.pdf" class="btn btn-primary">Download PDF</a>
+        `
+      };
+      renderOverlay();
+      return;
+    }
+
+    if (action === "open-docs-modal") {
+      state.ui.moreSheetOpen = false;
+      state.ui.modal = {
+        title: "Download Documentation",
+        html: `
+          <p>Download the OpenCawt documentation to learn how to integrate and use the protocol.</p>
+          <a href="/OpenCawt_Documentation.pdf" download="OpenCawt_Documentation.pdf" class="btn btn-primary">Download PDF</a>
+        `
+      };
+      renderOverlay();
+      return;
+    }
+
+    if (action === "open-agent-search") {
+      state.ui.moreSheetOpen = false;
+      state.ui.modal = {
+        title: "Search agents",
+        html: `
+          <form id="agent-search-form" class="stack" style="gap:var(--space-3)">
+            <label class="search-field" aria-label="Agent ID or display name">
+              <span class="segmented-label">Agent ID or display name</span>
+              <input
+                id="agent-search-input"
+                name="agentId"
+                type="search"
+                placeholder="Type agent ID or display name…"
+                autocomplete="off"
+                style="width:100%"
+              />
+            </label>
+            <div id="agent-search-suggestions" class="agent-search-suggestions" role="listbox" aria-label="Suggested agents" style="display:none"></div>
+            <div id="agent-search-error" style="display:none" class="muted" role="alert"></div>
+            <div class="form-actions" style="justify-content:space-between;gap:var(--space-2)">
+              <button class="btn btn-ghost" type="button" data-action="modal-close">Cancel</button>
+              <button class="btn btn-primary" type="submit">View profile</button>
+            </div>
+          </form>
+        `
+      };
+      renderOverlay();
+      window.setTimeout(() => {
+        const searchInput = document.getElementById("agent-search-input") as HTMLInputElement | null;
+        const searchForm = document.getElementById("agent-search-form");
+        searchInput?.focus();
+
+        let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const showError = (msg: string) => {
+          const err = document.getElementById("agent-search-error");
+          if (err) { err.textContent = msg; err.style.display = "block"; }
+        };
+        const hideError = () => {
+          const err = document.getElementById("agent-search-error");
+          if (err) { err.textContent = ""; err.style.display = "none"; }
+        };
+
+        const renderSuggestions = (agents: Array<{ agentId: string; displayName?: string }>) => {
+          const el = document.getElementById("agent-search-suggestions");
+          if (!el) return;
+          if (agents.length === 0) {
+            el.innerHTML = "";
+            el.style.display = "none";
+            return;
+          }
+          el.innerHTML = agents
+            .map(
+              (a) =>
+                `<button type="button" class="agent-search-suggestion" data-agent-id="${escapeHtml(a.agentId)}" role="option" tabindex="-1">${escapeHtml(a.displayName ? `${a.displayName} — ${a.agentId.slice(0, 10)}…` : a.agentId)}</button>`
+            )
+            .join("");
+          el.style.display = "flex";
+          agents.forEach((a, i) => {
+            const btn = el.children[i] as HTMLButtonElement;
+            btn?.addEventListener("click", () => {
+              state.ui.modal = null;
+              renderOverlay();
+              navigate({ name: "agent", id: a.agentId });
+            });
+          });
+        };
+
+        const doSearch = () => {
+          const q = searchInput?.value.trim() ?? "";
+          void searchAgents(q, 10).then(renderSuggestions);
+        };
+
+        searchInput?.addEventListener("input", () => {
+          hideError();
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(doSearch, 200);
+        });
+
+        // Show top agents immediately on open
+        doSearch();
+
+        searchForm?.addEventListener("submit", async (evt) => {
+          evt.preventDefault();
+          hideError();
+          const raw = searchInput?.value.trim() ?? "";
+          if (!raw) {
+            showError("Enter an agent ID or display name.");
+            return;
+          }
+          // Try to resolve display name → agentId via search
+          const suggestions = await searchAgents(raw, 20);
+          const match = suggestions.find(
+            (a) =>
+              a.agentId === raw ||
+              (a.displayName && a.displayName.toLowerCase() === raw.toLowerCase())
+          );
+          if (match) {
+            state.ui.modal = null;
+            renderOverlay();
+            navigate({ name: "agent", id: match.agentId });
+            return;
+          }
+          // Treat the raw value as a literal agent ID and let the profile page handle 404
+          state.ui.modal = null;
+          renderOverlay();
+          navigate({ name: "agent", id: raw });
+        });
+      }, 80);
       return;
     }
 
@@ -1387,15 +1846,152 @@ export function mountApp(root: HTMLElement): void {
         void renderRoute();
       }
     }
+
+    // Admin panel actions
+    if (action === "admin-signout") {
+      clearAdminToken();
+      adminState.status = null;
+      adminState.checkResults = null;
+      adminState.checkLoading = false;
+      adminState.feedback = {};
+      setMainContent(renderAdminLoginView());
+      return;
+    }
+    if (action === "admin-check-systems") {
+      const token = getAdminToken();
+      if (!token) return;
+      adminState.checkLoading = true;
+      setMainContent(renderAdminDashboardView(adminState), { animate: false });
+      handleAdminCheckSystems(token).then((results) => {
+        adminState.checkResults = results;
+        adminState.checkLoading = false;
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+      });
+      return;
+    }
+
+    const adminActionMap: Record<string, { key: string; banned: boolean; handler: (token: string, id: string, banned: boolean) => Promise<string> }> = {
+      "admin-ban-filing":    { key: "ban-filing",  banned: true,  handler: handleAdminBanFiling },
+      "admin-unban-filing":  { key: "ban-filing",  banned: false, handler: handleAdminBanFiling },
+      "admin-ban-defence":   { key: "ban-defence", banned: true,  handler: handleAdminBanDefence },
+      "admin-unban-defence": { key: "ban-defence", banned: false, handler: handleAdminBanDefence },
+      "admin-ban-jury":      { key: "ban-jury",    banned: true,  handler: handleAdminBanJury },
+      "admin-unban-jury":    { key: "ban-jury",    banned: false, handler: handleAdminBanJury }
+    };
+
+    if (action && action in adminActionMap) {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const cfg = adminActionMap[action];
+      const inputId = actionTarget.getAttribute("data-input");
+      const inputEl = inputId ? (document.getElementById(inputId) as HTMLInputElement | null) : null;
+      const agentId = inputEl?.value.trim() ?? "";
+      if (!agentId) {
+        adminState.feedback[cfg.key] = "Please enter an agent ID.";
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+        return;
+      }
+      cfg.handler(token, agentId, cfg.banned).then((msg) => {
+        adminState.feedback[cfg.key] = msg;
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+      });
+      return;
+    }
+
+    if (action === "admin-delete-case") {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const inputId = actionTarget.getAttribute("data-input");
+      const inputEl = inputId ? (document.getElementById(inputId) as HTMLInputElement | null) : null;
+      const caseId = inputEl?.value.trim() ?? "";
+      if (!caseId) {
+        adminState.feedback["delete-case"] = "Please enter a case ID.";
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+        return;
+      }
+      if (!window.confirm(`Permanently delete case ${caseId}? This cannot be undone.`)) {
+        return;
+      }
+      handleAdminDeleteCase(token, caseId).then((msg) => {
+        adminState.feedback["delete-case"] = msg;
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+      });
+      return;
+    }
+
+    if (action === "admin-set-daily-cap") {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const inputId = actionTarget.getAttribute("data-input");
+      const inputEl = inputId ? (document.getElementById(inputId) as HTMLInputElement | null) : null;
+      const cap = Number(inputEl?.value ?? "");
+      if (!Number.isFinite(cap) || cap < 1) {
+        adminState.feedback["daily-cap"] = "Please enter a valid positive number.";
+        setMainContent(renderAdminDashboardView(adminState), { animate: false });
+        return;
+      }
+      handleAdminSetDailyCap(token, Math.floor(cap)).then((msg) => {
+        adminState.feedback["daily-cap"] = msg;
+        // Refresh status to show new cap
+        fetchAdminStatus(token).then((s) => { adminState.status = s; setMainContent(renderAdminDashboardView(adminState), { animate: false }); });
+      });
+      return;
+    }
+
+    if (action === "admin-set-soft-cap-mode") {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const value = actionTarget.getAttribute("data-value");
+      if (value !== "warn" && value !== "enforce") return;
+      handleAdminSetSoftCapMode(token, value).then((msg) => {
+        adminState.feedback["daily-cap"] = msg;
+        fetchAdminStatus(token).then((s) => { adminState.status = s; setMainContent(renderAdminDashboardView(adminState), { animate: false }); });
+      });
+      return;
+    }
+
+    if (action === "admin-set-court-mode") {
+      event.preventDefault();
+      const token = getAdminToken();
+      if (!token) { setMainContent(renderAdminLoginView()); return; }
+      const value = actionTarget.getAttribute("data-value");
+      if (value !== "11-juror" && value !== "judge") return;
+      handleAdminSetCourtMode(token, value).then((msg) => {
+        adminState.feedback["court-mode"] = msg;
+        fetchAdminStatus(token).then((s) => { adminState.status = s; setMainContent(renderAdminDashboardView(adminState), { animate: false }); });
+      });
+      return;
+    }
   };
 
   const onInput = (event: Event) => {
-    const target = event.target as HTMLInputElement;
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement;
+    if (target.hasAttribute("data-max-chars")) {
+      const max = Number(target.getAttribute("data-max-chars"));
+      const counter = target.closest("label")?.querySelector<HTMLElement>(
+        `[data-char-counter-for="${target.name}"]`
+      ) ?? target.closest("form")?.querySelector<HTMLElement>(
+        `[data-char-counter-for="${target.name}"]`
+      );
+      if (counter && !Number.isNaN(max)) {
+        const min = target.getAttribute("data-min-chars");
+        const minStr = min ? ` (min ${min})` : "";
+        counter.textContent = `${target.value.length} / ${max} characters${minStr}`;
+      }
+    }
     if (
       target.form?.id === "lodge-dispute-form" &&
       (target.name === "defendantAgentId" || target.name === "openDefence")
     ) {
       syncLodgeDefendantNotifyField();
+    }
+    if (target.form?.id === "lodge-dispute-form" && target.name === "autoPayEnabled" && "checked" in target) {
+      state.autoPayEnabled = target.checked;
+      return;
     }
     if (target.getAttribute("data-action") === "decisions-query") {
       state.decisionsControls.query = target.value;
@@ -1451,6 +2047,23 @@ export function mountApp(root: HTMLElement): void {
       event.preventDefault();
       void submitBallotForm(form);
     }
+    if (form.id === "admin-login-form") {
+      event.preventDefault();
+      const formData = new FormData(form);
+      const password = String(formData.get("password") || "").trim();
+      handleAdminLogin(password).then((result) => {
+        if ("error" in result) {
+          setMainContent(renderAdminLoginView(result.error));
+        } else {
+          adminState.status = null;
+          adminState.statusLoading = false;
+          adminState.checkResults = null;
+          adminState.checkLoading = false;
+          adminState.feedback = {};
+          void renderRoute();
+        }
+      });
+    }
   };
 
   const bootstrap = async () => {
@@ -1479,6 +2092,14 @@ export function mountApp(root: HTMLElement): void {
       await renderRoute();
       simulation.start();
       pollTimer = window.setInterval(() => {
+        if (
+          state.route.name === "case" ||
+          state.route.name === "decision" ||
+          state.route.name === "lodge-dispute"
+        ) {
+          void refreshData(false);
+          return;
+        }
         void refreshData(true);
       }, 15000);
     } catch (error) {
@@ -1503,6 +2124,7 @@ export function mountApp(root: HTMLElement): void {
   window.addEventListener("beforeunload", () => {
     simulation.stop();
     stopCaseLivePolling();
+    stopFilingEstimatePolling();
     if (pollTimer !== null) {
       window.clearInterval(pollTimer);
     }
@@ -1540,6 +2162,7 @@ function patchCountdownRings(scope: HTMLElement, nowMs: number): void {
     if (label) {
       label.textContent = formatDurationLabel(countdown.remainingMs);
     }
+    ring.style.setProperty("--ring-colour", ringColourFromRatio(countdown.ratioRemaining));
   });
 
   const textCountdowns = scope.querySelectorAll<HTMLElement>(".header-countdown");
@@ -1725,6 +2348,26 @@ function isTickerEventLike(value: unknown): value is TickerEvent {
 }
 
 const moreSheetActions: BottomSheetAction[] = [
+  {
+    label: "White Paper",
+    action: "open-whitepaper-modal",
+    subtitle: "Download the OpenCawt whitepaper"
+  },
+  {
+    label: "Docs",
+    action: "open-docs-modal",
+    subtitle: "Download the OpenCawt documentation"
+  },
+  {
+    label: "Case ID search",
+    action: "open-verify-seal",
+    subtitle: "Verify sealed receipt hashes by case ID"
+  },
+  {
+    label: "Agent search",
+    action: "open-agent-search",
+    subtitle: "Search agents by ID or display name"
+  },
   {
     label: "About",
     href: "/about",

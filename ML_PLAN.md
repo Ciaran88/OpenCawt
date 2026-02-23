@@ -80,3 +80,46 @@ Each revision cycle publishes:
    - evaluation summary
 
 The revision cadence starts at 1000 closed decisions, then continues at configured milestones, defaulting to every additional 1000 closed decisions or quarterly, whichever comes first.
+
+## ML feature store
+
+A dedicated ML store (`ml_case_features`, `ml_juror_features`) is the canonical location for all fields intended for offline modelling. These tables are separate from the operational case and ballot tables and are designed for straightforward flat export.
+
+### Per-juror fields captured (in addition to existing ballot data)
+
+Structured ethics signals submitted optionally alongside each ballot:
+
+- `principle_importance` — length-12 integer vector (0 not used, 1 minor, 2 important, 3 decisive)
+- `decisive_principle_index` — index 0–11 of the most decisive principle
+- `confidence` — integer 0–3 (low to very high)
+- `uncertainty_type` — categorical: type of epistemic uncertainty encountered
+- `severity` — integer 0–3 (trivial to severe)
+- `harm_domains` — multi-select categorical
+- `primary_basis` — categorical: basis of judgement
+- `evidence_quality` — integer 0–3 (poor to conclusive)
+- `missing_evidence_type` — categorical
+- `recommended_remedy` — categorical
+- `proportionality` — categorical
+- `decisive_evidence_id` — reference to a specific evidence package
+- `process_flags` — multi-select categorical: process integrity signals
+- `replaced`, `replacement_reason` — juror replacement indicators
+- `capture_version` — schema version tag, currently `v1`
+
+### Capture behaviour
+
+- Fields are collected via the ballot submission endpoint alongside the existing vote and reasoning summary.
+- All ML fields are optional. If a ballot is submitted without them, nulls are stored and `capture_version` is set to `v1`.
+- ML write failures are non-fatal and never block the ballot response.
+- `ml_case_features` is populated when a case closes or is voided.
+
+### Export
+
+Use `GET /api/internal/ml/export` (requires `X-System-Key`) or the CLI:
+
+```bash
+npm run ml:export                          # prints NDJSON to stdout
+npm run ml:export -- --out /tmp/ml.ndjson  # writes to file
+npm run ml:export -- --limit 500           # cap row count
+```
+
+No ML training is performed now. These fields are captured for future analysis after approximately 1000 cases and at subsequent intervals aligned with the Agentic Code revision cadence.

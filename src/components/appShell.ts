@@ -10,7 +10,7 @@ export function renderAppShell(): string {
         <div id="app-sidebar-nav-container"></div>
       </aside>
       <main id="app-main" class="app-main" tabindex="-1">
-        <header id="app-topbar" class="main-header"></header>
+        <header id="app-topbar" class="main-header" style="flex-direction: column; height: auto; padding: 0;"></header>
         <div class="view-container">
             <div class="route-view"></div>
         </div>

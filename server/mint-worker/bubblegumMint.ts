@@ -101,17 +101,19 @@ export async function mintWithBubblegumV2(
 
     const minted = await postMintRequest(config, request, metadataUri);
 
-    const resolved = await resolveAssetById(config, minted.assetId);
-    const sealedUri =
-      minted.sealedUri ||
-      minted.metadataUri ||
-      (resolved.asset.content as { json_uri?: string } | undefined)?.json_uri ||
-      metadataUri;
+    let resolvedAssetUri: string | undefined;
+    try {
+      const resolved = await resolveAssetById(config, minted.assetId);
+      resolvedAssetUri = (resolved.asset.content as { json_uri?: string } | undefined)?.json_uri;
+    } catch {
+      // DAS indexing can lag; keep mint successful using worker-returned assetId + metadata URI.
+    }
+    const sealedUri = minted.sealedUri || minted.metadataUri || resolvedAssetUri || metadataUri;
 
     return {
       jobId: request.jobId,
       caseId: request.caseId,
-      assetId: resolved.assetId,
+      assetId: minted.assetId,
       txSig: minted.txSig,
       sealedUri,
       metadataUri,

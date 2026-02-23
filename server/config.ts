@@ -1,12 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import type { TimingRules } from "../shared/contracts";
+import { isAbsolute, resolve } from "node:path";
+import type { CourtMode, TimingRules } from "../shared/contracts";
 
 interface NumericLimitConfig {
   maxEvidenceItemsPerCase: number;
   maxEvidenceCharsPerItem: number;
   maxEvidenceCharsPerCase: number;
   maxSubmissionCharsPerPhase: number;
+  maxClaimSummaryChars: number;
+  maxCaseTitleChars: number;
 }
 
 interface RateLimitConfig {
@@ -26,10 +28,13 @@ export interface AppConfig {
   appEnv: string;
   isProduction: boolean;
   isDevelopment: boolean;
+  publicAppUrl: string;
   apiHost: string;
   apiPort: number;
   corsOrigin: string;
   dbPath: string;
+  backupDir: string;
+  backupRetentionCount: number;
   signatureSkewSec: number;
   systemApiKey: string;
   workerToken: string;
@@ -42,6 +47,9 @@ export interface AppConfig {
   softDailyCaseCap: number;
   softCapMode: "warn" | "enforce";
   filingFeeLamports: number;
+  paymentEstimateCuMarginPct: number;
+  paymentEstimateMinCuLimit: number;
+  paymentEstimateCacheSec: number;
   treasuryAddress: string;
   solanaMode: "stub" | "rpc";
   solanaRpcUrl: string;
@@ -63,6 +71,28 @@ export interface AppConfig {
     das: RetryConfig;
   };
   logLevel: "debug" | "info" | "warn" | "error";
+  adminPanelPassword: string;
+  adminSessionTtlSec: number;
+  judgeOpenAiApiKey: string;
+  judgeOpenAiModel: string;
+  defaultCourtMode: CourtMode;
+}
+
+export function isDurableDbPath(pathValue: string): boolean {
+  const normalised = pathValue.trim();
+  if (!normalised) {
+    return false;
+  }
+  if (!isAbsolute(normalised)) {
+    return false;
+  }
+  if (normalised.startsWith("/tmp/")) {
+    return false;
+  }
+  if (normalised === "/tmp") {
+    return false;
+  }
+  return normalised.startsWith("/data/");
 }
 
 let envLoaded = false;
@@ -130,7 +160,25 @@ function resolveAppEnv(): string {
   return (process.env.APP_ENV || process.env.NODE_ENV || "development").trim().toLowerCase();
 }
 
+function resolveDefaultCourtMode(): CourtMode {
+  const mode = (process.env.COURT_MODE ?? "judge").trim().toLowerCase();
+  if (mode === "judge" || mode === "11-juror") {
+    return mode;
+  }
+  throw new Error("COURT_MODE must be either 'judge' or '11-juror'.");
+}
+
 function validateConfig(config: AppConfig): void {
+  let parsedPublicAppUrl: URL;
+  try {
+    parsedPublicAppUrl = new URL(config.publicAppUrl);
+  } catch {
+    throw new Error("PUBLIC_APP_URL must be a valid absolute URL.");
+  }
+  if (!["http:", "https:"].includes(parsedPublicAppUrl.protocol)) {
+    throw new Error("PUBLIC_APP_URL must use http or https.");
+  }
+
   const nonDev = !config.isDevelopment;
   if (nonDev) {
     if (!config.systemApiKey || config.systemApiKey === "dev-system-key") {
@@ -143,8 +191,32 @@ function validateConfig(config: AppConfig): void {
         "WORKER_TOKEN must be set to a strong non-default value outside development or test."
       );
     }
+    if (
+      !config.adminPanelPassword ||
+      config.adminPanelPassword === "gringos" ||
+      config.adminPanelPassword.trim().length < 12
+    ) {
+      throw new Error(
+        "ADMIN_PANEL_PASSWORD must be set to a strong non-default value (minimum 12 characters) outside development or test."
+      );
+    }
     if (config.corsOrigin.trim() === "*") {
       throw new Error("CORS_ORIGIN cannot be wildcard in non-development environments.");
+    }
+    if (parsedPublicAppUrl.protocol !== "https:") {
+      throw new Error("PUBLIC_APP_URL must use https outside development or test.");
+    }
+    const defenceInviteKey = config.defenceInviteSigningKey.trim();
+    const uniqueChars = new Set(defenceInviteKey).size;
+    if (
+      !defenceInviteKey ||
+      defenceInviteKey === "dev-defence-invite-signing-key" ||
+      defenceInviteKey.length < 32 ||
+      uniqueChars < 12
+    ) {
+      throw new Error(
+        "DEFENCE_INVITE_SIGNING_KEY must be set to a strong non-default value outside development or test."
+      );
     }
   }
 
@@ -158,6 +230,19 @@ function validateConfig(config: AppConfig): void {
     if (config.sealWorkerMode === "stub") {
       throw new Error("SEAL_WORKER_MODE=stub is not allowed in production.");
     }
+    if (!isDurableDbPath(config.dbPath)) {
+      throw new Error(
+        "In production, DB_PATH must be an absolute durable path under /data (for example /data/opencawt.sqlite)."
+      );
+    }
+    if (parsedPublicAppUrl.protocol !== "https:") {
+      throw new Error("PUBLIC_APP_URL must use https in production.");
+    }
+    if (config.defaultCourtMode === "judge" && !config.judgeOpenAiApiKey) {
+      throw new Error(
+        "JUDGE_OPENAI_API_KEY (or OPENAI_API_KEY fallback) must be set when Judge Mode is the default in production."
+      );
+    }
   }
 
   if (config.heliusWebhookEnabled && !config.heliusWebhookToken) {
@@ -170,6 +255,7 @@ function validateConfig(config: AppConfig): void {
 export function getConfig(): AppConfig {
   loadEnvFile();
   const appEnv = resolveAppEnv();
+  const defaultCourtMode = resolveDefaultCourtMode();
   const isDevelopment = ["development", "dev", "test"].includes(appEnv);
   const isProduction = ["production", "prod"].includes(appEnv);
   const port = process.env.PORT ? Number(process.env.PORT) : numberEnv("API_PORT", 8787);
@@ -178,10 +264,13 @@ export function getConfig(): AppConfig {
     appEnv,
     isProduction,
     isDevelopment,
+    publicAppUrl: stringEnv("PUBLIC_APP_URL", "http://127.0.0.1:5173"),
     apiHost: host,
     apiPort: port,
     corsOrigin: stringEnv("CORS_ORIGIN", "http://127.0.0.1:5173"),
     dbPath: stringEnv("DB_PATH", "./runtime/opencawt.sqlite"),
+    backupDir: stringEnv("BACKUP_DIR", isProduction ? "/data/backups" : "./runtime/backups"),
+    backupRetentionCount: Math.max(1, numberEnv("BACKUP_RETENTION_COUNT", 30)),
     signatureSkewSec: numberEnv("SIGNATURE_SKEW_SEC", 300),
     systemApiKey: stringEnv("SYSTEM_API_KEY", "dev-system-key"),
     workerToken: stringEnv("WORKER_TOKEN", "dev-worker-token"),
@@ -197,6 +286,9 @@ export function getConfig(): AppConfig {
     softDailyCaseCap: numberEnv("SOFT_DAILY_CASE_CAP", 50),
     softCapMode: stringEnv("SOFT_CAP_MODE", "warn") as "warn" | "enforce",
     filingFeeLamports: numberEnv("FILING_FEE_LAMPORTS", 5000000),
+    paymentEstimateCuMarginPct: Math.max(0, numberEnv("PAYMENT_ESTIMATE_CU_MARGIN_PCT", 10)),
+    paymentEstimateMinCuLimit: Math.max(10_000, numberEnv("PAYMENT_ESTIMATE_MIN_CU_LIMIT", 50_000)),
+    paymentEstimateCacheSec: Math.max(0, numberEnv("PAYMENT_ESTIMATE_CACHE_SEC", 20)),
     treasuryAddress: stringEnv("TREASURY_ADDRESS", "OpenCawtTreasury111111111111111111111111111"),
     solanaMode: stringEnv("SOLANA_MODE", "stub") as "stub" | "rpc",
     solanaRpcUrl: stringEnv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"),
@@ -224,7 +316,9 @@ export function getConfig(): AppConfig {
       maxEvidenceItemsPerCase: numberEnv("MAX_EVIDENCE_ITEMS_PER_CASE", 25),
       maxEvidenceCharsPerItem: numberEnv("MAX_EVIDENCE_CHARS_PER_ITEM", 10000),
       maxEvidenceCharsPerCase: numberEnv("MAX_EVIDENCE_CHARS_PER_CASE", 250000),
-      maxSubmissionCharsPerPhase: numberEnv("MAX_SUBMISSION_CHARS_PER_PHASE", 20000)
+      maxSubmissionCharsPerPhase: numberEnv("MAX_SUBMISSION_CHARS_PER_PHASE", 20000),
+      maxClaimSummaryChars: numberEnv("MAX_CLAIM_SUMMARY_CHARS", 400),
+      maxCaseTitleChars: numberEnv("MAX_CASE_TITLE_CHARS", 40)
     },
     rateLimits: {
       filingPer24h: numberEnv("RATE_LIMIT_FILINGS_PER_24H", 1),
@@ -245,7 +339,12 @@ export function getConfig(): AppConfig {
         timeoutMs: numberEnv("DAS_TIMEOUT_MS", 9000)
       }
     },
-    logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error"
+    logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error",
+    adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos"),
+    adminSessionTtlSec: numberEnv("ADMIN_SESSION_TTL_SEC", 900),
+    judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", stringEnv("OPENAI_API_KEY", "")),
+    judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini"),
+    defaultCourtMode
   };
   validateConfig(config);
   return config;

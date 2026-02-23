@@ -15,6 +15,12 @@ import { hashCapabilityToken, verifySignedMutation } from "../server/services/au
 import { setSecurityHeaders } from "../server/services/http";
 import { createSolanaProvider } from "../server/services/solanaProvider";
 import {
+  clampComputeUnitLimit,
+  createPaymentEstimator,
+  isValidSolanaPubkey,
+  priorityFeeLamports
+} from "../server/services/paymentEstimator";
+import {
   appendTranscriptEvent,
   claimDefenceAssignment,
   clearAgentCaseActivity,
@@ -35,7 +41,11 @@ import {
   setCaseFiled,
   upsertAgent
 } from "../server/db/repository";
-import { createSessionEngine } from "../server/services/sessionEngine";
+import {
+  createSessionEngine,
+  JUDGE_SCREENING_MAX_RETRIES,
+  JUDGE_SCREENING_RETRY_DELAY_MS
+} from "../server/services/sessionEngine";
 import { createDrandClient } from "../server/services/drand";
 import {
   normalisePrincipleIds,
@@ -54,6 +64,8 @@ import {
 import { parseRoute, routeToPath } from "../src/util/router";
 import { loadOpenClawToolRegistry } from "../server/integrations/openclaw/exampleToolRegistry";
 import { OPENCAWT_OPENCLAW_TOOLS } from "../shared/openclawTools";
+import { PROSECUTION_VOTE_PROMPT, mapVoteToAnswer } from "../shared/transcriptVoting";
+import { validateMlSignals, MlValidationError } from "../server/ml/validateMlSignals";
 
 function withEnv<T>(
   overrides: Record<string, string | undefined>,
@@ -152,6 +164,54 @@ async function testEvidenceAttachmentHashing() {
   assert.notEqual(a, b);
 }
 
+function testTranscriptVoteMapping() {
+  assert.equal(PROSECUTION_VOTE_PROMPT, "Do you side with the prosecution on this case?");
+  assert.equal(
+    mapVoteToAnswer({
+      voteLabel: "for_prosecution",
+      votes: []
+    }),
+    "yay"
+  );
+  assert.equal(
+    mapVoteToAnswer({
+      voteLabel: "for_defence",
+      votes: []
+    }),
+    "nay"
+  );
+  assert.equal(
+    mapVoteToAnswer({
+      votes: [
+        {
+          claimId: "c1",
+          finding: "proven",
+          severity: 1,
+          recommendedRemedy: "warn",
+          rationale: "ok",
+          citations: []
+        }
+      ]
+    }),
+    "yay"
+  );
+  assert.equal(
+    mapVoteToAnswer({
+      votes: [
+        {
+          claimId: "c1",
+          finding: "insufficient",
+          severity: 1,
+          recommendedRemedy: "warn",
+          rationale: "ok",
+          citations: []
+        }
+      ]
+    }),
+    "nay"
+  );
+}
+
 async function testSealHashFixtures() {
   const transcriptProjection = [
     {
@@ -195,7 +255,7 @@ async function testSealHashFixtures() {
   );
 }
 
-function testSwarmValidationHelpers() {
+async function testSwarmValidationHelpers() {
   assert.deepEqual(normalisePrincipleIds([1, "P2", "3", "P2"], { field: "principles" }), [1, 2, 3]);
   assert.throws(
     () => normalisePrincipleIds(["P0"], { field: "principles" }),
@@ -243,12 +303,43 @@ function testSwarmValidationHelpers() {
     /At most 8/
   );
 
+  const resolver = async (_hostname: string) => [
+    { address: "198.51.100.24", family: 4 }
+  ];
   assert.equal(
-    validateNotifyUrl("https://agents.example.org/opencawt/invite"),
+    await validateNotifyUrl("https://agents.example.org/opencawt/invite", "notifyUrl", resolver),
     "https://agents.example.org/opencawt/invite"
   );
-  assert.throws(() => validateNotifyUrl("http://agents.example.org/callback"), /https/i);
-  assert.throws(() => validateNotifyUrl("https://127.0.0.1/callback"), /private network hosts/i);
+  await assert.rejects(
+    () => validateNotifyUrl("http://agents.example.org/callback", "notifyUrl", resolver),
+    /https/i
+  );
+  await assert.rejects(
+    () => validateNotifyUrl("https://127.0.0.1/callback", "notifyUrl", resolver),
+    /private network hosts/i
+  );
+  await assert.rejects(
+    () =>
+      validateNotifyUrl("https://agents.example.org/callback", "notifyUrl", async () => [
+        { address: "10.1.2.3", family: 4 }
+      ]),
+    /resolves to localhost or a private network host/i
+  );
+  await assert.rejects(
+    () =>
+      validateNotifyUrl(
+        "https://agents.example.org/callback",
+        "notifyUrl",
+        async () => {
+          throw new Error("dns failed");
+        }
+      ),
+    /hostname could not be resolved/i
+  );
+  await assert.rejects(
+    () => validateNotifyUrl("https://agents.example.org:9443/callback", "notifyUrl", resolver),
+    /port 443/i
+  );
 }
 
 function testMigrationBackfillDefaults() {
@@ -635,15 +726,59 @@ async function testVerdictInconclusiveMapsToVoid() {
   assert.equal(result.bundle.overall.outcome, undefined);
 }
 
+function testPaymentEstimatorMaths() {
+  assert.equal(clampComputeUnitLimit(100_000, 50_000, 10), 110_000);
+  assert.equal(clampComputeUnitLimit(10_000, 50_000, 10), 50_000);
+  assert.equal(clampComputeUnitLimit(2_000_000, 50_000, 10), 1_400_000);
+  assert.equal(priorityFeeLamports(400_000, 2_500), 1000);
+  assert.equal(priorityFeeLamports(50_000, 1_001), 51);
+}
+
+async function testPaymentEstimatorStubShape() {
+  await withEnv(
+    {
+      APP_ENV: "development",
+      SOLANA_MODE: "stub",
+      TREASURY_ADDRESS: "OpenCawtTreasury111111111111111111111111111",
+      FILING_FEE_LAMPORTS: "5000000",
+      PAYMENT_ESTIMATE_CU_MARGIN_PCT: "10",
+      PAYMENT_ESTIMATE_MIN_CU_LIMIT: "50000",
+      PAYMENT_ESTIMATE_CACHE_SEC: "20"
+    },
+    async () => {
+      const config = getConfig();
+      const estimator = createPaymentEstimator(config);
+      const estimate = await estimator.estimateFilingFee();
+      assert.ok(estimate.recommendedAtIso);
+      assert.ok(estimate.breakdown.filingFeeLamports > 0);
+      assert.ok(estimate.breakdown.computeUnitLimit >= config.paymentEstimateMinCuLimit);
+      assert.ok(estimate.breakdown.computeUnitPriceMicroLamports > 0);
+      assert.equal(estimate.recommendation.treasuryAddress, config.treasuryAddress);
+      assert.equal(estimate.recommendation.rpcUrl, config.heliusRpcUrl);
+    }
+  );
+}
+
+function testPayerWalletValidation() {
+  assert.equal(
+    isValidSolanaPubkey("6q6n9y8aYV2B7QhKf8qQYxLoY6dX2eS3p4uZbN2kL8Xa"),
+    true
+  );
+  assert.equal(isValidSolanaPubkey("invalid-wallet"), false);
+}
+
 function testConfigFailFastGuards() {
   assert.throws(
     () =>
       withEnv(
         {
           APP_ENV: "production",
+          PUBLIC_APP_URL: "https://app.example.com",
           CORS_ORIGIN: "https://app.example.com",
           SYSTEM_API_KEY: "dev-system-key",
           WORKER_TOKEN: "worker-prod-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-prod-strong-1234",
           SOLANA_MODE: "rpc",
           DRAND_MODE: "http",
           SEAL_WORKER_MODE: "http",
@@ -660,9 +795,12 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "production",
+          PUBLIC_APP_URL: "https://app.example.com",
           CORS_ORIGIN: "https://app.example.com",
           SYSTEM_API_KEY: "system-prod-token",
           WORKER_TOKEN: "worker-prod-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-prod-strong-1234",
           SOLANA_MODE: "stub",
           DRAND_MODE: "http",
           SEAL_WORKER_MODE: "http",
@@ -679,9 +817,12 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "staging",
+          PUBLIC_APP_URL: "https://staging.example.com",
           CORS_ORIGIN: "*",
           SYSTEM_API_KEY: "system-stage-token",
           WORKER_TOKEN: "worker-stage-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-stage-strong-5678",
           HELIUS_WEBHOOK_ENABLED: "false",
           HELIUS_WEBHOOK_TOKEN: undefined
         },
@@ -695,9 +836,12 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "staging",
+          PUBLIC_APP_URL: "https://staging.example.com",
           CORS_ORIGIN: "https://staging.example.com",
           SYSTEM_API_KEY: "system-stage-token",
           WORKER_TOKEN: "worker-stage-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-stage-strong-5678",
           HELIUS_WEBHOOK_ENABLED: "true",
           HELIUS_WEBHOOK_TOKEN: undefined
         },
@@ -705,6 +849,74 @@ function testConfigFailFastGuards() {
       ),
     /HELIUS_WEBHOOK_ENABLED/
   );
+
+  assert.throws(
+    () =>
+      withEnv(
+        {
+          APP_ENV: "production",
+          PUBLIC_APP_URL: "https://app.example.com",
+          CORS_ORIGIN: "https://app.example.com",
+          SYSTEM_API_KEY: "system-prod-token",
+          WORKER_TOKEN: "worker-prod-token",
+          ADMIN_PANEL_PASSWORD: "gringos",
+          DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-prod-strong-1234",
+          SOLANA_MODE: "rpc",
+          DRAND_MODE: "http",
+          SEAL_WORKER_MODE: "http",
+          HELIUS_WEBHOOK_ENABLED: "false",
+          HELIUS_WEBHOOK_TOKEN: undefined
+        },
+        () => getConfig()
+      ),
+    /ADMIN_PANEL_PASSWORD/
+  );
+
+  assert.throws(
+    () =>
+      withEnv(
+        {
+          APP_ENV: "production",
+          PUBLIC_APP_URL: "https://app.example.com",
+          CORS_ORIGIN: "https://app.example.com",
+          SYSTEM_API_KEY: "system-prod-token",
+          WORKER_TOKEN: "worker-prod-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+          DEFENCE_INVITE_SIGNING_KEY: "dev-defence-invite-signing-key",
+          SOLANA_MODE: "rpc",
+          DRAND_MODE: "http",
+          SEAL_WORKER_MODE: "http",
+          HELIUS_WEBHOOK_ENABLED: "false",
+          HELIUS_WEBHOOK_TOKEN: undefined
+        },
+        () => getConfig()
+      ),
+    /DEFENCE_INVITE_SIGNING_KEY/
+  );
+
+  const cfg = withEnv(
+    {
+      APP_ENV: "production",
+      PUBLIC_APP_URL: "https://app.example.com",
+      CORS_ORIGIN: "https://app.example.com",
+      SYSTEM_API_KEY: "system-prod-token",
+      WORKER_TOKEN: "worker-prod-token",
+      ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+      ADMIN_SESSION_TTL_SEC: "1200",
+      DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-prod-strong-1234",
+      SOLANA_MODE: "rpc",
+      DRAND_MODE: "http",
+      SEAL_WORKER_MODE: "http",
+      DB_PATH: "/data/opencawt.sqlite",
+      HELIUS_WEBHOOK_ENABLED: "false",
+      HELIUS_WEBHOOK_TOKEN: undefined
+    },
+    () => getConfig()
+  );
+  if (cfg instanceof Promise) {
+    throw new Error("Expected synchronous config load.");
+  }
+  assert.equal(cfg.adminSessionTtlSec, 1200);
 }
 
 function testSecurityHeadersPresence() {
@@ -1160,6 +1372,20 @@ async function testDefenceCutoffVoiding() {
       error: () => undefined,
       debug: () => undefined
     } as any,
+    judge: {
+      async screenCase(input: { summary: string }) {
+        return { approved: true, caseTitle: input.summary.slice(0, 37) + "..." };
+      },
+      async breakTiebreak(_input: unknown) {
+        return { finding: "not_proven" as const, reasoning: "stub" };
+      },
+      async recommendRemedy(_input: unknown) {
+        return "";
+      },
+      isAvailable() {
+        return true;
+      }
+    },
     async onCaseReadyToClose() {
       return;
     }
@@ -1170,6 +1396,117 @@ async function testDefenceCutoffVoiding() {
   assert.equal(updated?.status, "void");
   assert.equal(updated?.voidReason, "missing_defence_assignment");
   db.close();
+}
+
+async function testJudgeScreeningQueuedRetryAndTerminalFailure() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_judge_retry.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-prosecution", true);
+  const draft = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    openDefence: true,
+    claimSummary: "Judge screening retry behaviour.",
+    requestedRemedy: "warn"
+  });
+  setCaseFiled(db, {
+    caseId: draft.caseId,
+    txSig: "tx-judge-retry",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
+  });
+
+  const seededNow = Date.now();
+  const seededIso = new Date(seededNow).toISOString();
+  db.prepare(
+    `UPDATE cases
+     SET court_mode = 'judge',
+         session_stage = 'judge_screening',
+         judge_screening_status = 'pending',
+         scheduled_for = NULL
+     WHERE case_id = ?`
+  ).run(draft.caseId);
+  db.prepare(
+    `UPDATE case_runtime
+     SET current_stage = 'judge_screening',
+         stage_started_at = ?,
+         stage_deadline_at = NULL
+     WHERE case_id = ?`
+  ).run(seededIso, draft.caseId);
+
+  let screenCalls = 0;
+  const engine = createSessionEngine({
+    db,
+    config,
+    drand: {
+      async getRoundAtOrAfter() {
+        return {
+          round: 1,
+          randomness: "stub",
+          chainInfo: {}
+        };
+      }
+    },
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined
+    } as any,
+    judge: {
+      async screenCase() {
+        screenCalls += 1;
+        throw new Error("judge unavailable");
+      },
+      async breakTiebreak(_input: unknown) {
+        return { finding: "not_proven" as const, reasoning: "stub" };
+      },
+      async recommendRemedy(_input: unknown) {
+        return "";
+      },
+      isAvailable() {
+        return false;
+      }
+    },
+    async onCaseReadyToClose() {
+      return;
+    }
+  });
+
+  const realNow = Date.now;
+  let fakeNow = seededNow;
+  Date.now = () => fakeNow;
+  try {
+    await engine.tickNow();
+    const firstPass = getCaseById(db, draft.caseId);
+    const firstRuntime = getCaseRuntime(db, draft.caseId);
+    assert.equal(firstPass?.judgeScreeningStatus, "pending_retry");
+    assert.equal(firstPass?.status, "filed");
+    assert.equal(firstRuntime?.currentStage, "judge_screening");
+    assert.equal(screenCalls, 1);
+
+    await engine.tickNow();
+    assert.equal(screenCalls, 1);
+
+    for (let attempt = 1; attempt < JUDGE_SCREENING_MAX_RETRIES; attempt += 1) {
+      fakeNow += JUDGE_SCREENING_RETRY_DELAY_MS + 1;
+      await engine.tickNow();
+    }
+
+    const finalCase = getCaseById(db, draft.caseId);
+    const finalRuntime = getCaseRuntime(db, draft.caseId);
+    assert.equal(finalCase?.status, "void");
+    assert.equal(finalCase?.voidReason, "judge_screening_failed");
+    assert.equal(finalCase?.judgeScreeningStatus, "failed");
+    assert.equal(finalRuntime?.currentStage, "void");
+    assert.equal(screenCalls, JUDGE_SCREENING_MAX_RETRIES);
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
 }
 
 function testVictoryScoreAndLeaderboard() {
@@ -1230,10 +1567,11 @@ function testVictoryScoreAndLeaderboard() {
   assert.ok(leaderboard[0].victoryPercent > leaderboard[1].victoryPercent);
 
   const profile = getAgentProfile(db, "agent-a", { activityLimit: 10 });
-  assert.equal(profile.stats.prosecutionsTotal, 6);
-  assert.equal(profile.stats.prosecutionsWins, 4);
-  assert.equal(profile.stats.defencesTotal, 0);
-  assert.equal(profile.recentActivity.length, 6);
+  assert.ok(profile !== null, "profile should exist for agent-a");
+  assert.equal(profile!.stats.prosecutionsTotal, 6);
+  assert.equal(profile!.stats.prosecutionsWins, 4);
+  assert.equal(profile!.stats.defencesTotal, 0);
+  assert.equal(profile!.recentActivity.length, 6);
 
   db.close();
 }
@@ -1349,19 +1687,114 @@ async function testDrandHttpIntegration() {
   assert.ok(result.chainInfo);
 }
 
+function testMlSignalValidation() {
+  // null/undefined inputs return null
+  assert.equal(validateMlSignals(null), null);
+  assert.equal(validateMlSignals(undefined), null);
+  assert.equal(validateMlSignals("bad"), null);
+
+  // empty object returns empty MlSignals
+  const empty = validateMlSignals({});
+  assert.ok(empty !== null);
+  assert.deepEqual(empty, {});
+
+  // valid principleImportance (length 12, each 0-3)
+  const valid12 = Array.from({ length: 12 }, (_, i) => i % 4);
+  const r1 = validateMlSignals({ principleImportance: valid12 });
+  assert.ok(r1 !== null);
+  assert.deepEqual(r1!.principleImportance, valid12);
+
+  // wrong length principleImportance throws
+  assert.throws(
+    () => validateMlSignals({ principleImportance: [1, 2, 3] }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "principleImportance"
+  );
+
+  // out-of-range value throws
+  assert.throws(
+    () => validateMlSignals({ principleImportance: Array.from({ length: 12 }, (_, i) => i === 0 ? 5 : 0) }),
+    (e: unknown) => e instanceof MlValidationError
+  );
+
+  // valid decisivePrincipleIndex 0-11
+  const r2 = validateMlSignals({ decisivePrincipleIndex: 11 });
+  assert.equal(r2!.decisivePrincipleIndex, 11);
+
+  // out of range throws
+  assert.throws(
+    () => validateMlSignals({ decisivePrincipleIndex: 12 }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "decisivePrincipleIndex"
+  );
+
+  // valid enum fields
+  const r3 = validateMlSignals({ uncertaintyType: "CONFLICTING_EVIDENCE", primaryBasis: "INTENT" });
+  assert.equal(r3!.uncertaintyType, "CONFLICTING_EVIDENCE");
+  assert.equal(r3!.primaryBasis, "INTENT");
+
+  // invalid enum throws
+  assert.throws(
+    () => validateMlSignals({ uncertaintyType: "NOT_A_REAL_TYPE" }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "uncertaintyType"
+  );
+
+  // valid harmDomains array
+  const r4 = validateMlSignals({ harmDomains: ["SAFETY", "FINANCIAL"] });
+  assert.deepEqual(r4!.harmDomains, ["SAFETY", "FINANCIAL"]);
+
+  // invalid harmDomain member throws
+  assert.throws(
+    () => validateMlSignals({ harmDomains: ["SAFETY", "BOGUS"] }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "harmDomains"
+  );
+
+  // ordinal 0-3 fields
+  const r5 = validateMlSignals({ mlConfidence: 3, severity: 0, evidenceQuality: 2 });
+  assert.equal(r5!.mlConfidence, 3);
+  assert.equal(r5!.severity, 0);
+  assert.equal(r5!.evidenceQuality, 2);
+
+  assert.throws(
+    () => validateMlSignals({ severity: 4 }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "severity"
+  );
+
+  // valid processFlags
+  const r6 = validateMlSignals({ processFlags: ["TIMEOUT", "SUSPECTED_COLLUSION"] });
+  assert.deepEqual(r6!.processFlags, ["TIMEOUT", "SUSPECTED_COLLUSION"]);
+
+  // invalid process flag throws
+  assert.throws(
+    () => validateMlSignals({ processFlags: ["TIMEOUT", "INVALID_FLAG"] }),
+    (e: unknown) => e instanceof MlValidationError && e.field === "processFlags"
+  );
+
+  // valid recommendedRemedy and proportionality
+  const r7 = validateMlSignals({ recommendedRemedy: "WARNING", proportionality: "PROPORTIONATE" });
+  assert.equal(r7!.recommendedRemedy, "WARNING");
+  assert.equal(r7!.proportionality, "PROPORTIONATE");
+
+  // decisiveEvidenceId must be string
+  const r8 = validateMlSignals({ decisiveEvidenceId: "P-1" });
+  assert.equal(r8!.decisiveEvidenceId, "P-1");
+}
+
 async function run() {
   await testCountdownMaths();
   testRouteParsing();
   await testCanonicalHashing();
   await testEvidenceAttachmentHashing();
+  testTranscriptVoteMapping();
   await testSealHashFixtures();
-  testSwarmValidationHelpers();
+  await testSwarmValidationHelpers();
   testMigrationBackfillDefaults();
   await testSignatureVerification();
   await testCapabilityTokenEnforcement();
   await testDrandSelectionDeterminism();
   await testVerdictDeterminism();
   await testVerdictInconclusiveMapsToVoid();
+  testPaymentEstimatorMaths();
+  await testPaymentEstimatorStubShape();
+  testPayerWalletValidation();
   testConfigFailFastGuards();
   testSecurityHeadersPresence();
   await testRpcPayerMismatchGuard();
@@ -1373,9 +1806,11 @@ async function run() {
   testDefenceClaimRace();
   testNamedDefendantExclusivity();
   await testDefenceCutoffVoiding();
+  await testJudgeScreeningQueuedRetryAndTerminalFailure();
   testVictoryScoreAndLeaderboard();
   testOpenDefenceQuery();
   testOpenClawToolContractParity();
+  testMlSignalValidation();
   await testDrandHttpIntegration();
   if (process.env.RUN_SMOKE_OPENCLAW === "1") {
     execFileSync("node", ["--import", "tsx", "tests/smoke/openclaw-participation.smoke.ts"], {

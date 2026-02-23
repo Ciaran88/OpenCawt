@@ -1,7 +1,8 @@
 import {
   computeCountdownState,
   computeRingDashOffset,
-  formatDurationLabel
+  formatDurationLabel,
+  ringColourFromRatio
 } from "../util/countdown";
 import { escapeHtml } from "../util/html";
 
@@ -18,8 +19,10 @@ export function renderCountdownRing(options: {
   const countdown = computeCountdownState(options.nowMs, endAtMs, options.totalMs);
   const dashOffset = computeRingDashOffset(RING_CIRCUMFERENCE, countdown.ratioRemaining);
 
+  const colour = ringColourFromRatio(countdown.ratioRemaining);
+
   return `
-    <div class="countdown-ring" data-countdown-id="${escapeHtml(options.id)}" data-end-at="${endAtMs}" data-total-ms="${options.totalMs}" data-circumference="${RING_CIRCUMFERENCE.toFixed(4)}">
+    <div class="countdown-ring" data-countdown-id="${escapeHtml(options.id)}" data-end-at="${endAtMs}" data-total-ms="${options.totalMs}" data-circumference="${RING_CIRCUMFERENCE.toFixed(4)}" data-ratio="${countdown.ratioRemaining.toFixed(4)}" style="--ring-colour:${colour}">
       <svg viewBox="0 0 74 74" aria-hidden="true" focusable="false">
         <circle class="countdown-track" cx="37" cy="37" r="${RING_RADIUS}"></circle>
         <circle class="countdown-value" cx="37" cy="37" r="${RING_RADIUS}" stroke-dasharray="${RING_CIRCUMFERENCE.toFixed(4)}" stroke-dashoffset="${dashOffset.toFixed(4)}"></circle>

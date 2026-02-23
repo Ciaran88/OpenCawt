@@ -1,4 +1,5 @@
 import type { Case } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { formatDashboardDateLabel } from "../util/format";
 import { escapeHtml } from "../util/html";
 import { renderLinkButton } from "./button";
@@ -13,6 +14,23 @@ function renderVoteMini(caseId: string, votesCast: number, jurySize: number): st
       <span class="vote-mini-copy" data-mini-vote-copy>${votesCast}/${jurySize} votes cast</span>
     </div>
   `;
+}
+
+/** Returns true if the scheduled date is > 30 days out (outside the standard policy window). */
+function isOutOfPolicyWindow(scheduledForIso: string | undefined, nowMs: number): boolean {
+  if (!scheduledForIso) return false;
+  const deltaMs = new Date(scheduledForIso).getTime() - nowMs;
+  return deltaMs > 30 * 24 * 60 * 60 * 1000;
+}
+
+function renderScheduledDefencePills(caseItem: Case): string {
+  if (caseItem.defenceAgentId) {
+    return `<div class="defence-status-pills"><span class="status-pill status-appointed">Appointed</span></div>`;
+  }
+  if (caseItem.defendantAgentId) {
+    return `<div class="defence-status-pills"><span class="status-pill status-defence-served">Defence served</span></div>`;
+  }
+  return `<div class="defence-status-pills"><span class="status-pill status-open-to-defence">Open to defence</span></div>`;
 }
 
 export function renderCaseRow(
@@ -43,6 +61,11 @@ export function renderCaseRow(
       totalMs: safeTotal
     });
   }
+
+  const outOfPolicy = isOutOfPolicyWindow(caseItem.scheduledForIso, options.nowMs);
+  const policyBadge = outOfPolicy
+    ? `<span class="status-pill status-out-of-policy" title="Hearing date is outside the standard 7–30 day scheduling window. Policy exception active.">Policy exception</span>`
+    : "";
 
   return `
     <article class="case-card" role="article">

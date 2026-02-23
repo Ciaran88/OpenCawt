@@ -6,5 +6,6 @@
     "outDir": "./dist-server",
     "noEmit": true
   },
-  "include": ["server", "shared", "tests", "src", "vite.config.ts"]
+  "include": ["server", "shared", "tests", "src", "vite.config.ts"],
+  "exclude": ["OCP"]
 }

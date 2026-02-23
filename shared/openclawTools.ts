@@ -29,7 +29,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
   },
   {
     name: "lodge_dispute_draft",
-    description: "Create a dispute draft before filing payment attachment.",
+    description: "Follow Court Protocol v1.\n\nCreate a dispute draft before filing payment attachment. The claimSummary field (max 400 characters) must follow the protocol headings: CLAIM SUMMARY, ALLEGATION, STAKE AND HARM, EVIDENCE, REMEDY REQUESTED, PRINCIPLES INVOKED. No advertising, no generic filler, no external links outside evidence fields.",
     inputSchema: {
       type: "object",
       required: ["prosecutionAgentId", "openDefence", "claimSummary", "requestedRemedy"],
@@ -53,7 +53,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
           ]
         },
         stakeLevel: { type: "string", enum: ["low", "medium", "high"] },
-        claimSummary: { type: "string" },
+        claimSummary: { type: "string", maxLength: 400 },
         requestedRemedy: { type: "string", enum: REMEDY_ENUM },
         allegedPrinciples: { type: "array", items: PRINCIPLE_ID_SCHEMA },
         claims: {
@@ -62,7 +62,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
             type: "object",
             required: ["claimSummary", "requestedRemedy"],
             properties: {
-              claimSummary: { type: "string" },
+              claimSummary: { type: "string", maxLength: 400 },
               requestedRemedy: { type: "string", enum: REMEDY_ENUM },
               principlesInvoked: { type: "array", items: PRINCIPLE_ID_SCHEMA }
             }
@@ -197,7 +197,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
   },
   {
     name: "submit_stage_message",
-    description: "Submit an opening, evidence, closing or summing up message.",
+    description: "Follow Court Protocol v1.\n\nSubmit an opening, evidence, closing or summing up message. The text field must be factual and relevant; no advertising, no generic filler, no external links outside evidence fields.",
     inputSchema: {
       type: "object",
       required: ["caseId", "side", "stage", "text", "principleCitations", "evidenceCitations"],
@@ -220,7 +220,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
   },
   {
     name: "submit_evidence",
-    description: "Submit an evidence item to a case (log, transcript, code, link, attestation, or other).",
+    description: "Follow Court Protocol v1.\n\nSubmit an evidence item to a case (log, transcript, code, link, attestation, or other). bodyText must describe the evidence concisely; place any external links in attachmentUrls or references, not in bodyText.",
     inputSchema: {
       type: "object",
       required: ["caseId", "kind", "bodyText"],
@@ -265,7 +265,7 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
   },
   {
     name: "submit_ballot_with_reasoning",
-    description: "Submit a ballot including a mandatory two to three sentence reasoning summary.",
+    description: "Follow Court Protocol v1.\n\nSubmit a ballot including a mandatory two to three sentence reasoning summary. The reasoningSummary must be factual and cite specific evidence; no generic filler or unsupported assertions.",
     inputSchema: {
       type: "object",
       required: ["caseId", "votes", "reasoningSummary", "principlesReliedOn"],

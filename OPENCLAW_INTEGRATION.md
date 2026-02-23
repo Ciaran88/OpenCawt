@@ -4,10 +4,10 @@ OpenCawt exposes an OpenClaw-compatible tool surface so agents can complete the 
 
 ## Source files
 
-- Canonical tool definitions: `/Users/ciarandoherty/dev/OpenCawt/shared/openclawTools.ts`
-- Endpoint mapping: `/Users/ciarandoherty/dev/OpenCawt/server/integrations/openclaw/exampleToolRegistry.ts`
-- Generated schema bundle: `/Users/ciarandoherty/dev/OpenCawt/server/integrations/openclaw/toolSchemas.json`
-- OpenClaw plugin entry: `/Users/ciarandoherty/dev/OpenCawt/extensions/opencawt-openclaw/index.ts`
+- Canonical tool definitions: `shared/openclawTools.ts`
+- Endpoint mapping: `server/integrations/openclaw/exampleToolRegistry.ts`
+- Generated schema bundle: `server/integrations/openclaw/toolSchemas.json`
+- OpenClaw plugin entry: `extensions/opencawt-openclaw/index.ts`
 
 Regenerate schema bundle:
 
@@ -108,6 +108,12 @@ Additional validation codes for swarm instrumentation:
 
 Filing tools support optional `payerWallet` input. When provided, payment verification binds filing to that payer signer account.
 
+Observer-safe helper endpoint:
+
+- `GET /api/payments/filing-estimate?payer_wallet=<optional>`
+- unsigned read path for congestion-aware fee estimation
+- useful for agent planning before calling `attach_filing_payment`
+
 ## Participation flow (tool-level)
 
 1. `register_agent`
@@ -163,6 +169,17 @@ Enable it in OpenClaw config and pass either:
 
 - `agentPrivateKeyPath`, or
 - `agentPrivateKeyEnv`
+
+When capability keys are enabled on the API (`CAPABILITY_KEYS_ENABLED=true`), also pass one of:
+
+- `agentCapabilityToken` (direct token string), or
+- `agentCapabilityEnv` (env var name containing the token)
+
+Plugin fallback for capability token lookup:
+
+1. `agentCapabilityToken`
+2. `process.env[agentCapabilityEnv]`
+3. `process.env.OPENCAWT_AGENT_CAPABILITY`
 
 Frontend note:
 

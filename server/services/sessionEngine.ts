@@ -1,5 +1,6 @@
 import { createId } from "../../shared/ids";
 import type { CaseVoidReason, SessionStage } from "../../shared/contracts";
+import { PROSECUTION_VOTE_PROMPT } from "../../shared/transcriptVoting";
 import type { AppConfig } from "../config";
 import {
   appendTranscriptEvent,
@@ -9,6 +10,7 @@ import {
   incrementReplacementCount,
   listBallotsByCase,
   listCasesByStatuses,
+  listClaims,
   listEligibleJurors,
   listJuryPanelMembers,
   listQueuedSealJobs,
@@ -17,6 +19,7 @@ import {
   markJurorReplaced,
   markJurorTimedOut,
   markSessionStarted,
+  setCaseJudgeScreeningResult,
   setJuryReadinessDeadlines,
   setVotingDeadlinesForActiveJurors,
   type CaseRecord,
@@ -25,6 +28,9 @@ import {
 import type { Db } from "../db/sqlite";
 import type { DrandClient } from "./drand";
 import { pickReplacementFromProof, selectJuryDeterministically } from "./jury";
+import type { JudgeService } from "./judge";
+import { truncateCaseTitle } from "./validation";
+import { JUDGE_CALL_TIMEOUT_MS, withJudgeTimeout } from "./judge";
 import { retrySealJob } from "./sealing";
 import type { Logger } from "./observability";
 
@@ -33,6 +39,7 @@ interface SessionEngineDeps {
   config: AppConfig;
   drand: DrandClient;
   logger: Logger;
+  judge: JudgeService;
   onCaseReadyToClose: (caseId: string) => Promise<void>;
   onCaseVoided?: (caseId: string) => Promise<void> | void;
   onDefenceInviteTick?: (caseRecord: CaseRecord, nowIso: string) => Promise<void> | void;
@@ -45,6 +52,13 @@ export interface SessionEngine {
 }
 
 const TICK_MS = 5000;
+export const JUDGE_SCREENING_RETRY_DELAY_MS = 30_000;
+export const JUDGE_SCREENING_MAX_RETRIES = 5;
+
+type JudgeScreeningRetryState = {
+  attempts: number;
+  nextAttemptAtMs: number;
+};
 
 function toIso(ms: number): string {
   return new Date(ms).toISOString();
@@ -210,7 +224,14 @@ function setStage(
   nowIso: string,
   deadlineIso: string | null
 ): void {
-  const status = stage === "voting" ? "voting" : stage === "closed" ? "closed" : "jury_selected";
+  const status =
+    stage === "voting"
+      ? "voting"
+      : stage === "closed"
+        ? "closed"
+        : stage === "judge_screening" || stage === "pre_session"
+          ? "filed"
+          : "jury_selected";
   markCaseSessionStage(deps.db, {
     caseId: caseRecord.caseId,
     stage,
@@ -249,11 +270,28 @@ function setStage(
     actorRole: "court",
     eventType: "stage_started",
     stage,
-    messageText: `Stage ${stage.replace(/_/g, " ")} started.`,
+    messageText:
+      stage === "voting"
+        ? `Stage ${stage.replace(/_/g, " ")} started.`
+        : `Stage ${stage.replace(/_/g, " ")} started.`,
     payload: {
-      deadlineAtIso: deadlineIso
+      deadlineAtIso: deadlineIso,
+      ...(stage === "voting" ? { votePrompt: PROSECUTION_VOTE_PROMPT } : {})
     }
   });
+
+  if (stage === "voting") {
+    appendTranscriptEvent(deps.db, {
+      caseId: caseRecord.caseId,
+      actorRole: "court",
+      eventType: "notice",
+      stage: "voting",
+      messageText: PROSECUTION_VOTE_PROMPT,
+      payload: {
+        votePrompt: PROSECUTION_VOTE_PROMPT
+      }
+    });
+  }
 
   if (deadlineIso) {
     appendTranscriptEvent(deps.db, {
@@ -298,7 +336,11 @@ function voidCase(
   }
 }
 
-async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Promise<void> {
+async function processCase(
+  deps: SessionEngineDeps,
+  caseRecord: CaseRecord,
+  judgeRetryState: Map<string, JudgeScreeningRetryState>
+): Promise<void> {
   const now = Date.now();
   const nowIso = toIso(now);
   const runtime = getCaseRuntime(deps.db, caseRecord.caseId);
@@ -308,6 +350,149 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
   }
 
   if (runtime.currentStage === "void" || caseRecord.status === "void") {
+    judgeRetryState.delete(caseRecord.caseId);
+    return;
+  }
+
+  if (runtime.currentStage !== "judge_screening") {
+    judgeRetryState.delete(caseRecord.caseId);
+  }
+
+  // ── Judge screening stage (judge mode only) ────────────────────────────────
+  if (runtime.currentStage === "judge_screening") {
+    if (caseRecord.courtMode !== "judge") {
+      // Safety: non-judge case shouldn't be in screening; advance to pre_session
+      setStage(deps, caseRecord, "pre_session", nowIso, null);
+      return;
+    }
+
+    if (caseRecord.judgeScreeningStatus === "failed") {
+      return;
+    }
+
+    const retry = judgeRetryState.get(caseRecord.caseId);
+    if (retry && now < retry.nextAttemptAtMs) {
+      return;
+    }
+
+    try {
+      const claims = listClaims(deps.db, caseRecord.caseId);
+      const screenOutcome = await withJudgeTimeout(
+        deps.judge.screenCase({
+          caseId: caseRecord.caseId,
+          summary: caseRecord.summary,
+          caseTopic: caseRecord.caseTopic,
+          stakeLevel: caseRecord.stakeLevel,
+          requestedRemedy: caseRecord.requestedRemedy,
+          prosecutionAgentId: caseRecord.prosecutionAgentId,
+          defendantAgentId: caseRecord.defendantAgentId,
+          openDefence: caseRecord.openDefence,
+          claims: claims.map((c) => ({
+            summary: c.summary,
+            requestedRemedy: c.requestedRemedy,
+            allegedPrinciples: c.allegedPrinciples
+          }))
+        }),
+        JUDGE_CALL_TIMEOUT_MS,
+        "screenCase"
+      );
+      if (!screenOutcome.ok) {
+        // Timeout or rejection — let the outer catch handle fallback
+        throw new Error(screenOutcome.error);
+      }
+      const result = screenOutcome.data;
+      const maxCaseTitleChars = deps.config.limits.maxCaseTitleChars;
+      const caseTitle = truncateCaseTitle(result.caseTitle, maxCaseTitleChars);
+
+      setCaseJudgeScreeningResult(deps.db, {
+        caseId: caseRecord.caseId,
+        status: result.approved ? "approved" : "rejected",
+        reason: result.reason,
+        caseTitle
+      });
+
+      appendTranscriptEvent(deps.db, {
+        caseId: caseRecord.caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage: "judge_screening",
+        messageText: result.approved
+          ? `Case approved by judge screening. Title: "${caseTitle}"`
+          : `Case rejected by judge screening: ${result.reason ?? "No reason provided."}`,
+        payload: {
+          screeningResult: result.approved ? "approved" : "rejected",
+          caseTitle,
+          reason: result.reason
+        }
+      });
+
+      if (result.approved) {
+        judgeRetryState.delete(caseRecord.caseId);
+        setStage(deps, caseRecord, "pre_session", nowIso, null);
+      } else {
+        judgeRetryState.delete(caseRecord.caseId);
+        voidCase(
+          deps,
+          caseRecord,
+          "judge_screening_rejected",
+          nowIso,
+          `Case rejected during judge screening: ${result.reason ?? "Spam or insufficient merit."}`
+        );
+      }
+    } catch (error) {
+      const attempts = (retry?.attempts ?? 0) + 1;
+      const exhausted = attempts >= JUDGE_SCREENING_MAX_RETRIES;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      deps.logger.warn("judge_screening_retry_scheduled", {
+        caseId: caseRecord.caseId,
+        attempts,
+        exhausted,
+        error: errorMessage
+      });
+
+      const nextAttemptAtMs = now + JUDGE_SCREENING_RETRY_DELAY_MS;
+      const nextAttemptAtIso = toIso(nextAttemptAtMs);
+      setCaseJudgeScreeningResult(deps.db, {
+        caseId: caseRecord.caseId,
+        status: exhausted ? "failed" : "pending_retry",
+        reason: exhausted
+          ? `Judge screening failed after ${attempts} attempts: ${errorMessage}`
+          : `Judge screening retry ${attempts}/${JUDGE_SCREENING_MAX_RETRIES} scheduled for ${nextAttemptAtIso}. Last error: ${errorMessage}`
+      });
+
+      appendTranscriptEvent(deps.db, {
+        caseId: caseRecord.caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage: "judge_screening",
+        messageText: exhausted
+          ? "Judge screening failed after repeated retries. The case has been voided."
+          : `Judge screening unavailable. Retry ${attempts}/${JUDGE_SCREENING_MAX_RETRIES} queued.`,
+        payload: {
+          attempts,
+          maxRetries: JUDGE_SCREENING_MAX_RETRIES,
+          nextRetryAtIso: exhausted ? null : nextAttemptAtIso,
+          error: errorMessage
+        }
+      });
+
+      if (exhausted) {
+        judgeRetryState.delete(caseRecord.caseId);
+        voidCase(
+          deps,
+          caseRecord,
+          "judge_screening_failed",
+          nowIso,
+          "Case became void because judge screening was unavailable after repeated retries."
+        );
+      } else {
+        judgeRetryState.set(caseRecord.caseId, {
+          attempts,
+          nextAttemptAtMs
+        });
+      }
+    }
     return;
   }
 
@@ -384,7 +569,8 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
 
     const refreshed = listJuryPanelMembers(deps.db, caseRecord.caseId);
     const readyCount = refreshed.filter((member) => member.memberStatus === "ready").length;
-    if (readyCount >= deps.config.rules.jurorPanelSize) {
+    const requiredJurors = caseRecord.courtMode === "judge" ? 12 : deps.config.rules.jurorPanelSize;
+    if (readyCount >= requiredJurors) {
       const deadlineIso = addSeconds(nowIso, deps.config.rules.stageSubmissionSeconds);
       setStage(deps, caseRecord, "opening_addresses", nowIso, deadlineIso);
     }
@@ -432,7 +618,8 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
 
   if (runtime.currentStage === "voting") {
     const ballots = listBallotsByCase(deps.db, caseRecord.caseId);
-    if (ballots.length >= deps.config.rules.jurorPanelSize) {
+    const requiredBallots = caseRecord.courtMode === "judge" ? 12 : deps.config.rules.jurorPanelSize;
+    if (ballots.length >= requiredBallots) {
       await deps.onCaseReadyToClose(caseRecord.caseId);
       return;
     }
@@ -463,6 +650,7 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
 export function createSessionEngine(deps: SessionEngineDeps): SessionEngine {
   let timer: ReturnType<typeof setInterval> | null = null;
   let isRunning = false;
+  const judgeRetryState = new Map<string, JudgeScreeningRetryState>();
 
   const tickNow = async () => {
     if (isRunning) {
@@ -472,7 +660,7 @@ export function createSessionEngine(deps: SessionEngineDeps): SessionEngine {
     try {
       const candidates = listCasesByStatuses(deps.db, ["filed", "jury_selected", "voting"]);
       for (const caseRecord of candidates) {
-        await processCase(deps, caseRecord);
+        await processCase(deps, caseRecord, judgeRetryState);
       }
       const queuedJobs = listQueuedSealJobs(deps.db, {
         olderThanMinutes: 5,

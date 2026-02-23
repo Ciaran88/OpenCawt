@@ -3,6 +3,7 @@
  * Tools are registered with optional: true for opt-in allowlisting.
  * Tool availability depends on allowlists; optional tools must be explicitly allowed in agents.list[].tools.allow.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../../shared/openclawTools";
@@ -11,6 +12,21 @@ import { signPayload } from "../../shared/signing";
 interface AgentIdentity {
   agentId: string;
   privateKey: CryptoKey;
+}
+
+function resolveCapabilityToken(config: Record<string, unknown>): string | undefined {
+  const direct =
+    typeof config.agentCapabilityToken === "string" ? config.agentCapabilityToken.trim() : "";
+  if (direct) {
+    return direct;
+  }
+  const envName =
+    typeof config.agentCapabilityEnv === "string" ? config.agentCapabilityEnv.trim() : "";
+  if (envName && process.env[envName]?.trim()) {
+    return process.env[envName]!.trim();
+  }
+  const fallback = process.env.OPENCAWT_AGENT_CAPABILITY?.trim();
+  return fallback || undefined;
 }
 
 async function loadIdentity(config: { agentPrivateKeyPath?: string; agentPrivateKeyEnv?: string }): Promise<AgentIdentity | null> {
@@ -78,6 +94,7 @@ function getCaseId(params: Record<string, unknown>): string | undefined {
 export default function register(api: { config: { plugins?: { entries?: Record<string, { config?: Record<string, unknown> }> } }; registerTool: (tool: unknown, opts?: { optional?: boolean }) => void }) {
   const pluginConfig = api.config.plugins?.entries?.opencawt?.config ?? {};
   const apiBaseUrl = String(pluginConfig.apiBaseUrl ?? "http://127.0.0.1:8787").replace(/\/$/, "");
+  const capabilityToken = resolveCapabilityToken(pluginConfig);
 
   for (const tool of OPENCAWT_OPENCLAW_TOOLS) {
     const { name, description, parameters } = toOpenClawParameters(tool);
@@ -129,6 +146,9 @@ export default function register(api: { config: { plugins?: { entries?: Record<s
           for (const [k, v] of Object.entries(params)) {
             if (k !== "caseId" && v !== undefined) payload[k] = v;
           }
+          if (name === "juror_ready_confirm") {
+            payload.ready = true;
+          }
           const { payloadHash, signature } = await signPayload({
             method: "POST",
             path,
@@ -138,15 +158,24 @@ export default function register(api: { config: { plugins?: { entries?: Record<s
             privateKey: identity.privateKey
           });
 
+          const idempotencyBase = `${name}-${identity.agentId}-${getCaseId(params) ?? "x"}-${payloadHash}`;
+          const idempotencyKey = `opencawt-${createHash("sha256").update(idempotencyBase).digest("hex").slice(0, 32)}`;
+
+          const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+            "X-Agent-Id": identity.agentId,
+            "X-Timestamp": String(timestamp),
+            "X-Payload-Hash": payloadHash,
+            "X-Signature": signature,
+            "Idempotency-Key": idempotencyKey
+          };
+          if (capabilityToken) {
+            headers["X-Agent-Capability"] = capabilityToken;
+          }
+
           const res = await fetch(`${apiBaseUrl}${path}`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Agent-Id": identity.agentId,
-              "X-Timestamp": String(timestamp),
-              "X-Payload-Hash": payloadHash,
-              "X-Signature": signature
-            },
+            headers,
             body: JSON.stringify(payload)
           });
           const data = await res.json().catch(() => ({}));

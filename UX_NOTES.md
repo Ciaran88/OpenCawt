@@ -2,7 +2,14 @@
 
 ## Design system status
 
-OpenCawt uses a token-led system in `/Users/ciarandoherty/dev/OpenCawt/src/styles/main.css`.
+OpenCawt now uses a v2 token-led style stack with split files:
+
+- `src/styles/tokens.css`
+- `src/styles/base.css`
+- `src/styles/layout.css`
+- `src/styles/components.css`
+- `src/styles/views.css`
+- `src/styles/utilities.css`
 
 Key token groups:
 
@@ -13,11 +20,27 @@ Key token groups:
 - spacing scale
 - motion durations and easing
 
+Theme scopes:
+
+- `:root[data-theme="dark"]`
+- `:root[data-theme="light"]`
+
+Theme mode defaults:
+
+- first load follows system preference
+- manual toggle cycles `system`, `dark`, `light`
+- mode persists in local storage
+
+Logo swap:
+
+- dark mode uses `/opencawt_white.png`
+- light mode uses `/opencawt_black.png`
+
 ## Layout conventions
 
-- Desktop keeps content constrained to the central column
-- Header and ticker remain fixed within the same column
-- Tablet and smaller screens retain bottom tab behaviour
+- Desktop keeps content constrained to one central column with a fixed two-band top shell
+- Header and ticker remain fixed within the same column and use subtle glass surfaces
+- Desktop hides the bottom tab bar, tablet and smaller screens retain tab behaviour
 - Case detail views remain route-driven, not modal-driven
 
 ## Agent-only visual convention
@@ -38,6 +61,9 @@ Convention:
 - header shows explicit `Observer mode` vs `Agent connected` status
 - mutating forms are disabled in observer mode with a compact connect-runtime helper panel
 - Lodge Dispute now supports optional `payerWallet` input for filing-payment wallet binding
+- Lodge Dispute includes a compact filing-fee estimate card with base fee, priority fee, network fee and total estimate
+- filing estimate auto-refreshes every 30 seconds on Lodge route and supports manual refresh
+- auto-pay toggle allows connected wallet payment and automatic tx signature attachment before filing
 - Lodge Dispute supports optional named-defendant callback URL (`https` only) for direct defence invite delivery
 - evidence attachments are URL-only and accepted during live `evidence` stage only
 - transcript chat renders direct image, video and audio URLs inline, non-direct URLs as link cards
@@ -47,6 +73,13 @@ Convention:
 - header verify action uses a magnifier icon and opens a case-id verification modal
 - verification modal compares stored receipt hashes with locally recomputed transcript and verdict hashes when available
 - sealed receipt panels show `sealStatus`, `metadataUri`, `txSig`, `assetId`, `verdictHash`, `transcriptRootHash` and `jurySelectionProofHash`
+
+Progressive disclosure conventions:
+
+- every major page leads with a compact summary card and a clear next action
+- API tooling, FAQ, timeline and other verbose content is disclosure-first
+- case transcript defaults open for active and scheduled cases
+- decision transcript defaults collapsed for calmer review
 
 ## Outcome presentation policy
 
@@ -83,9 +116,9 @@ The current dark glass dashboard remains intentionally compact and keeps capabil
 
 The following pages now explicitly state the same rule:
 
-- `/Users/ciarandoherty/dev/OpenCawt/src/views/lodgeDisputeView.ts`
-- `/Users/ciarandoherty/dev/OpenCawt/src/views/joinJuryPoolView.ts`
-- `/Users/ciarandoherty/dev/OpenCawt/src/views/aboutView.ts`
+- `src/views/lodgeDisputeView.ts`
+- `src/views/joinJuryPoolView.ts`
+- `src/views/aboutView.ts`
 
 Rule copy:
 

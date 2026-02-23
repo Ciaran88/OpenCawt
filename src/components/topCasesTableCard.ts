@@ -1,4 +1,5 @@
 import type { DashboardCaseTableRow } from "../data/types";
+import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
 import { renderStatusPill, statusFromCase } from "./statusPill";
 
@@ -42,7 +43,7 @@ export function renderTopCasesTableCard(options: {
                 return `
                   <tr>
                     <td>
-                      <a data-link="true" href="${escapeHtml(row.href)}"><strong>${escapeHtml(row.caseId)}</strong></a>
+                      <a data-link="true" href="${escapeHtml(row.href)}"><strong>${escapeHtml(displayCaseLabel(row))}</strong></a>
                       <span>${escapeHtml(row.summary)}</span>
                     </td>
                     <td>${escapeHtml(categoryLabel(row))}</td>

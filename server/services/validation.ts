@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { badRequest } from "./errors";
 import type {
   BallotConfidence,
@@ -47,6 +48,14 @@ export const BALLOT_VOTE_LABELS: BallotVoteLabel[] = [
 const MAX_EVIDENCE_ATTACHMENT_URLS = 8;
 const MAX_EVIDENCE_ATTACHMENT_URL_LENGTH = 2048;
 const MAX_NOTIFY_URL_LENGTH = 2048;
+const HTTPS_DEFAULT_PORT = "443";
+
+type HostResolution = {
+  address: string;
+  family: number;
+};
+
+type HostResolver = (hostname: string) => Promise<HostResolution[]>;
 
 export function countSentences(text: string): number {
   const cleaned = text.trim();
@@ -124,6 +133,28 @@ export function validateReasoningSummary(text: string): string {
     );
   }
   return value;
+}
+
+export function validateClaimSummary(text: string, maxChars: number): string {
+  const value = text.trim();
+  if (value.length > maxChars) {
+    throw badRequest(
+      "CLAIM_SUMMARY_TOO_LONG",
+      `Claim summary must not exceed ${maxChars} characters.`
+    );
+  }
+  return value;
+}
+
+export function truncateCaseTitle(text: string, maxChars: number): string {
+  const value = (text ?? "").trim();
+  if (!value) {
+    return "Untitled Case";
+  }
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return value.slice(0, maxChars - 3) + "...";
 }
 
 function validateEnumValue<T extends string>(
@@ -213,20 +244,11 @@ function parseIpv4Octets(hostname: string): number[] | null {
   return octets;
 }
 
-function isBlockedHost(hostname: string): boolean {
-  const value = hostname.trim().toLowerCase().replace(/\.+$/, "");
-  if (!value) {
-    return true;
-  }
+function normaliseHost(hostname: string): string {
+  return hostname.trim().toLowerCase().replace(/\.+$/, "");
+}
 
-  if (value === "localhost" || value.endsWith(".localhost") || value === "::1") {
-    return true;
-  }
-
-  const octets = parseIpv4Octets(value);
-  if (!octets) {
-    return false;
-  }
+function isBlockedIpv4(octets: number[]): boolean {
   if (octets[0] === 10) {
     return true;
   }
@@ -236,8 +258,85 @@ function isBlockedHost(hostname: string): boolean {
   if (octets[0] === 192 && octets[1] === 168) {
     return true;
   }
-  return octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31;
+  if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) {
+    return true;
+  }
+  if (octets[0] === 169 && octets[1] === 254) {
+    return true;
+  }
+  if (octets[0] >= 224 && octets[0] <= 239) {
+    return true;
+  }
+  return octets[0] === 0;
 }
+
+function isBlockedIpv6(hostname: string): boolean {
+  const value = normaliseHost(hostname);
+  if (value === "::1" || value === "::") {
+    return true;
+  }
+
+  const mappedIpv4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
+  if (mappedIpv4) {
+    const mappedOctets = parseIpv4Octets(mappedIpv4[1]);
+    return mappedOctets ? isBlockedIpv4(mappedOctets) : false;
+  }
+
+  const firstHextetMatch = /^([0-9a-f]{1,4})/i.exec(value);
+  if (!firstHextetMatch) {
+    return false;
+  }
+
+  const firstHextet = Number.parseInt(firstHextetMatch[1], 16);
+  if (Number.isNaN(firstHextet)) {
+    return false;
+  }
+
+  if ((firstHextet & 0xfe00) === 0xfc00) {
+    return true;
+  }
+  if ((firstHextet & 0xffc0) === 0xfe80) {
+    return true;
+  }
+  return (firstHextet & 0xff00) === 0xff00;
+}
+
+function isBlockedHostLiteral(hostname: string): boolean {
+  const value = normaliseHost(hostname);
+  if (!value) {
+    return true;
+  }
+
+  if (value === "localhost" || value.endsWith(".localhost") || value === "::1") {
+    return true;
+  }
+
+  const octets = parseIpv4Octets(value);
+  if (octets) {
+    return isBlockedIpv4(octets);
+  }
+  return value.includes(":") ? isBlockedIpv6(value) : false;
+}
+
+function isBlockedResolvedIp(address: string): boolean {
+  const value = normaliseHost(address);
+  const octets = parseIpv4Octets(value);
+  if (octets) {
+    return isBlockedIpv4(octets);
+  }
+  return value.includes(":") ? isBlockedIpv6(value) : false;
+}
+
+const defaultHostResolver: HostResolver = async (hostname) => {
+  const entries = await lookup(hostname, {
+    all: true,
+    verbatim: true
+  });
+  return entries.map((entry) => ({
+    address: entry.address,
+    family: entry.family
+  }));
+};
 
 function validateHttpsUrl(
   value: string,
@@ -246,6 +345,7 @@ function validateHttpsUrl(
     invalid: string;
     schemeInvalid: string;
     hostBlocked: string;
+    portInvalid?: string;
   },
   maxLength: number
 ): string {
@@ -267,7 +367,10 @@ function validateHttpsUrl(
   if (parsed.protocol !== "https:") {
     throw badRequest(errorCodes.schemeInvalid, `${inputLabel} must use https.`);
   }
-  if (isBlockedHost(parsed.hostname)) {
+  if (parsed.port && parsed.port !== HTTPS_DEFAULT_PORT && errorCodes.portInvalid) {
+    throw badRequest(errorCodes.portInvalid, `${inputLabel} must use port 443.`);
+  }
+  if (isBlockedHostLiteral(parsed.hostname)) {
     throw badRequest(
       errorCodes.hostBlocked,
       `${inputLabel} cannot target localhost or private network hosts.`
@@ -276,23 +379,66 @@ function validateHttpsUrl(
   return parsed.toString();
 }
 
-export function validateNotifyUrl(value: unknown, field = "notifyUrl"): string | undefined {
+async function assertDnsSafeHost(
+  parsed: URL,
+  field: string,
+  resolveHost: HostResolver
+): Promise<void> {
+  const hostname = normaliseHost(parsed.hostname);
+  if (!hostname || parseIpv4Octets(hostname) || hostname.includes(":")) {
+    return;
+  }
+
+  let resolved: HostResolution[];
+  try {
+    resolved = await resolveHost(hostname);
+  } catch {
+    throw badRequest(
+      "NOTIFY_URL_DNS_RESOLUTION_FAILED",
+      `${field} hostname could not be resolved.`
+    );
+  }
+  if (!resolved.length) {
+    throw badRequest(
+      "NOTIFY_URL_DNS_RESOLUTION_FAILED",
+      `${field} hostname could not be resolved.`
+    );
+  }
+
+  for (const entry of resolved) {
+    if (isBlockedResolvedIp(entry.address)) {
+      throw badRequest(
+        "NOTIFY_URL_HOST_BLOCKED_RESOLVED",
+        `${field} resolves to localhost or a private network host.`
+      );
+    }
+  }
+}
+
+export async function validateNotifyUrl(
+  value: unknown,
+  field = "notifyUrl",
+  resolveHost: HostResolver = defaultHostResolver
+): Promise<string | undefined> {
   if (value === undefined || value === null || value === "") {
     return undefined;
   }
   if (typeof value !== "string") {
     throw badRequest("NOTIFY_URL_INVALID", `${field} must be a URL string.`);
   }
-  return validateHttpsUrl(
+  const normalised = validateHttpsUrl(
     value,
     field,
     {
       invalid: "NOTIFY_URL_INVALID",
       schemeInvalid: "NOTIFY_URL_SCHEME_INVALID",
-      hostBlocked: "NOTIFY_URL_HOST_BLOCKED"
+      hostBlocked: "NOTIFY_URL_HOST_BLOCKED",
+      portInvalid: "NOTIFY_URL_PORT_INVALID"
     },
     MAX_NOTIFY_URL_LENGTH
   );
+  await assertDnsSafeHost(new URL(normalised), field, resolveHost);
+  return normalised;
 }
 
 export function validateEvidenceAttachmentUrls(value: unknown): string[] {

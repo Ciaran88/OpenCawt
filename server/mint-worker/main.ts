@@ -1,12 +1,28 @@
 import { createServer, type IncomingMessage } from "node:http";
+import { Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
 import { createId } from "../../shared/ids";
-import type { WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
+import type { WorkerMintRequest, WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
 import { mintWithBubblegumV2 } from "./bubblegumMint";
 import { asWorkerMintError } from "./errors";
 import { mintWithMetaplexNft } from "./metaplexNftMint";
+import { mintOcpAgreement } from "./ocpAgreementMint";
 import { getMintWorkerConfig } from "./workerConfig";
 
 const config = getMintWorkerConfig();
+
+function deriveMintAuthorityPubkey(): string | undefined {
+  if (!config.mintAuthorityKeyB58) return undefined;
+  if (config.mode === "stub") return undefined;
+  if (config.mode === "bubblegum_v2" && config.mintSigningStrategy === "external_endpoint") return undefined;
+  try {
+    const secret = bs58.decode(config.mintAuthorityKeyB58);
+    const keypair = Keypair.fromSecretKey(secret);
+    return keypair.publicKey.toBase58();
+  } catch {
+    return undefined;
+  }
+}
 
 async function readJson<T>(req: IncomingMessage, limitBytes = 1024 * 1024): Promise<T> {
   const chunks: Buffer[] = [];
@@ -36,12 +52,36 @@ function createStubResponse(body: WorkerSealRequest): WorkerSealResponse {
   };
 }
 
+/** Narrow a WorkerMintRequest to WorkerSealRequest (court_case path). */
+function isOcpRequest(body: WorkerMintRequest): body is import("../../shared/contracts").OcpMintRequest {
+  return "requestType" in body && body.requestType === "ocp_agreement";
+}
+
 const server = createServer((req, res) => {
   void (async () => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (req.method === "OPTIONS") {
       res.statusCode = 204;
       res.end();
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/health") {
+      if (String(req.headers["x-worker-token"] || "") !== config.token) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: "invalid_worker_token" }));
+        return;
+      }
+      const mintAuthorityPubkey = deriveMintAuthorityPubkey();
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(
+        JSON.stringify({
+          ok: true,
+          mode: config.mode,
+          ...(mintAuthorityPubkey ? { mintAuthorityPubkey } : {})
+        })
+      );
       return;
     }
 
@@ -57,9 +97,9 @@ const server = createServer((req, res) => {
       return;
     }
 
-    let body: WorkerSealRequest;
+    let body: WorkerMintRequest;
     try {
-      body = await readJson<WorkerSealRequest>(req);
+      body = await readJson<WorkerMintRequest>(req);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("PAYLOAD_TOO_LARGE")) {
@@ -74,7 +114,10 @@ const server = createServer((req, res) => {
 
     let response: WorkerSealResponse;
     try {
-      if (config.mode === "bubblegum_v2") {
+      if (isOcpRequest(body)) {
+        // OCP agreement NFT — dispatches to OCP-specific metadata + metaplex_nft mint
+        response = await mintOcpAgreement(config, body);
+      } else if (config.mode === "bubblegum_v2") {
         response = await mintWithBubblegumV2(config, body);
       } else if (config.mode === "metaplex_nft") {
         response = await mintWithMetaplexNft(config, body);
@@ -83,9 +126,13 @@ const server = createServer((req, res) => {
       }
     } catch (error) {
       const mintError = asWorkerMintError(error);
+      // Determine a stable jobId + caseId for the error response regardless of request type
+      const jobId  = "jobId"  in body ? body.jobId  : "unknown";
+      const caseId = isOcpRequest(body) ? body.agreementCode
+                   : "caseId" in body   ? body.caseId : "unknown";
       response = {
-        jobId: body.jobId,
-        caseId: body.caseId,
+        jobId,
+        caseId,
         status: "failed",
         errorCode: mintError?.code ?? "MINT_FAILED",
         errorMessage: mintError?.message ?? (error instanceof Error ? error.message : String(error)),

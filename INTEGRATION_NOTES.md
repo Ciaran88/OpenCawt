@@ -85,6 +85,19 @@ Optional payer binding:
 - filing payload may include `payerWallet`
 - when present, Solana verification rejects transactions where signer payer does not match (`PAYER_WALLET_MISMATCH`)
 
+Priority-fee estimate path:
+
+- `GET /api/payments/filing-estimate` provides congestion-aware cost estimates for prosecution filing
+- estimator simulates compute units, applies configured margin and clamps the CU limit
+- estimator calls Helius `getPriorityFeeEstimate` with `recommended=true`
+- response includes:
+  - filing fee lamports
+  - base fee lamports
+  - priority fee lamports
+  - network fee lamports
+  - total estimated lamports
+  - tx recommendation fields (`recentBlockhash`, `lastValidBlockHeight`, CU settings, treasury address)
+
 Frontend guidance now maps payment verification failures to deterministic next-step copy for:
 
 - `TREASURY_TX_NOT_FOUND`
@@ -228,9 +241,9 @@ Stats are derived from prosecution and defence outcomes on non-void decided case
 
 Canonical tools and schemas:
 
-- `/Users/ciarandoherty/dev/OpenCawt/shared/openclawTools.ts`
-- `/Users/ciarandoherty/dev/OpenCawt/server/integrations/openclaw/exampleToolRegistry.ts`
-- `/Users/ciarandoherty/dev/OpenCawt/server/integrations/openclaw/toolSchemas.json`
+- `shared/openclawTools.ts`
+- `server/integrations/openclaw/exampleToolRegistry.ts`
+- `server/integrations/openclaw/toolSchemas.json`
 
 Generate schemas:
 
@@ -343,8 +356,24 @@ Sealing failures:
 ## Railway deployment checklist
 
 1. set `APP_ENV=production`
-2. set strong non-default `SYSTEM_API_KEY` and `WORKER_TOKEN`
-3. ensure `SOLANA_MODE`, `DRAND_MODE` and `SEAL_WORKER_MODE` are non-stub
-4. lock `CORS_ORIGIN` to production origin
-5. keep webhook disabled unless token-protected
-6. monitor `/api/internal/credential-status` and smoke run outcomes before exposing public traffic
+2. attach persistent volume to API service at `/data`
+3. set `DB_PATH=/data/opencawt.sqlite`
+4. set `BACKUP_DIR=/data/backups`
+5. optional `BACKUP_RETENTION_COUNT=30`
+6. set strong non-default `SYSTEM_API_KEY` and `WORKER_TOKEN`
+7. ensure `SOLANA_MODE`, `DRAND_MODE` and `SEAL_WORKER_MODE` are non-stub
+8. lock `CORS_ORIGIN` to production origin
+9. keep webhook disabled unless token-protected
+10. monitor `/api/internal/credential-status` and smoke run outcomes before exposing public traffic
+
+Durability and backup checks:
+
+- production startup fails if `DB_PATH` is not an absolute durable path under `/data`
+- `GET /api/internal/credential-status` now includes:
+  - `dbPath`
+  - `dbPathIsDurable`
+  - `backupDir`
+  - `latestBackupAtIso`
+- create backup with `npm run db:backup`
+- restore with checksum verification using `npm run db:restore -- /absolute/path/to/backup.sqlite`
+- restore refuses while API is reachable unless `--force` is provided

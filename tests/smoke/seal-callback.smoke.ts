@@ -65,8 +65,8 @@ function setupSealCallbackDb(dbPath: string): void {
     jurorPoolSnapshotHash: "pool-hash-1",
     outcome: "for_prosecution",
     decidedAtIso: now,
-    externalUrl: `/decision/${encodeURIComponent(case1)}`,
-    verdictUri: `/decision/${encodeURIComponent(case1)}`,
+    externalUrl: `https://opencawt.example/decision/${encodeURIComponent(case1)}`,
+    verdictUri: `https://opencawt.example/decision/${encodeURIComponent(case1)}`,
     metadata: { caseSummary: "Smoke", imagePath: "nft_seal.png" }
   };
 
@@ -82,8 +82,8 @@ function setupSealCallbackDb(dbPath: string): void {
     jurorPoolSnapshotHash: "pool-hash-2",
     outcome: "for_defence",
     decidedAtIso: now,
-    externalUrl: `/decision/${encodeURIComponent(case2)}`,
-    verdictUri: `/decision/${encodeURIComponent(case2)}`,
+    externalUrl: `https://opencawt.example/decision/${encodeURIComponent(case2)}`,
+    verdictUri: `https://opencawt.example/decision/${encodeURIComponent(case2)}`,
     metadata: { caseSummary: "Smoke", imagePath: "nft_seal.png" }
   };
 

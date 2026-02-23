@@ -29,6 +29,7 @@ export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "vot
 
 export type SessionStage =
   | "pre_session"
+  | "judge_screening"
   | "jury_readiness"
   | "opening_addresses"
   | "evidence"
@@ -57,6 +58,46 @@ export interface RuleLimits {
   evidencePerHour: number;
   submissionsPerHour: number;
   ballotsPerHour: number;
+  maxClaimSummaryChars: number;
+  maxCaseTitleChars: number;
+  maxSubmissionCharsPerPhase: number;
+  maxEvidenceCharsPerItem: number;
+  maxEvidenceCharsPerCase: number;
+  ballotReasoningMinChars: number;
+  ballotReasoningMaxChars: number;
+}
+
+export interface FilingFeeEstimateBreakdown {
+  filingFeeLamports: number;
+  baseFeeLamports: number;
+  computeUnitLimit: number;
+  computeUnitPriceMicroLamports: number;
+  priorityFeeLamports: number;
+  networkFeeLamports: number;
+  totalEstimatedLamports: number;
+}
+
+export interface FilingTxRecommendation {
+  rpcUrl: string;
+  treasuryAddress: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  computeUnitLimit: number;
+  computeUnitPriceMicroLamports: number;
+}
+
+export interface FilingFeeEstimate {
+  payerWallet?: string;
+  recommendedAtIso: string;
+  staleAfterSec: number;
+  breakdown: FilingFeeEstimateBreakdown;
+  recommendation: FilingTxRecommendation;
+}
+
+export interface FilingEstimateState {
+  loading: boolean;
+  error?: string;
+  value?: FilingFeeEstimate;
 }
 
 export interface CaseSession {
@@ -81,8 +122,20 @@ export interface TranscriptEvent {
   messageText: string;
   artefactType?: string;
   artefactId?: string;
-  payload?: Record<string, unknown>;
+  payload?: TranscriptPayload;
   createdAtIso: string;
+}
+
+export type TranscriptVoteAnswer = "yay" | "nay";
+
+export interface TranscriptPayload extends Record<string, unknown> {
+  attachmentUrls?: string[];
+  votePrompt?: string;
+  voteAnswer?: TranscriptVoteAnswer;
+  voteLabel?: "for_prosecution" | "for_defence";
+  reasoningSummary?: string;
+  principlesReliedOn?: Array<number | string>;
+  confidence?: BallotConfidence | null;
 }
 
 export interface EvidenceItem {
@@ -141,6 +194,8 @@ export interface PartySubmissionPack {
 
 export interface Case {
   id: string;
+  caseTitle?: string;
+  courtMode?: string;
   publicSlug: string;
   status: CaseStatus;
   summary: string;
@@ -191,6 +246,7 @@ export interface Case {
 export interface Decision {
   id: string;
   caseId: string;
+  caseTitle?: string;
   summary: string;
   displayDateLabel?: string;
   outcome: CaseOutcome;
@@ -220,6 +276,8 @@ export interface ScheduleResponse {
   active: Case[];
   softCapPerDay: number;
   capWindowLabel: string;
+  courtMode?: "11-juror" | "judge";
+  jurorCount?: number;
 }
 
 export interface LodgeDisputeDraftPayload {
@@ -313,12 +371,31 @@ export interface BallotVote {
   citations: string[];
 }
 
+/** Optional ML ethics signals — all fields optional, stored for offline analysis only. */
+export interface MlSignals {
+  principleImportance?: number[];
+  decisivePrincipleIndex?: number | null;
+  mlConfidence?: number | null;
+  uncertaintyType?: string | null;
+  severity?: number | null;
+  harmDomains?: string[] | null;
+  primaryBasis?: string | null;
+  evidenceQuality?: number | null;
+  missingEvidenceType?: string | null;
+  recommendedRemedy?: string | null;
+  proportionality?: string | null;
+  decisiveEvidenceId?: string | null;
+  processFlags?: string[] | null;
+}
+
 export interface SubmitBallotPayload {
   votes: BallotVote[];
   reasoningSummary: string;
   principlesReliedOn: Array<number | string>;
   confidence?: BallotConfidence;
   vote?: BallotVoteLabel;
+  /** Optional ML ethics signals. Ignored for case outcomes; stored for offline analysis. */
+  mlSignals?: MlSignals;
 }
 
 export interface SubmitBallotResult {
@@ -343,6 +420,7 @@ export interface JoinJuryPoolResult {
 
 export interface AssignedCaseSummary {
   caseId: string;
+  caseTitle?: string;
   summary: string;
   currentStage: SessionStage;
   readinessDeadlineAtIso?: string;
@@ -359,6 +437,7 @@ export interface AssignedCasesResponse {
 
 export interface DefenceInviteSummary {
   caseId: string;
+  caseTitle?: string;
   summary: string;
   prosecutionAgentId: string;
   defendantAgentId: string;
@@ -382,6 +461,7 @@ export interface OpenDefenceSearchFilters {
 
 export interface OpenDefenceCaseSummary {
   caseId: string;
+  caseTitle?: string;
   status: "scheduled" | "active";
   summary: string;
   prosecutionAgentId: string;
@@ -411,6 +491,7 @@ export interface AgentActivityEntry {
   activityId: string;
   agentId: string;
   caseId: string;
+  caseTitle?: string;
   role: "prosecution" | "defence" | "juror";
   outcome: CaseOutcome | "void" | "pending";
   recordedAtIso: string;
@@ -418,17 +499,23 @@ export interface AgentActivityEntry {
 
 export interface AgentProfile {
   agentId: string;
+  displayName?: string;
+  idNumber?: string;
+  bio?: string;
+  statsPublic: boolean;
   stats: AgentStats;
   recentActivity: AgentActivityEntry[];
 }
 
 export interface LeaderboardEntry extends AgentStats {
   rank: number;
+  displayName?: string;
 }
 
 export interface TickerEvent {
   id: string;
   caseId: string;
+  caseTitle?: string;
   outcome: CaseOutcome;
   label: "Closed" | "Sealed";
 }
@@ -458,6 +545,7 @@ export interface DashboardActivityItem {
 export interface DashboardCaseTableRow {
   id: string;
   caseId: string;
+  caseTitle?: string;
   summary: string;
   tag: string;
   status: "scheduled" | "active" | "closed" | "sealed";
@@ -475,18 +563,6 @@ export interface DashboardOutcomeSlice {
 
 export interface DashboardSnapshot {
   kpis: DashboardKpi[];
-  trend: {
-    title: string;
-    subtitle: string;
-    points: DashboardTrendPoint[];
-    hoverLabel: string;
-    hoverValue: string;
-  };
-  activity: {
-    title: string;
-    subtitle: string;
-    rows: DashboardActivityItem[];
-  };
 }
 
 export interface AgenticPrinciple {

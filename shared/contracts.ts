@@ -9,6 +9,7 @@ export type CaseLifecycleStatus =
 
 export type SessionStage =
   | "pre_session"
+  | "judge_screening"
   | "jury_readiness"
   | "opening_addresses"
   | "evidence"
@@ -18,6 +19,8 @@ export type SessionStage =
   | "closed"
   | "sealed"
   | "void";
+
+export type CourtMode = "11-juror" | "judge";
 
 export type CasePhase = "opening" | "evidence" | "closing" | "summing_up" | "voting" | "sealed";
 
@@ -54,6 +57,92 @@ export type EvidenceTypeLabel =
 export type EvidenceStrength = "weak" | "medium" | "strong";
 export type BallotConfidence = "low" | "medium" | "high";
 
+// ── ML ethics signal types ────────────────────────────────────────────────────
+// These types are collected per juror per case for future offline analysis.
+// They are optional additions to the ballot payload and have no effect on
+// case outcomes or the dispute protocol.
+
+export type MlUncertaintyType =
+  | "INSUFFICIENT_EVIDENCE"
+  | "CONFLICTING_EVIDENCE"
+  | "UNCLEAR_HARM"
+  | "UNCLEAR_INTENT"
+  | "AMBIGUOUS_PRINCIPLE_MAPPING"
+  | "PROCEDURAL_IRREGULARITY"
+  | "OTHER";
+
+export type MlHarmDomain =
+  | "INFORMATIONAL"
+  | "REPUTATIONAL"
+  | "FINANCIAL"
+  | "SAFETY"
+  | "AUTONOMY_CONSENT"
+  | "FAIRNESS_EQUITY"
+  | "PROCEDURAL_INTEGRITY";
+
+export type MlPrimaryBasis =
+  | "INTENT"
+  | "FORESEEABLE_CONSEQUENCES"
+  | "ACTUAL_OUTCOMES"
+  | "RULE_PROCEDURE_BREACH"
+  | "PATTERN_HISTORY";
+
+export type MlMissingEvidenceType =
+  | "LOGS"
+  | "PRIMARY_SOURCE"
+  | "TIMELINE"
+  | "THIRD_PARTY_CORROBORATION"
+  | "COUNTERFACTUAL"
+  | "EXPERT_JUDGEMENT"
+  | "OTHER";
+
+export type MlRecommendedRemedy =
+  | "NO_ACTION"
+  | "GUIDANCE_ONLY"
+  | "WARNING"
+  | "RESTRICTION_BAN"
+  | "RESTITUTION"
+  | "ESCALATE_HUMAN_REVIEW";
+
+export type MlProportionality =
+  | "TOO_LENIENT"
+  | "PROPORTIONATE"
+  | "TOO_HARSH"
+  | "NOT_SURE";
+
+export type MlProcessFlag =
+  | "TIMEOUT"
+  | "MISSING_STAGE_CONTENT"
+  | "OFF_TOPIC_ARGUMENT"
+  | "INADEQUATE_CITATIONS"
+  | "SUSPECTED_COLLUSION"
+  | "IDENTITY_UNCERTAINTY"
+  | "OTHER";
+
+/** Optional ML ethics signals submitted alongside a juror ballot. */
+export interface MlSignals {
+  /** Length-12 integer vector; 0 = not used, 1 = minor, 2 = important, 3 = decisive. */
+  principleImportance?: number[];
+  /** Index 0–11 of the single most decisive principle, or null. */
+  decisivePrincipleIndex?: number | null;
+  /** Juror confidence: 0 = low, 1 = medium, 2 = high, 3 = very high. */
+  mlConfidence?: number | null;
+  uncertaintyType?: MlUncertaintyType | null;
+  /** 0 = trivial, 1 = mild, 2 = material, 3 = severe. */
+  severity?: number | null;
+  harmDomains?: MlHarmDomain[] | null;
+  primaryBasis?: MlPrimaryBasis | null;
+  /** 0 = poor, 1 = mixed, 2 = strong, 3 = conclusive. */
+  evidenceQuality?: number | null;
+  missingEvidenceType?: MlMissingEvidenceType | null;
+  recommendedRemedy?: MlRecommendedRemedy | null;
+  proportionality?: MlProportionality | null;
+  /** Reference to a specific evidence package, e.g. "P-1" or "D-2". */
+  decisiveEvidenceId?: string | null;
+  processFlags?: MlProcessFlag[] | null;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export type CaseVoidReason =
   | "missing_defence_assignment"
   | "missing_opening_submission"
@@ -62,7 +151,9 @@ export type CaseVoidReason =
   | "missing_summing_submission"
   | "voting_timeout"
   | "inconclusive_verdict"
-  | "manual_void";
+  | "manual_void"
+  | "judge_screening_rejected"
+  | "judge_screening_failed";
 
 export type Remedy = "warn" | "delist" | "ban" | "restitution" | "other" | "none";
 
@@ -177,6 +268,10 @@ export interface VerdictBundle {
       insufficient: number;
     };
     majorityRemedy: Remedy;
+    judgeTiebreak?: {
+      finding: "proven" | "not_proven";
+      reasoning: string;
+    };
   }>;
   overall: {
     jurySize: number;
@@ -184,6 +279,10 @@ export interface VerdictBundle {
     outcome?: CaseOutcome;
     inconclusive: boolean;
     remedy: Remedy;
+    judgeTiebreak?: {
+      claimsBroken: string[];
+    };
+    judgeRemedyRecommendation?: string;
   };
   integrity: {
     drandRound: number | null;
@@ -263,6 +362,10 @@ export interface RegisterAgentPayload {
   agentId: string;
   jurorEligible?: boolean;
   notifyUrl?: string;
+  displayName?: string;
+  idNumber?: string;
+  bio?: string;
+  statsPublic?: boolean;
 }
 
 export interface JoinJuryPoolPayload {
@@ -321,6 +424,8 @@ export interface SubmitBallotPayload {
   principlesReliedOn: Array<string | number>;
   confidence?: BallotConfidence;
   vote?: BallotVoteLabel;
+  /** Optional ML ethics signals. Ignored for case outcomes; stored for offline analysis. */
+  mlSignals?: MlSignals;
 }
 
 export interface JurorReadinessPayload {
@@ -331,6 +436,33 @@ export interface JurorReadinessPayload {
 export interface FileCasePayload {
   treasuryTxSig: string;
   payerWallet?: string;
+}
+
+export interface FilingFeeEstimateBreakdown {
+  filingFeeLamports: number;
+  baseFeeLamports: number;
+  computeUnitLimit: number;
+  computeUnitPriceMicroLamports: number;
+  priorityFeeLamports: number;
+  networkFeeLamports: number;
+  totalEstimatedLamports: number;
+}
+
+export interface FilingTxRecommendation {
+  rpcUrl: string;
+  treasuryAddress: string;
+  recentBlockhash: string;
+  lastValidBlockHeight: number;
+  computeUnitLimit: number;
+  computeUnitPriceMicroLamports: number;
+}
+
+export interface FilingFeeEstimateResponse {
+  payerWallet?: string;
+  recommendedAtIso: string;
+  staleAfterSec: number;
+  breakdown: FilingFeeEstimateBreakdown;
+  recommendation: FilingTxRecommendation;
 }
 
 export interface DefenceAssignPayload {
@@ -347,6 +479,7 @@ export interface AssignedCasesPayload {
 
 export interface AssignedCaseSummary {
   caseId: string;
+  caseTitle?: string;
   summary: string;
   currentStage: SessionStage;
   readinessDeadlineAtIso?: string;
@@ -363,6 +496,7 @@ export interface AssignedCasesResponse {
 
 export interface DefenceInviteSummary {
   caseId: string;
+  caseTitle?: string;
   summary: string;
   prosecutionAgentId: string;
   defendantAgentId: string;
@@ -386,6 +520,7 @@ export interface OpenDefenceSearchFilters {
 
 export interface OpenDefenceCaseSummary {
   caseId: string;
+  caseTitle?: string;
   status: "scheduled" | "active";
   summary: string;
   prosecutionAgentId: string;
@@ -415,6 +550,7 @@ export interface AgentActivityEntry {
   activityId: string;
   agentId: string;
   caseId: string;
+  caseTitle?: string;
   role: "prosecution" | "defence" | "juror";
   outcome: CaseOutcome | "void" | "pending";
   recordedAtIso: string;
@@ -422,15 +558,22 @@ export interface AgentActivityEntry {
 
 export interface AgentProfile {
   agentId: string;
+  displayName?: string;
+  idNumber?: string;
+  bio?: string;
+  statsPublic: boolean;
   stats: AgentStats;
   recentActivity: AgentActivityEntry[];
 }
 
 export interface LeaderboardEntry extends AgentStats {
   rank: number;
+  displayName?: string;
 }
 
 export interface WorkerSealRequest {
+  /** Discriminator — optional for backward compatibility with pre-union callers. */
+  requestType?: "court_case";
   jobId: string;
   caseId: string;
   verdictHash: string;
@@ -450,6 +593,85 @@ export interface WorkerSealRequest {
     imagePath: string;
   };
 }
+
+/**
+ * OCP agreement mint request — sent by the OCP server to the mint worker when
+ * `OCP_SOLANA_MODE=rpc`.  The worker dispatches on `requestType === "ocp_agreement"`
+ * and calls `mintOcpAgreement()` instead of the court-case path.
+ */
+export interface OcpMintRequest {
+  requestType: "ocp_agreement";
+  /** Unique job ID for this mint (ocp_mjob_* prefix). */
+  jobId: string;
+  /** 10-character Crockford Base32 code identifying the agreement. */
+  agreementCode: string;
+  /** Proposal ID (the DB primary key of the sealed agreement). */
+  proposalId: string;
+  /** SHA-256 hex of canonical agreement terms. */
+  termsHash: string;
+  /** base58 Ed25519 public key of party A. */
+  partyAAgentId: string;
+  /** base58 Ed25519 public key of party B. */
+  partyBAgentId: string;
+  /** Visibility of the agreement record. */
+  mode: "public" | "private";
+  /** ISO 8601 timestamp when the agreement was sealed. */
+  sealedAtIso: string;
+  /** Canonical public URL for this agreement — used as NFT external_url. */
+  externalUrl: string;
+  /** Pre-computed metadata URI; if set the worker skips Pinata upload. */
+  metadataUri?: string;
+}
+
+/**
+ * OCP minting fee estimate — returned by `GET /v1/agreements/fee-estimate`.
+ * Mirrors the shape of `FilingFeeEstimateResponse` but uses OCP-specific naming.
+ */
+export interface OcpFeeEstimateResponse {
+  payerWallet?: string;
+  recommendedAtIso: string;
+  staleAfterSec: number;
+  breakdown: OcpFeeEstimateBreakdown;
+  recommendation: OcpFeeTxRecommendation;
+}
+
+export interface OcpFeeEstimateBreakdown {
+  /** The minting fee charged by the OCP treasury (lamports). */
+  mintingFeeLamports: number;
+  /** Solana base fee for the transfer TX (lamports). */
+  baseFeeLamports: number;
+  /** Compute unit limit recommended for the transfer TX. */
+  computeUnitLimit: number;
+  /** Compute unit price (micro-lamports) for priority fee. */
+  computeUnitPriceMicroLamports: number;
+  /** Priority fee component (lamports). */
+  priorityFeeLamports: number;
+  /** Total network fee = base + priority (lamports). */
+  networkFeeLamports: number;
+  /** Total estimated cost = minting fee + network fee (lamports). */
+  totalEstimatedLamports: number;
+}
+
+export interface OcpFeeTxRecommendation {
+  /** Helius RPC URL the client should use to submit the TX. */
+  rpcUrl: string;
+  /** Treasury address to transfer SOL to. */
+  treasuryAddress: string;
+  /** Recent blockhash for building the transfer TX. */
+  recentBlockhash: string;
+  /** Last valid block height for the blockhash. */
+  lastValidBlockHeight: number;
+  /** Recommended compute unit limit for the TX. */
+  computeUnitLimit: number;
+  /** Recommended compute unit price (micro-lamports). */
+  computeUnitPriceMicroLamports: number;
+}
+
+/**
+ * Union of all mint request types accepted by the mint worker.
+ * Dispatch on `requestType` to determine the handler.
+ */
+export type WorkerMintRequest = WorkerSealRequest | OcpMintRequest;
 
 export type WorkerSealResponse =
   | {

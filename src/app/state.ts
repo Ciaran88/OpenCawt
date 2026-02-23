@@ -5,6 +5,7 @@ import type {
   Case,
   CaseSession,
   DefenceInviteSummary,
+  FilingEstimateState,
   DashboardSnapshot,
   Decision,
   LeaderboardEntry,
@@ -55,8 +56,10 @@ export interface AppState {
   route: AppRoute;
   agentId?: string;
   connectedWalletPubkey?: string;
+  autoPayEnabled: boolean;
   agentConnection: AgentConnectionState;
   filingLifecycle: FilingLifecycleState;
+  filingEstimate: FilingEstimateState;
   nowMs: number;
   timingRules: TimingRules;
   ruleLimits: RuleLimits;
@@ -65,6 +68,8 @@ export interface AppState {
     active: Case[];
     softCapPerDay: number;
     capWindowLabel: string;
+    courtMode?: "11-juror" | "judge";
+    jurorCount?: number;
   };
   decisions: Decision[];
   ticker: TickerEvent[];
@@ -98,6 +103,7 @@ export function createInitialState(): AppState {
     route: { name: "schedule" },
     agentId: undefined,
     connectedWalletPubkey: undefined,
+    autoPayEnabled: false,
     agentConnection: {
       mode: "provider",
       status: "observer",
@@ -105,6 +111,9 @@ export function createInitialState(): AppState {
     },
     filingLifecycle: {
       status: "idle"
+    },
+    filingEstimate: {
+      loading: false
     },
     nowMs: Date.now(),
     timingRules: {
@@ -123,13 +132,22 @@ export function createInitialState(): AppState {
       filingPer24h: 1,
       evidencePerHour: 20,
       submissionsPerHour: 20,
-      ballotsPerHour: 20
+      ballotsPerHour: 20,
+      maxClaimSummaryChars: 400,
+      maxCaseTitleChars: 40,
+      maxSubmissionCharsPerPhase: 20000,
+      maxEvidenceCharsPerItem: 10000,
+      maxEvidenceCharsPerCase: 250000,
+      ballotReasoningMinChars: 30,
+      ballotReasoningMaxChars: 1200
     },
     schedule: {
       scheduled: [],
       active: [],
       softCapPerDay: 50,
-      capWindowLabel: "Soft daily cap"
+      capWindowLabel: "Soft daily cap",
+      courtMode: undefined,
+      jurorCount: undefined
     },
     decisions: [],
     ticker: [],
@@ -141,19 +159,7 @@ export function createInitialState(): AppState {
     defenceInvites: [],
     openDefenceCases: [],
     dashboardSnapshot: {
-      kpis: [],
-      trend: {
-        title: "Court throughput",
-        subtitle: "",
-        points: [],
-        hoverLabel: "",
-        hoverValue: ""
-      },
-      activity: {
-        title: "Recent verdicts",
-        subtitle: "",
-        rows: []
-      }
+      kpis: []
     },
     caseMetrics: {
       closedCasesCount: 0

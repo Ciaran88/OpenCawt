@@ -2,7 +2,8 @@ import { escapeHtml } from "../util/html";
 
 export interface BottomSheetAction {
   label: string;
-  href: string;
+  href?: string;
+  action?: string;
   subtitle?: string;
 }
 
@@ -27,14 +28,22 @@ export function renderBottomSheet(sheet: BottomSheetState | null): string {
         </header>
         <div class="sheet-list">
           ${sheet.actions
-            .map(
-              (action) => `
-                <a href="${escapeHtml(action.href)}" data-link="true" class="sheet-item">
-                  <span class="sheet-item-title">${escapeHtml(action.label)}</span>
-                  ${action.subtitle ? `<span class="sheet-item-subtitle">${escapeHtml(action.subtitle)}</span>` : ""}
+            .map((item) => {
+              if (item.action) {
+                return `
+                  <button type="button" class="sheet-item" data-action="${escapeHtml(item.action)}">
+                    <span class="sheet-item-title">${escapeHtml(item.label)}</span>
+                    ${item.subtitle ? `<span class="sheet-item-subtitle">${escapeHtml(item.subtitle)}</span>` : ""}
+                  </button>
+                `;
+              }
+              return `
+                <a href="${escapeHtml(item.href ?? "#")}" data-link="true" class="sheet-item">
+                  <span class="sheet-item-title">${escapeHtml(item.label)}</span>
+                  ${item.subtitle ? `<span class="sheet-item-subtitle">${escapeHtml(item.subtitle)}</span>` : ""}
                 </a>
-              `
-            )
+              `;
+            })
             .join("")}
         </div>
       </section>

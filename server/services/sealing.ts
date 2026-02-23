@@ -76,7 +76,12 @@ async function postWorkerMint(
   throw new Error(`SEAL_WORKER_ERROR:${String(lastError)}`);
 }
 
-function buildWorkerSealRequest(caseRecord: CaseRecord): WorkerSealRequest {
+function buildDecisionUrl(config: AppConfig, caseId: string): string {
+  const base = config.publicAppUrl.endsWith("/") ? config.publicAppUrl : `${config.publicAppUrl}/`;
+  return new URL(`decision/${encodeURIComponent(caseId)}`, base).toString();
+}
+
+function buildWorkerSealRequest(caseRecord: CaseRecord, config: AppConfig): WorkerSealRequest {
   if (!caseRecord.verdictHash) {
     throw new Error("SEAL_VERDICT_HASH_MISSING");
   }
@@ -96,6 +101,8 @@ function buildWorkerSealRequest(caseRecord: CaseRecord): WorkerSealRequest {
     throw new Error("SEAL_OUTCOME_MISSING");
   }
 
+  const decisionUrl = buildDecisionUrl(config, caseRecord.caseId);
+
   return {
     jobId: createId("seal"),
     caseId: caseRecord.caseId,
@@ -108,8 +115,8 @@ function buildWorkerSealRequest(caseRecord: CaseRecord): WorkerSealRequest {
     jurorPoolSnapshotHash: caseRecord.poolSnapshotHash,
     outcome: caseRecord.outcome,
     decidedAtIso: caseRecord.decidedAtIso,
-    externalUrl: `/decision/${encodeURIComponent(caseRecord.caseId)}`,
-    verdictUri: `/decision/${encodeURIComponent(caseRecord.caseId)}`,
+    externalUrl: decisionUrl,
+    verdictUri: decisionUrl,
     metadata: {
       caseSummary: caseRecord.summary,
       imagePath: "nft_seal.png"
@@ -122,7 +129,7 @@ export async function enqueueSealJob(options: {
   config: AppConfig;
   caseRecord: CaseRecord;
 }): Promise<{ jobId: string; mode: "stub" | "http"; status: string; created: boolean }> {
-  const request = buildWorkerSealRequest(options.caseRecord);
+  const request = buildWorkerSealRequest(options.caseRecord, options.config);
   const payloadHash = await canonicalHashHex(request);
   const created = createSealJobIfMissing(options.db, {
     caseId: options.caseRecord.caseId,

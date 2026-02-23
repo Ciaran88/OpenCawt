@@ -73,6 +73,27 @@ function buildMetadataJson(
   };
 }
 
+function ensureAbsoluteHttpsUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new WorkerMintError({
+      code: "INVALID_EXTERNAL_URL",
+      message: "Seal metadata external_url must be an absolute URL.",
+      retryable: false
+    });
+  }
+  if (parsed.protocol !== "https:") {
+    throw new WorkerMintError({
+      code: "INVALID_EXTERNAL_URL_SCHEME",
+      message: "Seal metadata external_url must use https.",
+      retryable: false
+    });
+  }
+  return parsed.toString();
+}
+
 async function pinataRequest<T>(
   config: MintWorkerConfig,
   endpoint: string,
@@ -152,7 +173,14 @@ export async function uploadReceiptMetadata(
     return request.metadataUri;
   }
   const imageUri = await ensureSealImageUri(config);
-  const metadata = buildMetadataJson(request, imageUri, sealedAtIso);
+  const metadata = buildMetadataJson(
+    {
+      ...request,
+      externalUrl: ensureAbsoluteHttpsUrl(request.externalUrl)
+    },
+    imageUri,
+    sealedAtIso
+  );
 
   const result = await pinataRequest<PinataJsonResponse>(config, "/pinning/pinJSONToIPFS", {
     method: "POST",

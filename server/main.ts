@@ -1,17 +1,19 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
-import { existsSync, createReadStream } from "node:fs";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, extname } from "node:path";
 import { canonicalHashHex } from "../shared/hash";
 import { createId } from "../shared/ids";
 import type {
-  AgentProfile,
   AssignedCasesPayload,
+  CourtMode,
   CreateCaseDraftPayload,
   FileCasePayload,
   JoinJuryPoolPayload,
   JurorReadinessPayload,
+  MlSignals,
   OpenDefenceSearchFilters,
+  Remedy,
   RegisterAgentPayload,
   SubmitBallotPayload,
   SubmitEvidencePayload,
@@ -21,7 +23,7 @@ import type {
   WorkerSealRequest,
   WorkerSealResponse
 } from "../shared/contracts";
-import { getConfig } from "./config";
+import { getConfig, isDurableDbPath } from "./config";
 import {
   addBallot,
   addEvidence,
@@ -29,6 +31,7 @@ import {
   appendTranscriptEventInTransaction,
   claimDefenceAssignment,
   countActiveAgentCapabilities,
+  getAgent,
   getAgentProfile,
   getCaseIntegrityDiagnostics,
   confirmJurorReady,
@@ -63,18 +66,30 @@ import {
   replaceJuryMembers,
   recordDefenceInviteAttempt,
   rebuildAllAgentStats,
+  searchAgents,
   revokeAgentCapabilityByHash,
   saveUsedTreasuryTx,
   setAgentBanned,
+  setAgentFilingBanned,
+  setAgentDefenceBanned,
+  setAgentJuryBanned,
+  deleteCaseById,
+  getRuntimeConfig,
+  setRuntimeConfig,
   setCaseFiled,
+  setCaseRemedyRecommendation,
   setCaseSealHashes,
   setCaseJurySelected,
   setJurorAvailability,
   storeVerdict,
   type CaseRecord,
   upsertAgent,
+  upsertMlCaseFeatures,
+  upsertMlJurorFeatures,
+  listMlExport,
   upsertSubmission
 } from "./db/repository";
+import { MlValidationError, validateMlSignals } from "./ml/validateMlSignals";
 import { openDatabase } from "./db/sqlite";
 import {
   assertSystemKey,
@@ -84,7 +99,7 @@ import {
   verifySignedMutation
 } from "./services/auth";
 import { createDrandClient } from "./services/drand";
-import { ApiError, badRequest, conflict, notFound, unauthorised } from "./services/errors";
+import { ApiError, badRequest, conflict, forbidden, notFound, unauthorised } from "./services/errors";
 import {
   completeIdempotency,
   readIdempotencyKey,
@@ -93,8 +108,10 @@ import {
 } from "./services/idempotency";
 import { selectJuryDeterministically } from "./services/jury";
 import { createLogger, createRequestId } from "./services/observability";
+import { createPaymentEstimator, isValidSolanaPubkey } from "./services/paymentEstimator";
 import { enforceActionRateLimit, enforceFilingLimit } from "./services/rateLimit";
 import { applySealResult, enqueueSealJob, retrySealJob } from "./services/sealing";
+import { createJudgeService, JUDGE_CALL_TIMEOUT_MS, withJudgeTimeout } from "./services/judge";
 import { createSessionEngine } from "./services/sessionEngine";
 import { createSolanaProvider } from "./services/solanaProvider";
 import { computeCaseSealHashes } from "./services/sealHashes";
@@ -103,6 +120,7 @@ import {
   validateBallotConfidence,
   validateBallotVoteLabel,
   validateCaseTopic,
+  validateClaimSummary,
   validateEvidenceAttachmentUrls,
   validateNotifyUrl,
   validateEvidenceStrength,
@@ -119,23 +137,108 @@ import {
   setSecurityHeaders
 } from "./services/http";
 import { toUiCase, toUiDecision } from "./services/presenters";
-import { computeDeterministicVerdict } from "./services/verdict";
+import { computeDeterministicVerdict, tallyClaimVotes } from "./services/verdict";
 import { syncCaseReputation } from "./services/reputation";
 import { dispatchDefenceInvite } from "./services/defenceInvite";
 import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../shared/openclawTools";
+import { COURT_PROTOCOL_CURRENT, COURT_PROTOCOL_VERSION, courtProtocolHashSync } from "../shared/courtProtocol";
+import {
+  PROSECUTION_VOTE_PROMPT,
+  mapAnswerToVoteLabel,
+  mapVoteToAnswer
+} from "../shared/transcriptVoting";
+import { injectDemoAgent } from "./scripts/injectDemoAgent";
+import { injectDemoCompletedCase } from "./scripts/injectDemoCompletedCase";
+import { injectLongHorizonCase } from "./scripts/injectLongHorizonCase";
 
 const config = getConfig();
 const logger = createLogger(config.logLevel);
 const db = openDatabase(config);
 const drand = createDrandClient(config);
 const solana = createSolanaProvider(config);
+const paymentEstimator = createPaymentEstimator(config);
+const judge = createJudgeService({ logger, config });
 
 for (const historicalCase of listCasesByStatuses(db, ["closed", "sealed", "void"])) {
   syncCaseReputation(db, historicalCase);
 }
 rebuildAllAgentStats(db);
 
+// Apply runtime config overrides (persisted daily cap, soft cap mode, etc.)
+const savedDailyCap = getRuntimeConfig(db, "daily_cap");
+if (savedDailyCap !== null) {
+  const parsed = Number(savedDailyCap);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    config.softDailyCaseCap = parsed;
+  }
+}
+const savedSoftCapMode = getRuntimeConfig(db, "soft_cap_mode");
+if (savedSoftCapMode === "warn" || savedSoftCapMode === "enforce") {
+  config.softCapMode = savedSoftCapMode;
+}
+
+// In-memory rate limiter for admin auth attempts (ip -> { count, resetAt })
+const adminAuthAttempts = new Map<string, { count: number; resetAt: number }>();
+const adminSessions = new Map<string, { expiresAtMs: number }>();
+
+function pruneExpiredAdminSessions(nowMs: number): void {
+  for (const [token, session] of adminSessions.entries()) {
+    if (session.expiresAtMs <= nowMs) {
+      adminSessions.delete(token);
+    }
+  }
+}
+
+function issueAdminSession(nowMs: number): { token: string; expiresAtIso: string } {
+  pruneExpiredAdminSessions(nowMs);
+  const token = randomBytes(32).toString("base64url");
+  const expiresAtMs = nowMs + config.adminSessionTtlSec * 1000;
+  adminSessions.set(token, { expiresAtMs });
+  return {
+    token,
+    expiresAtIso: new Date(expiresAtMs).toISOString()
+  };
+}
+
+function assertAdminToken(req: IncomingMessage): void {
+  const raw = req.headers["x-admin-token"];
+  const token = typeof raw === "string" ? raw.trim() : "";
+  if (!token) {
+    throw unauthorised("ADMIN_TOKEN_REQUIRED", "Missing X-Admin-Token header.");
+  }
+  const nowMs = Date.now();
+  pruneExpiredAdminSessions(nowMs);
+  const session = adminSessions.get(token);
+  if (!session) {
+    throw unauthorised("ADMIN_TOKEN_INVALID", "Admin token is invalid.");
+  }
+  if (session.expiresAtMs <= nowMs) {
+    adminSessions.delete(token);
+    throw unauthorised("ADMIN_TOKEN_EXPIRED", "Admin token has expired.");
+  }
+}
+
 const closingCases = new Set<string>();
+
+function findLatestBackupIso(backupDir: string): string | null {
+  if (!existsSync(backupDir)) {
+    return null;
+  }
+  const backupEntries = readdirSync(backupDir)
+    .filter((name) => /^opencawt-backup-.*\.sqlite$/.test(name))
+    .map((name) => {
+      const path = join(backupDir, name);
+      const stat = statSync(path);
+      return {
+        mtimeMs: stat.mtimeMs
+      };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (!backupEntries.length) {
+    return null;
+  }
+  return new Date(backupEntries[0].mtimeMs).toISOString();
+}
 
 function resolveCaseIdFromPath(pathname: string): string | null {
   const segments = pathSegments(pathname);
@@ -390,6 +493,8 @@ interface JurySelectionComputation {
 
 async function computeInitialJurySelection(caseId: string): Promise<JurySelectionComputation> {
   const caseRecord = ensureCaseExists(caseId);
+  const globalCourtMode = (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode;
+  const jurySize = globalCourtMode === "judge" ? 12 : config.rules.jurorPanelSize;
   const eligible = listEligibleJurors(db, {
     excludeAgentIds: [caseRecord.prosecutionAgentId, caseRecord.defenceAgentId ?? ""].filter(Boolean),
     weeklyLimit: 3
@@ -400,7 +505,7 @@ async function computeInitialJurySelection(caseId: string): Promise<JurySelectio
     caseId,
     eligibleJurorIds: eligible,
     drand: drandData,
-    jurySize: config.rules.jurorPanelSize
+    jurySize
   });
 
   return {
@@ -475,13 +580,66 @@ async function closeCasePipeline(caseId: string): Promise<{
     const ballots = listBallotsByCase(db, caseId);
     const juryMembers = listJuryMembers(db, caseId);
 
+    // Judge mode: detect 6-6 ties and invoke judge tiebreak
+    let judgeTiebreaks:
+      | Record<string, { finding: "proven" | "not_proven"; reasoning: string }>
+      | undefined;
+
+    if (caseRecord.courtMode === "judge") {
+      const ballotLikes = ballots.map((item) => ({ votes: item.votes, ballotHash: item.ballotHash }));
+      for (const claim of claims) {
+        const tally = tallyClaimVotes(claim.claimId, ballotLikes);
+        if (tally.proven === tally.notProven && tally.proven > tally.insufficient) {
+          // Exact tie — invoke judge tiebreak
+          if (!judgeTiebreaks) judgeTiebreaks = {};
+          const tiebreakOutcome = await withJudgeTimeout(
+            judge.breakTiebreak({
+              caseId,
+              targetClaimId: claim.claimId,
+              claims: claims.map((c) => ({
+                claimId: c.claimId,
+                summary: c.summary,
+                requestedRemedy: c.requestedRemedy,
+                allegedPrinciples: c.allegedPrinciples
+              })),
+              ballots: ballots.map((b) => ({ votes: b.votes })),
+              submissions: submissions.map((s) => ({
+                side: s.side,
+                phase: s.phase,
+                text: s.text
+              })),
+              evidence: evidence.map((e) => ({
+                submittedBy: e.submittedBy,
+                kind: e.kind,
+                bodyText: e.bodyText,
+                references: e.references
+              }))
+            }),
+            JUDGE_CALL_TIMEOUT_MS,
+            "breakTiebreak"
+          );
+          if (tiebreakOutcome.ok) {
+            judgeTiebreaks[claim.claimId] = tiebreakOutcome.data;
+          } else {
+            logger.warn("judge_tiebreak_timeout", {
+              caseId,
+              claimId: claim.claimId,
+              error: tiebreakOutcome.error
+            });
+            // Fallback: no tiebreak, claim becomes insufficient
+          }
+        }
+      }
+    }
+
+    const jurySize = juryMembers.length || (caseRecord.courtMode === "judge" ? 12 : config.rules.jurorPanelSize);
     const closeTime = new Date().toISOString();
     const verdict = await computeDeterministicVerdict({
       caseId,
       prosecutionAgentId: caseRecord.prosecutionAgentId,
       defenceAgentId: caseRecord.defenceAgentId,
       closedAtIso: closeTime,
-      jurySize: juryMembers.length || config.rules.jurorPanelSize,
+      jurySize,
       claims: claims.map((item) => ({
         claimId: item.claimId,
         requestedRemedy: item.requestedRemedy
@@ -491,8 +649,49 @@ async function closeCasePipeline(caseId: string): Promise<{
       submissionHashes: submissions.map((item) => item.contentHash),
       drandRound: caseRecord.drandRound ?? null,
       drandRandomness: caseRecord.drandRandomness ?? null,
-      poolSnapshotHash: caseRecord.poolSnapshotHash ?? null
+      poolSnapshotHash: caseRecord.poolSnapshotHash ?? null,
+      courtMode: caseRecord.courtMode,
+      judgeTiebreak: judgeTiebreaks
     });
+
+    // Judge mode: get remedy recommendation for prosecution wins.
+    // The remedy is advisory and stored on the case record only — it is intentionally
+    // excluded from the sealed verdict bundle so the bundle hash remains stable.
+    if (caseRecord.courtMode === "judge" && verdict.overallOutcome === "for_prosecution") {
+      const remedyOutcome = await withJudgeTimeout(
+        judge.recommendRemedy({
+          caseId,
+          summary: caseRecord.summary,
+          caseTopic: caseRecord.caseTopic,
+          outcome: "for_prosecution",
+          claims: verdict.bundle.claims.map((vc) => {
+            const claim = claims.find((c) => c.claimId === vc.claimId)!;
+            return {
+              claimId: vc.claimId,
+              summary: claim.summary,
+              finding: vc.finding as "proven" | "not_proven" | "insufficient",
+              majorityRemedy: vc.majorityRemedy as Remedy,
+              allegedPrinciples: claim.allegedPrinciples
+            };
+          }),
+          submissions: submissions.map((s) => ({
+            side: s.side,
+            phase: s.phase,
+            text: s.text
+          }))
+        }),
+        JUDGE_CALL_TIMEOUT_MS,
+        "recommendRemedy"
+      );
+      if (remedyOutcome.ok && remedyOutcome.data) {
+        setCaseRemedyRecommendation(db, caseId, remedyOutcome.data);
+      } else if (!remedyOutcome.ok) {
+        logger.warn("judge_remedy_timeout", {
+          caseId,
+          error: remedyOutcome.error
+        });
+      }
+    }
 
     if (verdict.inconclusive || !verdict.overallOutcome) {
       markCaseVoid(db, {
@@ -514,6 +713,17 @@ async function closeCasePipeline(caseId: string): Promise<{
       });
 
       const voidedCase = ensureCaseExists(caseId);
+      try {
+        upsertMlCaseFeatures(db, {
+          caseId,
+          agenticCodeVersion: "agentic-code-v1.0.0",
+          outcome: "void",
+          voidReasonGroup: voidedCase.voidReasonGroup ?? null,
+          scheduledAt: voidedCase.scheduledForIso ?? null,
+          startedAt: voidedCase.filedAtIso ?? null,
+          endedAt: voidedCase.voidedAtIso ?? closeTime
+        });
+      } catch { /* non-fatal */ }
       syncCaseReputation(db, voidedCase);
       return {
         caseId,
@@ -540,6 +750,17 @@ async function closeCasePipeline(caseId: string): Promise<{
     });
 
     const closedCase = ensureCaseExists(caseId);
+    try {
+      upsertMlCaseFeatures(db, {
+        caseId,
+        agenticCodeVersion: "agentic-code-v1.0.0",
+        outcome: closedCase.outcome ?? verdict.overallOutcome ?? null,
+        voidReasonGroup: null,
+        scheduledAt: closedCase.scheduledForIso ?? null,
+        startedAt: closedCase.filedAtIso ?? null,
+        endedAt: closedCase.closedAtIso ?? closeTime
+      });
+    } catch { /* non-fatal */ }
     syncCaseReputation(db, closedCase);
     const runtimeAfter = getCaseRuntime(db, caseId);
 
@@ -590,6 +811,7 @@ const sessionEngine = createSessionEngine({
   config,
   drand,
   logger,
+  judge,
   async onCaseReadyToClose(caseId: string) {
     await closeCasePipeline(caseId);
   },
@@ -714,6 +936,11 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         throw new ApiError(403, "NOT_PROSECUTION", "Only prosecution can file this case.");
       }
 
+      const filingAgent = getAgent(db, verified.agentId);
+      if (filingAgent?.bannedFromFiling) {
+        throw forbidden("AGENT_BANNED_FROM_FILING", "This agent is banned from submitting disputes.");
+      }
+
       const treasuryTxSig = body.treasuryTxSig?.trim();
       if (!treasuryTxSig) {
         throw badRequest("TREASURY_TX_REQUIRED", "Treasury transaction signature is required.");
@@ -769,6 +996,20 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           inviteStatus: namedDefendantCase ? "queued" : "none"
         });
 
+        // Apply global court mode to this case
+        const globalCourtMode =
+          (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode;
+        if (globalCourtMode === "judge") {
+          db.prepare(
+            `UPDATE cases SET court_mode = ?, judge_screening_status = ? WHERE case_id = ?`
+          ).run("judge", "pending", caseId);
+
+          // Override runtime stage to judge_screening
+          db.prepare(
+            `UPDATE case_runtime SET current_stage = ? WHERE case_id = ?`
+          ).run("judge_screening", caseId);
+        }
+
         saveUsedTreasuryTx(db, {
           txSig: treasuryTxSig,
           caseId,
@@ -778,11 +1019,12 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
 
         persistInitialJurySelection(caseId, computedJury);
 
+        const filingStage = globalCourtMode === "judge" ? "judge_screening" : "pre_session";
         appendTranscriptEventInTransaction(db, {
           caseId,
           actorRole: "court",
           eventType: "payment_verified",
-          stage: "pre_session",
+          stage: filingStage,
           messageText: "Filing payment was verified and session scheduling has started.",
           payload: {
             treasuryTxSig,
@@ -1021,6 +1263,57 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   });
 
   try {
+    // OCP embedded: delegate API and serve frontend
+    if (pathname.startsWith("/api/ocp") || pathname.startsWith("/v1")) {
+      try {
+        const ocpPath: string = "../OCP/server/main.ts";
+        const ocpModule = await import(/* @vite-ignore */ ocpPath);
+        await ocpModule.handleOcpRequest(req, res);
+      } catch (err) {
+        logger.error("ocp_delegate_failed", {
+          requestId,
+          pathname,
+          error: String(err)
+        });
+        sendJson(res, 503, {
+          error: {
+            code: "OCP_UNAVAILABLE",
+            message: "OCP service temporarily unavailable."
+          }
+        });
+      }
+      return;
+    }
+    if (method === "GET" && (pathname === "/ocp" || pathname.startsWith("/ocp/"))) {
+      const ocpDist = resolve(process.cwd(), "dist", "ocp");
+      const safePath =
+        pathname === "/ocp" || pathname === "/ocp/"
+          ? "/index.html"
+          : pathname.slice(4) || "/index.html";
+      const filePath = join(ocpDist, safePath.replace(/^\/+/, ""));
+      if (filePath.startsWith(ocpDist) && existsSync(filePath)) {
+        const ext = extname(filePath);
+        const mime: Record<string, string> = {
+          ".html": "text/html",
+          ".js": "application/javascript",
+          ".css": "text/css",
+          ".ico": "image/x-icon",
+          ".png": "image/png",
+          ".svg": "image/svg+xml",
+          ".json": "application/json"
+        };
+        res.setHeader("Content-Type", mime[ext] ?? "application/octet-stream");
+        createReadStream(filePath).pipe(res);
+        return;
+      }
+      const indexPath = join(ocpDist, "index.html");
+      if (existsSync(indexPath)) {
+        res.setHeader("Content-Type", "text/html");
+        createReadStream(indexPath).pipe(res);
+        return;
+      }
+    }
+
     if (method === "GET" && pathname === "/api/health") {
       sendJson(res, 200, {
         ok: true,
@@ -1032,10 +1325,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     if (method === "GET" && pathname === "/api/internal/credential-status") {
       assertSystemKey(req, config);
+      const latestBackupAtIso = findLatestBackupIso(config.backupDir);
       sendJson(res, 200, {
         solanaMode: config.solanaMode,
         sealWorkerMode: config.sealWorkerMode,
         drandMode: config.drandMode,
+        dbPath: config.dbPath,
+        dbPathIsDurable: config.isProduction ? isDurableDbPath(config.dbPath) : true,
+        backupDir: config.backupDir,
+        latestBackupAtIso,
         hasHeliusApiKey: Boolean(config.heliusApiKey),
         hasTreasuryAddress: Boolean(config.treasuryAddress),
         hasWorkerToken: Boolean(config.workerToken),
@@ -1079,9 +1377,399 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    // Admin panel authentication — returns a short-lived admin session token on success
+    if (method === "POST" && pathname === "/api/internal/admin-auth") {
+      const clientIp = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "unknown");
+      const now = Date.now();
+      const attempt = adminAuthAttempts.get(clientIp);
+      if (attempt && now < attempt.resetAt && attempt.count >= 5) {
+        throw unauthorised("ADMIN_AUTH_RATE_LIMITED", "Too many failed attempts. Try again later.");
+      }
+      const body = await readJsonBody<{ password: string }>(req);
+      const provided = String(body.password ?? "");
+      const expected = config.adminPanelPassword;
+      const match =
+        provided.length === expected.length &&
+        timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+      if (!match) {
+        const cur = adminAuthAttempts.get(clientIp);
+        adminAuthAttempts.set(clientIp, {
+          count: (cur?.count ?? 0) + 1,
+          resetAt: now + 15 * 60 * 1000
+        });
+        throw unauthorised("ADMIN_AUTH_INVALID", "Invalid admin password.");
+      }
+      adminAuthAttempts.delete(clientIp);
+      const session = issueAdminSession(now);
+      sendJson(res, 200, session);
+      return;
+    }
+
+    // Agent role-specific bans
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "agents" &&
+      segments[4] === "ban-filing"
+    ) {
+      assertAdminToken(req);
+      const agentId = decodeURIComponent(segments[3]);
+      const body = await readJsonBody<{ banned: boolean }>(req);
+      if (typeof body.banned !== "boolean") {
+        throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
+      }
+      setAgentFilingBanned(db, { agentId, banned: body.banned });
+      sendJson(res, 200, { agentId, bannedFromFiling: body.banned });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "agents" &&
+      segments[4] === "ban-defence"
+    ) {
+      assertAdminToken(req);
+      const agentId = decodeURIComponent(segments[3]);
+      const body = await readJsonBody<{ banned: boolean }>(req);
+      if (typeof body.banned !== "boolean") {
+        throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
+      }
+      setAgentDefenceBanned(db, { agentId, banned: body.banned });
+      sendJson(res, 200, { agentId, bannedFromDefence: body.banned });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "agents" &&
+      segments[4] === "ban-jury"
+    ) {
+      assertAdminToken(req);
+      const agentId = decodeURIComponent(segments[3]);
+      const body = await readJsonBody<{ banned: boolean }>(req);
+      if (typeof body.banned !== "boolean") {
+        throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
+      }
+      setAgentJuryBanned(db, { agentId, banned: body.banned });
+      sendJson(res, 200, { agentId, bannedFromJury: body.banned });
+      return;
+    }
+
+    // Delete a case by ID (admin)
+    if (
+      method === "DELETE" &&
+      segments.length === 4 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "cases"
+    ) {
+      assertAdminToken(req);
+      const caseId = decodeURIComponent(segments[3]);
+      deleteCaseById(db, caseId);
+      sendJson(res, 200, { caseId, deleted: true });
+      return;
+    }
+
+    // Update daily case cap (admin)
+    if (method === "POST" && pathname === "/api/internal/config/daily-cap") {
+      assertAdminToken(req);
+      const body = await readJsonBody<{ cap: number }>(req);
+      const cap = Number(body.cap);
+      if (!Number.isFinite(cap) || cap < 1) {
+        throw badRequest("CAP_INVALID", "cap must be a positive integer.");
+      }
+      config.softDailyCaseCap = Math.floor(cap);
+      setRuntimeConfig(db, "daily_cap", String(Math.floor(cap)));
+      sendJson(res, 200, { softDailyCaseCap: config.softDailyCaseCap });
+      return;
+    }
+
+    // Update soft cap mode (admin)
+    if (method === "POST" && pathname === "/api/internal/config/soft-cap-mode") {
+      assertAdminToken(req);
+      const body = await readJsonBody<{ mode: "warn" | "enforce" }>(req);
+      const mode = body.mode;
+      if (mode !== "warn" && mode !== "enforce") {
+        throw badRequest("MODE_INVALID", "mode must be 'warn' or 'enforce'.");
+      }
+      config.softCapMode = mode;
+      setRuntimeConfig(db, "soft_cap_mode", mode);
+      sendJson(res, 200, { softCapMode: config.softCapMode });
+      return;
+    }
+
+    // Update court mode (admin)
+    if (method === "POST" && pathname === "/api/internal/config/court-mode") {
+      assertAdminToken(req);
+      const body = await readJsonBody<{ mode?: string }>(req);
+      if (body.mode !== "11-juror" && body.mode !== "judge") {
+        throw badRequest("INVALID_COURT_MODE", "Court mode must be '11-juror' or 'judge'.");
+      }
+      if (body.mode === "judge" && !judge.isAvailable()) {
+        throw conflict(
+          "JUDGE_MODE_UNAVAILABLE",
+          "Judge Mode cannot be enabled because judge integration is unavailable."
+        );
+      }
+      setRuntimeConfig(db, "court_mode", body.mode);
+      sendJson(res, 200, { courtMode: body.mode });
+      return;
+    }
+
+    // Admin status endpoint
+    if (method === "GET" && pathname === "/api/internal/admin-status") {
+      assertAdminToken(req);
+      // DB connectivity: attempt a trivial query
+      let dbReady = false;
+      try {
+        db.prepare("SELECT 1").get();
+        dbReady = true;
+      } catch {
+        dbReady = false;
+      }
+      // Railway worker: check if seal worker URL is configured and mode is http
+      const workerReady = config.sealWorkerMode === "http" && Boolean(config.sealWorkerUrl);
+      // Helius: check if API key is present
+      const heliusReady = Boolean(config.heliusApiKey);
+      // Drand: check if mode is http (stub means not connected)
+      const drandReady = config.drandMode === "http";
+
+      // OCP API: live check to /v1/health
+      let ocpReady = false;
+      try {
+        const ocpRes = await Promise.race([
+          fetch(`http://127.0.0.1:${config.apiPort}/v1/health`, { method: "GET" }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("OCP timeout")), 3000)
+          )
+        ]);
+        if (ocpRes.ok) {
+          const ocpJson = (await ocpRes.json()) as { status?: string; dbOk?: boolean };
+          ocpReady = ocpJson.status === "ok" && ocpJson.dbOk === true;
+        }
+      } catch {
+        ocpReady = false;
+      }
+
+      const workflowParts: string[] = [
+        "Filing fee: prosecution pays SOL to treasury.",
+        "Case close: verdict computed, seal job enqueued.",
+        `Mint worker (${config.sealWorkerMode}): receives seal request, uploads metadata, mints cNFT on Solana.`
+      ];
+      if (config.sealWorkerMode === "stub") {
+        workflowParts[2] = "Mint worker (stub): returns synthetic seal data without on-chain mint.";
+      } else if (config.sealWorkerMode === "http" && config.sealWorkerUrl) {
+        workflowParts[2] =
+          "Mint worker (http): receives seal request from server, uploads metadata (Pinata), mints cNFT on Solana.";
+      }
+      const workflowSummary = workflowParts.join(" ");
+
+      sendJson(res, 200, {
+        db: { ready: dbReady },
+        railwayWorker: { ready: workerReady, mode: config.sealWorkerMode },
+        helius: { ready: heliusReady, hasApiKey: Boolean(config.heliusApiKey) },
+        drand: { ready: drandReady, mode: config.drandMode },
+        ocp: { ready: ocpReady },
+        softDailyCaseCap: config.softDailyCaseCap,
+        softCapMode: config.softCapMode,
+        jurorPanelSize: config.rules.jurorPanelSize,
+        courtMode: (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode,
+        judgeAvailable: judge.isAvailable(),
+        treasuryAddress: config.treasuryAddress,
+        sealWorkerUrl: config.sealWorkerUrl,
+        sealWorkerMode: config.sealWorkerMode,
+        workflowSummary
+      });
+      return;
+    }
+
+    // Admin check systems (live connectivity tests)
+    if (
+      (method === "GET" || method === "POST") &&
+      pathname === "/api/internal/admin-check-systems"
+    ) {
+      assertAdminToken(req);
+      const CHECK_TIMEOUT_MS = 6000;
+
+      const withTimeout = <T>(promise: Promise<T>, label: string): Promise<{ ok: true; data: T } | { ok: false; error: string }> =>
+        Promise.race([
+          promise.then((data) => ({ ok: true as const, data })),
+          new Promise<{ ok: false; error: string }>((resolve) =>
+            setTimeout(() => resolve({ ok: false, error: `${label} timeout` }), CHECK_TIMEOUT_MS)
+          )
+        ]).catch((err) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
+
+      const dbCheck = (async () => {
+        try {
+          db.prepare("SELECT 1").get();
+          return { ready: true as const };
+        } catch (e) {
+          return { ready: false as const, error: e instanceof Error ? e.message : String(e) };
+        }
+      })();
+
+      const workerCheck =
+        config.sealWorkerMode === "http" && config.sealWorkerUrl
+          ? withTimeout(
+              fetch(`${config.sealWorkerUrl.replace(/\/$/, "")}/health`, {
+                method: "GET",
+                headers: { "X-Worker-Token": config.workerToken }
+              }).then(async (r) => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const json = (await r.json()) as { ok?: boolean; mode?: string; mintAuthorityPubkey?: string };
+                return {
+                  ready: json.ok === true,
+                  mode: config.sealWorkerMode,
+                  mintAuthorityPubkey: json.mintAuthorityPubkey
+                };
+              }),
+              "Railway Worker"
+            ).then((r) =>
+              r.ok
+                ? { ready: r.data.ready, mode: r.data.mode, mintAuthorityPubkey: r.data.mintAuthorityPubkey }
+                : { ready: false as const, error: r.error, mode: config.sealWorkerMode, mintAuthorityPubkey: undefined }
+            )
+          : Promise.resolve({
+              ready: false,
+              error: "stub mode",
+              mode: config.sealWorkerMode,
+              mintAuthorityPubkey: undefined
+            });
+
+      const heliusCheck =
+        config.heliusApiKey
+          ? withTimeout(
+              (async () => {
+                let url = (config.heliusRpcUrl || "").trim();
+                if (!url.includes("api-key=")) {
+                  url += url.includes("?") ? "&" : "?";
+                  url += `api-key=${encodeURIComponent(config.heliusApiKey!)}`;
+                }
+                const res = await fetch(url, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Accept: "application/json" },
+                  body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "getHealth",
+                    params: []
+                  })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const envelope = (await res.json()) as { result?: string; error?: { message?: string } };
+                if (envelope.error) throw new Error(envelope.error.message ?? "RPC error");
+                return envelope.result === "ok";
+              })(),
+              "Helius API"
+            ).then((r) =>
+              r.ok ? { ready: r.data } : { ready: false as const, error: r.error }
+            )
+          : Promise.resolve({ ready: false, error: "no API key" });
+
+      const drandCheck =
+        config.drandMode === "http"
+          ? withTimeout(
+              fetch(`${config.drandBaseUrl.replace(/\/$/, "")}/info`, {
+                method: "GET",
+                headers: { Accept: "application/json" }
+              }).then(async (r) => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                await r.json();
+                return true;
+              }),
+              "Drand API"
+            ).then((r) => (r.ok ? { ready: r.data } : { ready: false as const, error: r.error }))
+          : Promise.resolve({ ready: false, error: "stub mode" });
+
+      const ocpCheck = withTimeout(
+        fetch(`http://127.0.0.1:${config.apiPort}/v1/health`, { method: "GET" }).then(async (r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const json = (await r.json()) as { status?: string; dbOk?: boolean };
+          if (json.status !== "ok" || json.dbOk !== true) {
+            throw new Error(json.dbOk === false ? "OCP DB unreachable" : "Invalid health response");
+          }
+          return true;
+        }),
+        "OCP API"
+      ).then((r) => (r.ok ? { ready: r.data } : { ready: false as const, error: r.error }));
+
+      const treasuryBalanceCheck =
+        config.treasuryAddress && config.heliusApiKey
+          ? withTimeout(
+              (async () => {
+                let url = (config.heliusRpcUrl || "").trim();
+                if (!url.includes("api-key=")) {
+                  url += url.includes("?") ? "&" : "?";
+                  url += `api-key=${encodeURIComponent(config.heliusApiKey!)}`;
+                }
+                const res = await fetch(url, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Accept: "application/json" },
+                  body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "getBalance",
+                    params: [config.treasuryAddress, { commitment: "finalized" }]
+                  })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const envelope = (await res.json()) as { result?: { value?: number }; error?: { message?: string } };
+                if (envelope.error) throw new Error(envelope.error.message ?? "RPC error");
+                const lamports = envelope.result?.value ?? 0;
+                if (typeof lamports !== "number") throw new Error("Invalid balance response");
+                return (lamports / 1e9).toFixed(4);
+              })(),
+              "Treasury balance"
+            ).then((r) => (r.ok ? r.data : null))
+          : Promise.resolve(null);
+
+      const [dbResult, workerResult, heliusResult, drandResult, ocpResult, treasuryBalanceSol] =
+        await Promise.all([
+          dbCheck,
+          workerCheck,
+          heliusCheck,
+          drandCheck,
+          ocpCheck,
+          treasuryBalanceCheck
+        ]);
+
+      sendJson(res, 200, {
+        db: { ready: dbResult.ready, error: dbResult.error },
+        railwayWorker: {
+          ready: workerResult.ready,
+          error: workerResult.error,
+          mode: workerResult.mode ?? config.sealWorkerMode,
+          mintAuthorityPubkey: workerResult.mintAuthorityPubkey
+        },
+        helius: { ready: heliusResult.ready, error: heliusResult.error },
+        drand: { ready: drandResult.ready, error: drandResult.error },
+        ocp: { ready: ocpResult.ready, error: ocpResult.error },
+        treasuryBalanceSol
+      });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/openclaw/tools") {
       sendJson(res, 200, {
         tools: OPENCAWT_OPENCLAW_TOOLS.map(toOpenClawParameters)
+      });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/agent/protocol") {
+      sendJson(res, 200, {
+        version: COURT_PROTOCOL_VERSION,
+        text: COURT_PROTOCOL_CURRENT,
+        hash: courtProtocolHashSync(),
+        updatedAt: "2026-02-20"
       });
       return;
     }
@@ -1099,8 +1787,41 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         filingPer24h: config.rateLimits.filingPer24h,
         evidencePerHour: config.rateLimits.evidencePerHour,
         submissionsPerHour: config.rateLimits.submissionsPerHour,
-        ballotsPerHour: config.rateLimits.ballotsPerHour
+        ballotsPerHour: config.rateLimits.ballotsPerHour,
+        maxClaimSummaryChars: config.limits.maxClaimSummaryChars,
+        maxCaseTitleChars: config.limits.maxCaseTitleChars,
+        maxSubmissionCharsPerPhase: config.limits.maxSubmissionCharsPerPhase,
+        maxEvidenceCharsPerItem: config.limits.maxEvidenceCharsPerItem,
+        maxEvidenceCharsPerCase: config.limits.maxEvidenceCharsPerCase,
+        ballotReasoningMinChars: 30,
+        ballotReasoningMaxChars: 1200
       });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/payments/filing-estimate") {
+      const payerWallet = url.searchParams.get("payer_wallet")?.trim();
+      if (payerWallet && !isValidSolanaPubkey(payerWallet)) {
+        throw badRequest("PAYER_WALLET_INVALID", "Payer wallet must be a valid Base58 public key.");
+      }
+      let estimate;
+      try {
+        estimate = await paymentEstimator.estimateFilingFee({
+          payerWallet: payerWallet || undefined
+        });
+      } catch (error) {
+        if (error instanceof ApiError && error.code === "HELIUS_PRIORITY_ESTIMATE_FAILED") {
+          throw error;
+        }
+        throw badRequest(
+          "PAYMENT_ESTIMATE_UNAVAILABLE",
+          "Payment estimate is unavailable. Retry shortly.",
+          {
+            reason: error instanceof Error ? error.message : String(error)
+          }
+        );
+      }
+      sendJson(res, 200, estimate);
       return;
     }
 
@@ -1116,12 +1837,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const hydrated = await Promise.all(openRecords.map((item) => hydrateCase(item)));
       const scheduled = hydrated.filter((item) => item.status === "scheduled");
       const active = hydrated.filter((item) => item.status === "active");
+      const courtMode =
+        (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode;
+      const jurorCount = courtMode === "judge" ? 12 : config.rules.jurorPanelSize;
 
       sendJson(res, 200, {
         scheduled,
         active,
         softCapPerDay: config.softDailyCaseCap,
-        capWindowLabel: "Soft daily cap"
+        capWindowLabel: "Soft daily cap",
+        courtMode,
+        jurorCount
       });
       return;
     }
@@ -1163,6 +1889,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "GET" && pathname === "/api/agents/search") {
+      const q = url.searchParams.get("q") ?? "";
+      const limit = Number(url.searchParams.get("limit") || "10");
+      const agents = searchAgents(db, {
+        q: q || undefined,
+        limit: Number.isFinite(limit) ? limit : 10
+      });
+      sendJson(res, 200, { agents });
+      return;
+    }
+
     if (
       method === "GET" &&
       segments.length === 4 &&
@@ -1172,9 +1909,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     ) {
       const agentId = decodeURIComponent(segments[2]);
       const activityLimit = Number(url.searchParams.get("activity_limit") || "20");
-      const profile: AgentProfile = getAgentProfile(db, agentId, {
+      const profile = getAgentProfile(db, agentId, {
         activityLimit: Number.isFinite(activityLimit) ? activityLimit : 20
       });
+      if (!profile) {
+        sendJson(res, 404, null);
+        return;
+      }
       sendJson(res, 200, profile);
       return;
     }
@@ -1306,8 +2047,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw badRequest("AGENT_ID_MISMATCH", "Payload agentId must match signing identity.");
           }
 
-          const notifyUrl = validateNotifyUrl(body.notifyUrl, "notifyUrl");
-          upsertAgent(db, body.agentId, body.jurorEligible ?? true, notifyUrl);
+          const notifyUrl = await validateNotifyUrl(body.notifyUrl, "notifyUrl");
+          if (body.bio && body.bio.length > 500) {
+            throw badRequest("BIO_TOO_LONG", "bio must be 500 characters or fewer.");
+          }
+          upsertAgent(db, body.agentId, body.jurorEligible ?? true, notifyUrl, {
+            displayName: body.displayName,
+            idNumber: body.idNumber,
+            bio: body.bio,
+            statsPublic: body.statsPublic
+          });
 
           return {
             statusCode: 200,
@@ -1338,6 +2087,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         async handler(verified) {
           if (body.agentId !== verified.agentId) {
             throw badRequest("AGENT_ID_MISMATCH", "Payload agentId must match signing identity.");
+          }
+
+          const juryAgent = getAgent(db, verified.agentId);
+          if (juryAgent?.bannedFromJury) {
+            throw forbidden("AGENT_BANNED_FROM_JURY", "This agent is banned from serving on the jury.");
           }
 
           upsertAgent(db, body.agentId, true);
@@ -1406,10 +2160,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw badRequest("AGENT_ID_MISMATCH", "Prosecution agent must match signing identity.");
           }
 
+          const filingAgent = getAgent(db, verified.agentId);
+          if (filingAgent?.bannedFromFiling) {
+            throw forbidden("AGENT_BANNED_FROM_FILING", "This agent is banned from submitting disputes.");
+          }
+
           if (!body.claimSummary?.trim() && (!body.claims || body.claims.length === 0)) {
             throw badRequest("CLAIM_SUMMARY_REQUIRED", "Claim summary is required.");
           }
 
+          const maxClaimSummary = config.limits.maxClaimSummaryChars;
           const caseTopic = validateCaseTopic(body.caseTopic ?? "other");
           const stakeLevel = validateStakeLevel(body.stakeLevel ?? "medium");
           const allegedPrinciples = normalisePrincipleIds(body.allegedPrinciples ?? [], {
@@ -1424,8 +2184,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
                       `claims[${index}].claimSummary is required.`
                     );
                   }
+                  const trimmed = claim.claimSummary.trim();
+                  validateClaimSummary(trimmed, maxClaimSummary);
                   return {
-                    claimSummary: claim.claimSummary.trim(),
+                    claimSummary: trimmed,
                     requestedRemedy: claim.requestedRemedy,
                     principlesInvoked: normalisePrincipleIds(claim.principlesInvoked ?? [], {
                       field: `claims[${index}].principlesInvoked`
@@ -1433,8 +2195,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
                   };
                 })
               : undefined;
-          const claimSummary = body.claimSummary?.trim() || claims?.[0]?.claimSummary || "";
-          const defendantNotifyUrl = validateNotifyUrl(
+          const claimSummary = validateClaimSummary(
+            body.claimSummary?.trim() || claims?.[0]?.claimSummary || "",
+            maxClaimSummary
+          );
+          const defendantNotifyUrl = await validateNotifyUrl(
             body.defendantNotifyUrl,
             "defendantNotifyUrl"
           );
@@ -1521,6 +2286,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         caseId,
         actionType: "volunteer_defence",
         async handler(verified) {
+          const defenceAgent = getAgent(db, verified.agentId);
+          if (defenceAgent?.bannedFromDefence) {
+            throw forbidden("AGENT_BANNED_FROM_DEFENCE", "This agent is banned from acting as defence.");
+          }
           upsertAgent(db, verified.agentId, true);
           ensureCaseExists(caseId);
           const claim = claimDefenceAssignment(db, {
@@ -1812,6 +2581,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw new ApiError(403, "NOT_PENDING_JUROR", "Juror readiness is not pending for this agent.");
           }
 
+          const juryAgent = getAgent(db, verified.agentId);
+          if (juryAgent?.bannedFromJury) {
+            throw forbidden("AGENT_BANNED_FROM_JURY", "This agent is banned from serving on the jury.");
+          }
+
           if (member.readyDeadlineAtIso && Date.now() > new Date(member.readyDeadlineAtIso).getTime()) {
             throw conflict("READINESS_DEADLINE_PASSED", "Readiness deadline has passed.");
           }
@@ -1884,6 +2658,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw conflict("JUROR_NOT_ACTIVE", "Juror is not active for voting.");
           }
 
+          const juryAgent = getAgent(db, verified.agentId);
+          if (juryAgent?.bannedFromJury) {
+            throw forbidden("AGENT_BANNED_FROM_JURY", "This agent is banned from serving on the jury.");
+          }
+
           if (member.votingDeadlineAtIso && Date.now() > new Date(member.votingDeadlineAtIso).getTime()) {
             throw conflict("BALLOT_DEADLINE_PASSED", "Voting deadline has passed for this juror.");
           }
@@ -1932,6 +2711,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             }
           }
 
+          // Validate optional ML ethics signals. Errors here are bad-request.
+          let mlSignals: MlSignals | null = null;
+          try {
+            mlSignals = validateMlSignals(body.mlSignals);
+          } catch (err) {
+            if (err instanceof MlValidationError) {
+              throw badRequest("ML_SIGNAL_INVALID", err.message, { field: err.field });
+            }
+            throw err;
+          }
+
           const ballotHash = await canonicalHashHex({
             ...body,
             reasoningSummary,
@@ -1962,7 +2752,28 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw error;
           }
 
+          const voteAnswer = mapVoteToAnswer({
+            voteLabel: ballot.vote ?? null,
+            votes: ballot.votes
+          });
+          const voteLabel = mapAnswerToVoteLabel(voteAnswer);
+
           markJurorVoted(db, caseId, verified.agentId);
+
+          // Write ML juror feature row (fire-and-forget; never blocks the response)
+          try {
+            upsertMlJurorFeatures(db, {
+              caseId,
+              jurorId: verified.agentId,
+              vote: ballot.vote ?? null,
+              rationale: ballot.reasoningSummary,
+              replaced: false,
+              replacementReason: null,
+              signals: mlSignals
+            });
+          } catch {
+            // Non-fatal — ML write failure must never break the ballot response
+          }
 
           appendTranscriptEvent(db, {
             caseId,
@@ -1970,10 +2781,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             actorAgentId: verified.agentId,
             eventType: "ballot_submitted",
             stage: "voting",
-            messageText: "Juror submitted ballot with reasoning summary.",
+            messageText: `Juror submitted ballot: ${voteAnswer === "yay" ? "Yay" : "Nay"}.`,
             artefactType: "ballot",
             artefactId: ballot.ballotId,
             payload: {
+              votePrompt: PROSECUTION_VOTE_PROMPT,
+              voteAnswer,
+              voteLabel,
               reasoningSummary: ballot.reasoningSummary,
               principlesReliedOn: ballot.principlesReliedOn,
               confidence: ballot.confidence ?? null
@@ -2134,6 +2948,27 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         tokenHash,
         revoked: true
       });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/internal/demo/inject-completed-case") {
+      assertSystemKey(req, config);
+      const result = await injectDemoCompletedCase();
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/internal/demo/inject-agent") {
+      assertSystemKey(req, config);
+      const result = await injectDemoAgent();
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/internal/demo/inject-long-horizon-case") {
+      assertSystemKey(req, config);
+      const result = await injectLongHorizonCase();
+      sendJson(res, 200, result);
       return;
     }
 
@@ -2299,6 +3134,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "GET" && pathname === "/api/internal/ml/export") {
+      assertSystemKey(req, config);
+      const limit = Math.min(Number(url.searchParams.get("limit") || "1000"), 5000);
+      const offset = Number(url.searchParams.get("offset") || "0");
+      const rows = listMlExport(db, { limit, offset });
+      sendJson(res, 200, { count: rows.length, offset, rows });
+      return;
+    }
+
     if (method === "GET" && !pathname.startsWith("/api")) {
       const distDir = resolve(process.cwd(), "dist");
       const safePath = pathname === "/" ? "/index.html" : pathname;
@@ -2310,8 +3154,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           ".js": "application/javascript",
           ".css": "text/css",
           ".ico": "image/x-icon",
+          ".png": "image/png",
           ".svg": "image/svg+xml",
-          ".json": "application/json"
+          ".json": "application/json",
+          ".pdf": "application/pdf"
         };
         res.setHeader("Content-Type", mime[ext] ?? "application/octet-stream");
         createReadStream(filePath).pipe(res);
@@ -2359,6 +3205,7 @@ server.listen(config.apiPort, config.apiHost, () => {
     `OpenCawt API listening on http://${config.apiHost}:${config.apiPort} (db ${config.dbPath})\n`
   );
   sessionEngine.start();
+
 });
 
 process.on("SIGINT", () => {

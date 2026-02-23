@@ -10,6 +10,7 @@ import type {
   CaseOutcome,
   CaseVoidReason,
   ClaimOutcome,
+  CourtMode,
   CreateCaseDraftPayload,
   DefenceInviteStatus,
   DefenceInviteSummary,
@@ -19,6 +20,7 @@ import type {
   JurySelectionProof,
   LeaderboardEntry,
   LearningVoidReasonGroup,
+  MlSignals,
   OpenDefenceCaseSummary,
   OpenDefenceSearchFilters,
   Remedy,
@@ -109,6 +111,9 @@ function toLearningVoidReasonGroup(reason?: CaseVoidReason): LearningVoidReasonG
     return "other_timeout";
   }
   if (reason === "manual_void") {
+    return "admin_void";
+  }
+  if (reason === "judge_screening_failed" || reason === "judge_screening_rejected") {
     return "admin_void";
   }
   if (reason === "voting_timeout") {
@@ -206,6 +211,11 @@ export interface CaseRecord {
   sealUri?: string;
   filingWarning?: string;
   defendantNotifyUrl?: string;
+  courtMode: CourtMode;
+  caseTitle?: string;
+  judgeScreeningStatus?: "pending" | "pending_retry" | "approved" | "rejected" | "failed";
+  judgeScreeningReason?: string;
+  judgeRemedyRecommendation?: string;
 }
 
 export interface ClaimRecord {
@@ -309,29 +319,62 @@ export function upsertAgent(
   db: Db,
   agentId: string,
   jurorEligible = true,
-  notifyUrl?: string
+  notifyUrl?: string,
+  profile?: { displayName?: string; idNumber?: string; bio?: string; statsPublic?: boolean }
 ): void {
   const now = nowIso();
   db.prepare(
     `
-    INSERT INTO agents (agent_id, juror_eligible, notify_url, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO agents (agent_id, juror_eligible, notify_url, display_name, id_number, bio, stats_public, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(agent_id) DO UPDATE SET
       juror_eligible = excluded.juror_eligible,
       notify_url = COALESCE(excluded.notify_url, agents.notify_url),
+      display_name = COALESCE(excluded.display_name, agents.display_name),
+      id_number = COALESCE(excluded.id_number, agents.id_number),
+      bio = COALESCE(excluded.bio, agents.bio),
+      stats_public = CASE WHEN excluded.display_name IS NOT NULL OR excluded.bio IS NOT NULL THEN excluded.stats_public ELSE agents.stats_public END,
       updated_at = excluded.updated_at
     `
-  ).run(agentId, jurorEligible ? 1 : 0, notifyUrl ?? null, now, now);
+  ).run(
+    agentId,
+    jurorEligible ? 1 : 0,
+    notifyUrl ?? null,
+    profile?.displayName ?? null,
+    profile?.idNumber ?? null,
+    profile?.bio ?? null,
+    profile?.statsPublic !== false ? 1 : 0,
+    now,
+    now
+  );
 }
 
 export function getAgent(
   db: Db,
   agentId: string
-): { agentId: string; banned: boolean; jurorEligible: boolean; notifyUrl?: string } | null {
+): {
+  agentId: string;
+  banned: boolean;
+  jurorEligible: boolean;
+  notifyUrl?: string;
+  bannedFromFiling: boolean;
+  bannedFromDefence: boolean;
+  bannedFromJury: boolean;
+} | null {
   const row = db
-    .prepare(`SELECT agent_id, banned, juror_eligible, notify_url FROM agents WHERE agent_id = ?`)
+    .prepare(
+      `SELECT agent_id, banned, juror_eligible, notify_url, banned_from_filing, banned_from_defence, banned_from_jury FROM agents WHERE agent_id = ?`
+    )
     .get(agentId) as
-    | { agent_id: string; banned: number; juror_eligible: number; notify_url: string | null }
+    | {
+        agent_id: string;
+        banned: number;
+        juror_eligible: number;
+        notify_url: string | null;
+        banned_from_filing: number;
+        banned_from_defence: number;
+        banned_from_jury: number;
+      }
     | undefined;
   if (!row) {
     return null;
@@ -340,7 +383,10 @@ export function getAgent(
     agentId: row.agent_id,
     banned: row.banned === 1,
     jurorEligible: row.juror_eligible === 1,
-    notifyUrl: row.notify_url ?? undefined
+    notifyUrl: row.notify_url ?? undefined,
+    bannedFromFiling: row.banned_from_filing === 1,
+    bannedFromDefence: row.banned_from_defence === 1,
+    bannedFromJury: row.banned_from_jury === 1
   };
 }
 
@@ -351,6 +397,74 @@ export function setAgentBanned(db: Db, input: { agentId: string; banned: boolean
     now,
     input.agentId
   );
+}
+
+export function setAgentFilingBanned(db: Db, input: { agentId: string; banned: boolean }): void {
+  const now = nowIso();
+  db.prepare(`UPDATE agents SET banned_from_filing = ?, updated_at = ? WHERE agent_id = ?`).run(
+    input.banned ? 1 : 0,
+    now,
+    input.agentId
+  );
+}
+
+export function setAgentDefenceBanned(db: Db, input: { agentId: string; banned: boolean }): void {
+  const now = nowIso();
+  db.prepare(`UPDATE agents SET banned_from_defence = ?, updated_at = ? WHERE agent_id = ?`).run(
+    input.banned ? 1 : 0,
+    now,
+    input.agentId
+  );
+}
+
+export function setAgentJuryBanned(db: Db, input: { agentId: string; banned: boolean }): void {
+  const now = nowIso();
+  db.prepare(`UPDATE agents SET banned_from_jury = ?, updated_at = ? WHERE agent_id = ?`).run(
+    input.banned ? 1 : 0,
+    now,
+    input.agentId
+  );
+}
+
+export function deleteCaseById(db: Db, caseId: string): void {
+  // Delete in foreign-key-safe order (children before parents)
+  db.prepare(`DELETE FROM case_transcript_events WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM case_runtime WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM seal_jobs WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM ballots WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM submissions WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM evidence_items WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM claims WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM verdicts WHERE case_id = ?`).run(caseId);
+  const panelIds = (
+    db.prepare(`SELECT panel_id FROM jury_panels WHERE case_id = ?`).all(caseId) as Array<{
+      panel_id: string;
+    }>
+  ).map((r) => r.panel_id);
+  for (const panelId of panelIds) {
+    db.prepare(`DELETE FROM jury_panel_members WHERE panel_id = ?`).run(panelId);
+  }
+  db.prepare(`DELETE FROM jury_selection_runs WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM jury_panels WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM agent_case_activity WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM ml_case_features WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM ml_juror_features WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM cases WHERE case_id = ?`).run(caseId);
+}
+
+export function getRuntimeConfig(db: Db, key: string): string | null {
+  const row = db
+    .prepare(`SELECT value FROM runtime_config WHERE key = ?`)
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setRuntimeConfig(db: Db, key: string, value: string): void {
+  const now = nowIso();
+  db.prepare(
+    `INSERT INTO runtime_config (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).run(key, value, now);
 }
 
 export function countActiveAgentCapabilities(db: Db, agentId: string, atIso = nowIso()): number {
@@ -627,7 +741,23 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     sealTxSig: row.seal_tx_sig ? String(row.seal_tx_sig) : undefined,
     sealUri: row.seal_uri ? String(row.seal_uri) : undefined,
     filingWarning: row.filing_warning ? String(row.filing_warning) : undefined,
-    defendantNotifyUrl: row.defendant_notify_url ? String(row.defendant_notify_url) : undefined
+    defendantNotifyUrl: row.defendant_notify_url ? String(row.defendant_notify_url) : undefined,
+    courtMode: (String(row.court_mode ?? "judge") as CourtMode),
+    caseTitle: row.case_title ? String(row.case_title) : undefined,
+    judgeScreeningStatus: row.judge_screening_status
+      ? (String(row.judge_screening_status) as
+          | "pending"
+          | "pending_retry"
+          | "approved"
+          | "rejected"
+          | "failed")
+      : undefined,
+    judgeScreeningReason: row.judge_screening_reason
+      ? String(row.judge_screening_reason)
+      : undefined,
+    judgeRemedyRecommendation: row.judge_remedy_recommendation
+      ? String(row.judge_remedy_recommendation)
+      : undefined
   };
 }
 
@@ -691,7 +821,12 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         seal_asset_id,
         seal_tx_sig,
         seal_uri,
-        filing_warning
+        filing_warning,
+        court_mode,
+        case_title,
+        judge_screening_status,
+        judge_screening_reason,
+        judge_remedy_recommendation
       FROM cases
       WHERE case_id = ?
       `
@@ -769,7 +904,12 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         seal_asset_id,
         seal_tx_sig,
         seal_uri,
-        filing_warning
+        filing_warning,
+        court_mode,
+        case_title,
+        judge_screening_status,
+        judge_screening_reason,
+        judge_remedy_recommendation
       FROM cases
       WHERE status IN (${placeholders})
       ORDER BY created_at DESC
@@ -1123,7 +1263,12 @@ export function claimDefenceAssignment(
           seal_asset_id,
           seal_tx_sig,
           seal_uri,
-          filing_warning
+          filing_warning,
+          court_mode,
+          case_title,
+          judge_screening_status,
+          judge_screening_reason,
+          judge_remedy_recommendation
         FROM cases
         WHERE case_id = ?
         LIMIT 1
@@ -1208,8 +1353,12 @@ export function claimDefenceAssignment(
       return { status: "already_taken", caseRecord: refreshed };
     }
 
-    // For named-defendant filings, session scheduling starts one hour after defence acceptance.
-    if (!caseRecord.scheduledForIso && caseRecord.status === "filed") {
+    // For named-defendant filings, session scheduling starts after defence acceptance.
+    // Initial jury selection immediately moves status to "jury_selected", so include both states.
+    if (
+      !caseRecord.scheduledForIso &&
+      (caseRecord.status === "filed" || caseRecord.status === "jury_selected")
+    ) {
       const scheduleAtIso = new Date(
         new Date(input.nowIso).getTime() + input.scheduleDelaySec * 1000
       ).toISOString();
@@ -1928,6 +2077,7 @@ export function listEligibleJurors(
       INNER JOIN juror_availability j ON j.agent_id = a.agent_id
       WHERE a.banned = 0
       AND a.juror_eligible = 1
+      AND a.banned_from_jury = 0
       AND j.availability IN ('available', 'limited')
       ORDER BY a.agent_id ASC
       `
@@ -2156,6 +2306,27 @@ export function markCaseVoid(
   });
 }
 
+export function setCaseJudgeScreeningResult(
+  db: Db,
+  input: {
+    caseId: string;
+    status: "pending_retry" | "approved" | "rejected" | "failed";
+    reason?: string;
+    caseTitle?: string;
+  }
+): void {
+  db.prepare(
+    `UPDATE cases SET judge_screening_status = ?, judge_screening_reason = ?, case_title = ? WHERE case_id = ?`
+  ).run(input.status, input.reason ?? null, input.caseTitle ?? null, input.caseId);
+}
+
+export function setCaseRemedyRecommendation(db: Db, caseId: string, recommendation: string): void {
+  db.prepare(`UPDATE cases SET judge_remedy_recommendation = ? WHERE case_id = ?`).run(
+    recommendation.slice(0, 1000),
+    caseId
+  );
+}
+
 export function markSessionStarted(db: Db, caseId: string, atIso: string): void {
   db.prepare(`UPDATE cases SET session_started_at = ?, session_stage = 'jury_readiness' WHERE case_id = ?`).run(
     atIso,
@@ -2296,6 +2467,7 @@ export function listAssignedCasesForJuror(db: Db, agentId: string): AssignedCase
       `
       SELECT
         c.case_id,
+        c.case_title,
         c.summary,
         r.current_stage,
         r.stage_deadline_at,
@@ -2313,6 +2485,7 @@ export function listAssignedCasesForJuror(db: Db, agentId: string): AssignedCase
     )
     .all(agentId) as Array<{
     case_id: string;
+    case_title: string | null;
     summary: string;
     current_stage: SessionStage | null;
     stage_deadline_at: string | null;
@@ -2323,6 +2496,7 @@ export function listAssignedCasesForJuror(db: Db, agentId: string): AssignedCase
 
   return rows.map((row) => ({
     caseId: row.case_id,
+    caseTitle: row.case_title ?? undefined,
     summary: row.summary,
     currentStage: (row.current_stage ?? "pre_session") as SessionStage,
     stageDeadlineAtIso: row.stage_deadline_at ?? undefined,
@@ -2432,6 +2606,7 @@ export function listDefenceInvitesForAgent(db: Db, agentId: string): DefenceInvi
       `
       SELECT
         case_id,
+        case_title,
         summary,
         prosecution_agent_id,
         defendant_agent_id,
@@ -2450,6 +2625,7 @@ export function listDefenceInvitesForAgent(db: Db, agentId: string): DefenceInvi
     )
     .all(agentId) as Array<{
     case_id: string;
+    case_title: string | null;
     summary: string;
     prosecution_agent_id: string;
     defendant_agent_id: string;
@@ -2463,6 +2639,7 @@ export function listDefenceInvitesForAgent(db: Db, agentId: string): DefenceInvi
 
   return rows.map((row) => ({
     caseId: row.case_id,
+    caseTitle: row.case_title ?? undefined,
     summary: row.summary,
     prosecutionAgentId: row.prosecution_agent_id,
     defendantAgentId: row.defendant_agent_id,
@@ -2573,7 +2750,12 @@ export function listOpenDefenceCases(
         seal_asset_id,
         seal_tx_sig,
         seal_uri,
-        filing_warning
+        filing_warning,
+        court_mode,
+        case_title,
+        judge_screening_status,
+        judge_screening_reason,
+        judge_remedy_recommendation
       FROM cases
       WHERE ${where.join(" AND ")}
       ORDER BY COALESCE(scheduled_for, created_at) ASC
@@ -2593,6 +2775,7 @@ export function listOpenDefenceCases(
     const reserved = Boolean(item.defendantAgentId) && nowMs < exclusiveWindowEndMs;
     return {
       caseId: item.caseId,
+      caseTitle: item.caseTitle,
       status: mapUiStatus(item),
       summary: item.summary,
       prosecutionAgentId: item.prosecutionAgentId,
@@ -2652,10 +2835,11 @@ export function listAgentActivity(db: Db, agentId: string, limit = 20): AgentAct
   const rows = db
     .prepare(
       `
-      SELECT activity_id, agent_id, case_id, role, outcome, recorded_at
-      FROM agent_case_activity
-      WHERE agent_id = ?
-      ORDER BY recorded_at DESC
+      SELECT a.activity_id, a.agent_id, a.case_id, a.role, a.outcome, a.recorded_at, c.case_title
+      FROM agent_case_activity a
+      LEFT JOIN cases c ON c.case_id = a.case_id
+      WHERE a.agent_id = ?
+      ORDER BY a.recorded_at DESC
       LIMIT ?
       `
     )
@@ -2666,11 +2850,13 @@ export function listAgentActivity(db: Db, agentId: string, limit = 20): AgentAct
     role: "prosecution" | "defence" | "juror";
     outcome: CaseOutcome | "void" | "pending";
     recorded_at: string;
+    case_title: string | null;
   }>;
   return rows.map((row) => ({
     activityId: row.activity_id,
     agentId: row.agent_id,
     caseId: row.case_id,
+    caseTitle: row.case_title ?? undefined,
     role: row.role,
     outcome: row.outcome,
     recordedAtIso: row.recorded_at
@@ -2847,9 +3033,19 @@ export function getAgentProfile(
   db: Db,
   agentId: string,
   input?: { activityLimit?: number }
-): AgentProfile {
+): AgentProfile | null {
+  const agentRow = db
+    .prepare(`SELECT display_name, id_number, bio, stats_public FROM agents WHERE agent_id = ?`)
+    .get(agentId) as
+    | { display_name: string | null; id_number: string | null; bio: string | null; stats_public: number }
+    | undefined;
+  if (!agentRow) return null;
   return {
     agentId,
+    displayName: agentRow.display_name ?? undefined,
+    idNumber: agentRow.id_number ?? undefined,
+    bio: agentRow.bio ?? undefined,
+    statsPublic: agentRow.stats_public === 1,
     stats: getAgentStats(db, agentId),
     recentActivity: listAgentActivity(db, agentId, input?.activityLimit ?? 20)
   };
@@ -2866,18 +3062,21 @@ export function listLeaderboard(
     .prepare(
       `
       SELECT
-        agent_id,
-        prosecutions_total,
-        prosecutions_wins,
-        defences_total,
-        defences_wins,
-        juries_total,
-        decided_cases_total,
-        victory_percent,
-        last_active_at
-      FROM agent_stats_cache
-      WHERE decided_cases_total >= ?
-      ORDER BY victory_percent DESC, decided_cases_total DESC, COALESCE(last_active_at, '') DESC, agent_id ASC
+        asc_.agent_id,
+        asc_.prosecutions_total,
+        asc_.prosecutions_wins,
+        asc_.defences_total,
+        asc_.defences_wins,
+        asc_.juries_total,
+        asc_.decided_cases_total,
+        asc_.victory_percent,
+        asc_.last_active_at,
+        a.display_name
+      FROM agent_stats_cache asc_
+      JOIN agents a ON a.agent_id = asc_.agent_id
+      WHERE asc_.decided_cases_total >= ?
+        AND a.stats_public = 1
+      ORDER BY asc_.victory_percent DESC, asc_.decided_cases_total DESC, COALESCE(asc_.last_active_at, '') DESC, asc_.agent_id ASC
       LIMIT ?
       `
     )
@@ -2891,11 +3090,13 @@ export function listLeaderboard(
     decided_cases_total: number;
     victory_percent: number;
     last_active_at: string | null;
+    display_name: string | null;
   }>;
 
   return rows.map((row, idx) => ({
     rank: idx + 1,
     agentId: row.agent_id,
+    displayName: row.display_name ?? undefined,
     prosecutionsTotal: Number(row.prosecutions_total),
     prosecutionsWins: Number(row.prosecutions_wins),
     defencesTotal: Number(row.defences_total),
@@ -2904,6 +3105,50 @@ export function listLeaderboard(
     decidedCasesTotal: Number(row.decided_cases_total),
     victoryPercent: Number(row.victory_percent),
     lastActiveAtIso: row.last_active_at ?? undefined
+  }));
+}
+
+export function searchAgents(
+  db: Db,
+  input: { q?: string; limit?: number }
+): Array<{ agentId: string; displayName?: string }> {
+  const limit = Math.max(1, Math.min(input.limit ?? 10, 20));
+  const q = (input.q ?? "").trim();
+
+  if (!q) {
+    const rows = db
+      .prepare(
+        `
+      SELECT a.agent_id, a.display_name
+      FROM agent_stats_cache asc_
+      JOIN agents a ON a.agent_id = asc_.agent_id
+      WHERE a.stats_public = 1 AND asc_.decided_cases_total >= 1
+      ORDER BY asc_.victory_percent DESC, asc_.decided_cases_total DESC, asc_.last_active_at DESC
+      LIMIT ?
+      `
+      )
+      .all(limit) as Array<{ agent_id: string; display_name: string | null }>;
+    return rows.map((r) => ({
+      agentId: r.agent_id,
+      displayName: r.display_name ?? undefined
+    }));
+  }
+
+  const pattern = `%${q}%`;
+  const lowerPattern = `%${q.toLowerCase()}%`;
+  const rows = db
+    .prepare(
+      `
+    SELECT agent_id, display_name FROM agents
+    WHERE agent_id LIKE ? OR (display_name IS NOT NULL AND LOWER(display_name) LIKE ?)
+    ORDER BY display_name IS NOT NULL DESC, display_name ASC, agent_id ASC
+    LIMIT ?
+    `
+    )
+    .all(pattern, lowerPattern, limit) as Array<{ agent_id: string; display_name: string | null }>;
+  return rows.map((r) => ({
+    agentId: r.agent_id,
+    displayName: r.display_name ?? undefined
   }));
 }
 
@@ -3124,6 +3369,7 @@ export function saveIdempotencyRecord(
 
 export function listDecisions(db: Db): Array<{
   caseId: string;
+  caseTitle?: string;
   summary: string;
   status: "closed" | "sealed" | "void";
   outcome: "for_prosecution" | "for_defence" | "void";
@@ -3137,7 +3383,7 @@ export function listDecisions(db: Db): Array<{
   const rows = db
     .prepare(
       `
-      SELECT case_id, summary, status, closed_at, decided_at, outcome, verdict_hash, verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, void_reason, created_at, voided_at
+      SELECT case_id, case_title, summary, status, closed_at, decided_at, outcome, verdict_hash, verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, void_reason, created_at, voided_at
       FROM cases
       WHERE status IN ('closed', 'sealed', 'void')
       ORDER BY COALESCE(decided_at, closed_at, voided_at, created_at) DESC
@@ -3145,6 +3391,7 @@ export function listDecisions(db: Db): Array<{
     )
     .all() as Array<{
     case_id: string;
+    case_title: string | null;
     summary: string;
     status: "closed" | "sealed" | "void";
     closed_at: string | null;
@@ -3173,6 +3420,7 @@ export function listDecisions(db: Db): Array<{
         : ((bundle.overall?.outcome as "for_prosecution" | "for_defence" | undefined) ?? "void"));
     return {
       caseId: row.case_id,
+      caseTitle: row.case_title ?? undefined,
       summary: row.summary,
       status: row.status,
       outcome,
@@ -3343,3 +3591,234 @@ export function getSealJobByJobId(db: Db, jobId: string): SealJobRecord | null {
     responseJson: row.response_json ? maybeJson(row.response_json, {}) : null
   };
 }
+
+// ── ML feature store ──────────────────────────────────────────────────────────
+
+/** Upsert a per-juror ML feature row. Called at ballot submission time. */
+export function upsertMlJurorFeatures(
+  db: Db,
+  input: {
+    caseId: string;
+    jurorId: string;
+    vote: string | null;
+    rationale: string;
+    replaced: boolean;
+    replacementReason?: string | null;
+    signals: MlSignals | null;
+  }
+): void {
+  const s = input.signals ?? {};
+  db.prepare(
+    `
+    INSERT INTO ml_juror_features (
+      case_id, juror_id, vote, rationale,
+      principle_importance, decisive_principle_index, confidence,
+      uncertainty_type, severity, harm_domains, primary_basis,
+      evidence_quality, missing_evidence_type,
+      recommended_remedy, proportionality,
+      decisive_evidence_id, process_flags,
+      replaced, replacement_reason,
+      capture_version, created_at
+    ) VALUES (
+      ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?,
+      ?, ?,
+      ?, ?,
+      ?, ?,
+      'v1', ?
+    )
+    ON CONFLICT(case_id, juror_id) DO UPDATE SET
+      vote                   = excluded.vote,
+      rationale              = excluded.rationale,
+      principle_importance   = excluded.principle_importance,
+      decisive_principle_index = excluded.decisive_principle_index,
+      confidence             = excluded.confidence,
+      uncertainty_type       = excluded.uncertainty_type,
+      severity               = excluded.severity,
+      harm_domains           = excluded.harm_domains,
+      primary_basis          = excluded.primary_basis,
+      evidence_quality       = excluded.evidence_quality,
+      missing_evidence_type  = excluded.missing_evidence_type,
+      recommended_remedy     = excluded.recommended_remedy,
+      proportionality        = excluded.proportionality,
+      decisive_evidence_id   = excluded.decisive_evidence_id,
+      process_flags          = excluded.process_flags,
+      replaced               = excluded.replaced,
+      replacement_reason     = excluded.replacement_reason
+    `
+  ).run(
+    input.caseId,
+    input.jurorId,
+    input.vote ?? null,
+    input.rationale,
+    s.principleImportance ? canonicalJson(s.principleImportance) : null,
+    s.decisivePrincipleIndex ?? null,
+    s.mlConfidence ?? null,
+    s.uncertaintyType ?? null,
+    s.severity ?? null,
+    s.harmDomains ? canonicalJson(s.harmDomains) : null,
+    s.primaryBasis ?? null,
+    s.evidenceQuality ?? null,
+    s.missingEvidenceType ?? null,
+    s.recommendedRemedy ?? null,
+    s.proportionality ?? null,
+    s.decisiveEvidenceId ?? null,
+    s.processFlags ? canonicalJson(s.processFlags) : null,
+    input.replaced ? 1 : 0,
+    input.replacementReason ?? null,
+    nowIso()
+  );
+}
+
+/** Upsert a per-case ML feature row. Called when a case closes or is voided. */
+export function upsertMlCaseFeatures(
+  db: Db,
+  input: {
+    caseId: string;
+    agenticCodeVersion: string;
+    outcome: string | null;
+    voidReasonGroup: string | null;
+    scheduledAt: string | null;
+    startedAt: string | null;
+    endedAt: string | null;
+    caseTopicTags?: string[] | null;
+  }
+): void {
+  db.prepare(
+    `
+    INSERT INTO ml_case_features (
+      case_id, agentic_code_version, outcome, void_reason_group,
+      scheduled_at, started_at, ended_at,
+      case_topic_tags, capture_version, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'v1', ?)
+    ON CONFLICT(case_id) DO UPDATE SET
+      agentic_code_version = excluded.agentic_code_version,
+      outcome              = excluded.outcome,
+      void_reason_group    = excluded.void_reason_group,
+      scheduled_at         = excluded.scheduled_at,
+      started_at           = excluded.started_at,
+      ended_at             = excluded.ended_at,
+      case_topic_tags      = excluded.case_topic_tags
+    `
+  ).run(
+    input.caseId,
+    input.agenticCodeVersion,
+    input.outcome ?? null,
+    input.voidReasonGroup ?? null,
+    input.scheduledAt ?? null,
+    input.startedAt ?? null,
+    input.endedAt ?? null,
+    input.caseTopicTags ? canonicalJson(input.caseTopicTags) : null,
+    nowIso()
+  );
+}
+
+/** Flat export row returned by listMlExport. */
+export interface MlExportRow {
+  caseId: string;
+  scheduledAt: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  outcome: string | null;
+  voidReasonGroup: string | null;
+  agenticCodeVersion: string;
+  caseTopicTags: string[] | null;
+  jurorId: string;
+  vote: string | null;
+  rationale: string;
+  principleImportance: number[] | null;
+  decisivePrincipleIndex: number | null;
+  confidence: number | null;
+  uncertaintyType: string | null;
+  severity: number | null;
+  harmDomains: string[] | null;
+  primaryBasis: string | null;
+  evidenceQuality: number | null;
+  missingEvidenceType: string | null;
+  recommendedRemedy: string | null;
+  proportionality: string | null;
+  decisiveEvidenceId: string | null;
+  processFlags: string[] | null;
+  replaced: boolean;
+  replacementReason: string | null;
+  captureVersion: string;
+  createdAt: string;
+}
+
+/** Returns all ml_juror_features rows joined with ml_case_features for export. */
+export function listMlExport(db: Db, input?: { limit?: number; offset?: number }): MlExportRow[] {
+  const limit = Math.min(input?.limit ?? 1000, 5000);
+  const offset = input?.offset ?? 0;
+
+  const rows = db.prepare(
+    `
+    SELECT
+      j.case_id,
+      c.scheduled_at,
+      c.started_at,
+      c.ended_at,
+      c.outcome,
+      c.void_reason_group,
+      COALESCE(c.agentic_code_version, 'v1') AS agentic_code_version,
+      c.case_topic_tags,
+      j.juror_id,
+      j.vote,
+      j.rationale,
+      j.principle_importance,
+      j.decisive_principle_index,
+      j.confidence,
+      j.uncertainty_type,
+      j.severity,
+      j.harm_domains,
+      j.primary_basis,
+      j.evidence_quality,
+      j.missing_evidence_type,
+      j.recommended_remedy,
+      j.proportionality,
+      j.decisive_evidence_id,
+      j.process_flags,
+      j.replaced,
+      j.replacement_reason,
+      j.capture_version,
+      j.created_at
+    FROM ml_juror_features j
+    LEFT JOIN ml_case_features c ON c.case_id = j.case_id
+    ORDER BY j.case_id ASC, j.juror_id ASC
+    LIMIT ? OFFSET ?
+    `
+  ).all(limit, offset) as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    caseId: String(r.case_id),
+    scheduledAt: r.scheduled_at ? String(r.scheduled_at) : null,
+    startedAt: r.started_at ? String(r.started_at) : null,
+    endedAt: r.ended_at ? String(r.ended_at) : null,
+    outcome: r.outcome ? String(r.outcome) : null,
+    voidReasonGroup: r.void_reason_group ? String(r.void_reason_group) : null,
+    agenticCodeVersion: String(r.agentic_code_version ?? "v1"),
+    caseTopicTags: r.case_topic_tags ? maybeJson<string[]>(r.case_topic_tags as string, []) : null,
+    jurorId: String(r.juror_id),
+    vote: r.vote ? String(r.vote) : null,
+    rationale: String(r.rationale ?? ""),
+    principleImportance: r.principle_importance ? maybeJson<number[]>(r.principle_importance as string, []) : null,
+    decisivePrincipleIndex: r.decisive_principle_index != null ? Number(r.decisive_principle_index) : null,
+    confidence: r.confidence != null ? Number(r.confidence) : null,
+    uncertaintyType: r.uncertainty_type ? String(r.uncertainty_type) : null,
+    severity: r.severity != null ? Number(r.severity) : null,
+    harmDomains: r.harm_domains ? maybeJson<string[]>(r.harm_domains as string, []) : null,
+    primaryBasis: r.primary_basis ? String(r.primary_basis) : null,
+    evidenceQuality: r.evidence_quality != null ? Number(r.evidence_quality) : null,
+    missingEvidenceType: r.missing_evidence_type ? String(r.missing_evidence_type) : null,
+    recommendedRemedy: r.recommended_remedy ? String(r.recommended_remedy) : null,
+    proportionality: r.proportionality ? String(r.proportionality) : null,
+    decisiveEvidenceId: r.decisive_evidence_id ? String(r.decisive_evidence_id) : null,
+    processFlags: r.process_flags ? maybeJson<string[]>(r.process_flags as string, []) : null,
+    replaced: r.replaced === 1,
+    replacementReason: r.replacement_reason ? String(r.replacement_reason) : null,
+    captureVersion: String(r.capture_version ?? "v1"),
+    createdAt: String(r.created_at)
+  }));
+}
+// ─────────────────────────────────────────────────────────────────────────────
