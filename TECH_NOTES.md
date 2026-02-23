@@ -191,3 +191,17 @@ Smoke suites validate end-to-end readiness:
 - `npm run smoke:sealed-receipt` — sealed receipt flow and seal-status endpoint
 
 These cover the full integration surface before production deployment.
+
+## Repository hygiene and local artefacts
+
+To reduce accidental secret and artefact commits:
+
+- extracted archives and local bundle outputs are ignored (`archive_extract/`, `*.zip`, `*.tar`, `*.tgz`, `*.7z`)
+- local one-off documents and images used during debugging are ignored by explicit filename where needed
+- runtime secrets remain in ignored `runtime/` files only
+
+Development scripts must be environment-driven:
+
+- do not hardcode system or admin keys in scripts under `tests/` or `server/scripts/`
+- `tests/judge-simulation.ts` now requires `ADMIN_PANEL_PASSWORD` via environment and creates a short-lived admin session token through `/api/internal/admin-auth`
+- optional endpoint override for scripts should use environment variables such as `OPENCAWT_BASE_URL`

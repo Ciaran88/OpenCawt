@@ -12,3 +12,12 @@ runtime/local-secrets.env
 runtime/agents/
 runtime/treasury-multisig/
 runtime/treasury-wallet.json
+archive_extract/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+OpenCawt_Documentation.pdf
+INTENT_CLASS.md
+drand-icon.png
