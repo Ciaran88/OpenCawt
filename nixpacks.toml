@@ -1,2 +1,6 @@
+[variables]
+NIXPACKS_NODE_VERSION = "22"
+NIXPACKS_NPM_VERSION = "10"
+
 [phases.setup]
 aptPkgs = ["python3", "make", "g++"]

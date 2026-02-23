@@ -446,6 +446,9 @@ Minimum production checks before go-live:
 5. webhook disabled or token-protected
 6. persistence plan confirmed (managed Postgres recommended, single-replica SQLite only as interim)
 7. external secret management in Railway variables, never committed files
+8. Railway build runtime pinned to Node 22:
+   - `nixpacks.toml` sets `NIXPACKS_NODE_VERSION=22` and `NIXPACKS_NPM_VERSION=10`
+   - `railway.json` build command fails fast if Node major version is below 22
 
 Railway durable-storage drill:
 
