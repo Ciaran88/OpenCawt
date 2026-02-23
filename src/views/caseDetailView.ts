@@ -156,9 +156,9 @@ function renderTranscript(events: TranscriptEvent[]): string {
     : "";
 
   return `
-    <section class="case-transcript-primary glass-overlay">
+    <section id="case-transcript-block" class="case-transcript-primary glass-overlay">
       <h3>Court session transcript</h3>
-      <div class="session-transcript-window" aria-label="Case transcript">
+      <div id="session-transcript-window" class="session-transcript-window" aria-label="Case transcript">
       ${events
         .map((event) => {
           if (isCourtSignpost(event)) {
@@ -464,7 +464,7 @@ export function renderCaseDetailView(
     : "";
 
   const top = `
-    <section class="detail-top">
+    <section id="case-detail-top" class="detail-top">
       <div>
         <div class="case-idline">
           <span class="case-id">${escapeHtml(displayCaseLabel(caseItem))}</span>
@@ -515,7 +515,7 @@ export function renderCaseDetailView(
     ${top}
     ${!observerMode ? renderCourtProtocolPanel() : ""}
     ${renderTranscript(transcript)}
-    <details class="case-detail-collapse glass-overlay">
+    <details id="case-session-controls" class="case-detail-collapse glass-overlay">
       <summary class="case-detail-collapse-summary">Session controls and actions</summary>
       <div class="case-detail-collapse-body stack">
         ${renderStepper(caseItem.currentPhase)}

@@ -400,9 +400,28 @@ export function mountApp(root: HTMLElement): void {
     }, 30000);
   };
 
+  const patchCaseLiveDom = (caseItem: Case) => {
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(
+      renderCaseDetailView(state, caseItem, state.agentConnection),
+      "text/html"
+    );
+    const dynamicBlocks = [
+      "case-detail-top",
+      "case-transcript-block",
+      "case-session-controls"
+    ];
+    for (const id of dynamicBlocks) {
+      const current = dom.main.querySelector<HTMLElement>(`#${id}`);
+      const next = parsed.querySelector<HTMLElement>(`#${id}`);
+      if (current && next) {
+        current.outerHTML = next.outerHTML;
+      }
+    }
+  };
+
   const refreshCaseLive = async (caseId: string, rerender = true) => {
-    const pageScrollY = window.scrollY;
-    const transcriptBefore = dom.main.querySelector<HTMLElement>(".session-transcript-window");
+    const transcriptBefore = dom.main.querySelector<HTMLElement>("#session-transcript-window");
     const transcriptScrollTop = transcriptBefore?.scrollTop ?? 0;
     const transcriptWasNearBottom = transcriptBefore
       ? transcriptBefore.scrollHeight - (transcriptBefore.scrollTop + transcriptBefore.clientHeight) < 40
@@ -420,11 +439,8 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       activeRenderedCase = caseItem;
-      setMainContent(renderCaseDetailView(state, caseItem, state.agentConnection), {
-        animate: false
-      });
-      window.scrollTo({ top: pageScrollY, left: 0, behavior: "auto" });
-      const transcriptAfter = dom.main.querySelector<HTMLElement>(".session-transcript-window");
+      patchCaseLiveDom(caseItem);
+      const transcriptAfter = dom.main.querySelector<HTMLElement>("#session-transcript-window");
       if (transcriptAfter) {
         transcriptAfter.scrollTop = transcriptWasNearBottom
           ? transcriptAfter.scrollHeight
