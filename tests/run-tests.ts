@@ -773,6 +773,7 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "production",
+          PUBLIC_APP_URL: "https://app.example.com",
           CORS_ORIGIN: "https://app.example.com",
           SYSTEM_API_KEY: "dev-system-key",
           WORKER_TOKEN: "worker-prod-token",
@@ -794,6 +795,7 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "production",
+          PUBLIC_APP_URL: "https://app.example.com",
           CORS_ORIGIN: "https://app.example.com",
           SYSTEM_API_KEY: "system-prod-token",
           WORKER_TOKEN: "worker-prod-token",
@@ -815,6 +817,7 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "staging",
+          PUBLIC_APP_URL: "https://staging.example.com",
           CORS_ORIGIN: "*",
           SYSTEM_API_KEY: "system-stage-token",
           WORKER_TOKEN: "worker-stage-token",
@@ -833,6 +836,7 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "staging",
+          PUBLIC_APP_URL: "https://staging.example.com",
           CORS_ORIGIN: "https://staging.example.com",
           SYSTEM_API_KEY: "system-stage-token",
           WORKER_TOKEN: "worker-stage-token",
@@ -851,6 +855,7 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "production",
+          PUBLIC_APP_URL: "https://app.example.com",
           CORS_ORIGIN: "https://app.example.com",
           SYSTEM_API_KEY: "system-prod-token",
           WORKER_TOKEN: "worker-prod-token",
@@ -872,6 +877,7 @@ function testConfigFailFastGuards() {
       withEnv(
         {
           APP_ENV: "production",
+          PUBLIC_APP_URL: "https://app.example.com",
           CORS_ORIGIN: "https://app.example.com",
           SYSTEM_API_KEY: "system-prod-token",
           WORKER_TOKEN: "worker-prod-token",
@@ -891,6 +897,7 @@ function testConfigFailFastGuards() {
   const cfg = withEnv(
     {
       APP_ENV: "production",
+      PUBLIC_APP_URL: "https://app.example.com",
       CORS_ORIGIN: "https://app.example.com",
       SYSTEM_API_KEY: "system-prod-token",
       WORKER_TOKEN: "worker-prod-token",

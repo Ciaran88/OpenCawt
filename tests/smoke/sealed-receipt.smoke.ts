@@ -62,8 +62,8 @@ function setupDb(dbPath: string): { caseId: string; jobId: string; workerToken: 
     jurorPoolSnapshotHash: "pool-smoke",
     outcome: "for_prosecution",
     decidedAtIso: now,
-    externalUrl: `/decision/${encodeURIComponent(caseId)}`,
-    verdictUri: `/decision/${encodeURIComponent(caseId)}`,
+    externalUrl: `https://opencawt.example/decision/${encodeURIComponent(caseId)}`,
+    verdictUri: `https://opencawt.example/decision/${encodeURIComponent(caseId)}`,
     metadata: {
       caseSummary: "Sealed receipt smoke case",
       imagePath: "nft_seal.png"

@@ -28,6 +28,7 @@ export interface AppConfig {
   appEnv: string;
   isProduction: boolean;
   isDevelopment: boolean;
+  publicAppUrl: string;
   apiHost: string;
   apiPort: number;
   corsOrigin: string;
@@ -159,6 +160,16 @@ function resolveAppEnv(): string {
 }
 
 function validateConfig(config: AppConfig): void {
+  let parsedPublicAppUrl: URL;
+  try {
+    parsedPublicAppUrl = new URL(config.publicAppUrl);
+  } catch {
+    throw new Error("PUBLIC_APP_URL must be a valid absolute URL.");
+  }
+  if (!["http:", "https:"].includes(parsedPublicAppUrl.protocol)) {
+    throw new Error("PUBLIC_APP_URL must use http or https.");
+  }
+
   const nonDev = !config.isDevelopment;
   if (nonDev) {
     if (!config.systemApiKey || config.systemApiKey === "dev-system-key") {
@@ -182,6 +193,9 @@ function validateConfig(config: AppConfig): void {
     }
     if (config.corsOrigin.trim() === "*") {
       throw new Error("CORS_ORIGIN cannot be wildcard in non-development environments.");
+    }
+    if (parsedPublicAppUrl.protocol !== "https:") {
+      throw new Error("PUBLIC_APP_URL must use https outside development or test.");
     }
     const defenceInviteKey = config.defenceInviteSigningKey.trim();
     const uniqueChars = new Set(defenceInviteKey).size;
@@ -212,6 +226,9 @@ function validateConfig(config: AppConfig): void {
         "In production, DB_PATH must be an absolute durable path under /data (for example /data/opencawt.sqlite)."
       );
     }
+    if (parsedPublicAppUrl.protocol !== "https:") {
+      throw new Error("PUBLIC_APP_URL must use https in production.");
+    }
     const courtMode = (process.env.COURT_MODE ?? "").trim().toLowerCase();
     if (courtMode === "judge" && !config.judgeOpenAiApiKey) {
       throw new Error(
@@ -238,6 +255,7 @@ export function getConfig(): AppConfig {
     appEnv,
     isProduction,
     isDevelopment,
+    publicAppUrl: stringEnv("PUBLIC_APP_URL", "http://127.0.0.1:5173"),
     apiHost: host,
     apiPort: port,
     corsOrigin: stringEnv("CORS_ORIGIN", "http://127.0.0.1:5173"),
