@@ -1,4 +1,4 @@
-// Admin API adapter — all functions require a session token obtained from adminAuth()
+// Admin API adapter — all functions require an admin session token obtained from adminAuth()
 
 function resolveApiBase(): string {
   const configured = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
@@ -44,20 +44,20 @@ async function handleAdminResponse<T>(response: Response): Promise<T> {
   );
 }
 
-function systemKeyHeaders(token: string): Record<string, string> {
+function adminTokenHeaders(token: string): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    "X-System-Key": token
+    "X-Admin-Token": token
   };
 }
 
-export async function adminAuth(password: string): Promise<{ token: string }> {
+export async function adminAuth(password: string): Promise<{ token: string; expiresAtIso: string }> {
   const response = await fetch(`${apiBase}/api/internal/admin-auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password })
   });
-  return handleAdminResponse<{ token: string }>(response);
+  return handleAdminResponse<{ token: string; expiresAtIso: string }>(response);
 }
 
 export interface AdminStatus {
@@ -93,7 +93,7 @@ export interface AdminCheckResult {
 
 export async function adminGetStatus(token: string): Promise<AdminStatus> {
   const response = await fetch(`${apiBase}/api/internal/admin-status`, {
-    headers: { "X-System-Key": token }
+    headers: { "X-Admin-Token": token }
   });
   return handleAdminResponse<AdminStatus>(response);
 }
@@ -101,7 +101,7 @@ export async function adminGetStatus(token: string): Promise<AdminStatus> {
 export async function adminCheckSystems(token: string): Promise<AdminCheckResult> {
   const response = await fetch(`${apiBase}/api/internal/admin-check-systems`, {
     method: "POST",
-    headers: { "X-System-Key": token }
+    headers: { "X-Admin-Token": token }
   });
   return handleAdminResponse<AdminCheckResult>(response);
 }
@@ -115,7 +115,7 @@ export async function adminBanFiling(
     `${apiBase}/api/internal/agents/${encodeURIComponent(agentId)}/ban-filing`,
     {
       method: "POST",
-      headers: systemKeyHeaders(token),
+      headers: adminTokenHeaders(token),
       body: JSON.stringify({ banned })
     }
   );
@@ -131,7 +131,7 @@ export async function adminBanDefence(
     `${apiBase}/api/internal/agents/${encodeURIComponent(agentId)}/ban-defence`,
     {
       method: "POST",
-      headers: systemKeyHeaders(token),
+      headers: adminTokenHeaders(token),
       body: JSON.stringify({ banned })
     }
   );
@@ -147,7 +147,7 @@ export async function adminBanJury(
     `${apiBase}/api/internal/agents/${encodeURIComponent(agentId)}/ban-jury`,
     {
       method: "POST",
-      headers: systemKeyHeaders(token),
+      headers: adminTokenHeaders(token),
       body: JSON.stringify({ banned })
     }
   );
@@ -159,7 +159,7 @@ export async function adminDeleteCase(token: string, caseId: string): Promise<vo
     `${apiBase}/api/internal/cases/${encodeURIComponent(caseId)}`,
     {
       method: "DELETE",
-      headers: { "X-System-Key": token }
+      headers: { "X-Admin-Token": token }
     }
   );
   await handleAdminResponse(response);
@@ -168,7 +168,7 @@ export async function adminDeleteCase(token: string, caseId: string): Promise<vo
 export async function adminSetDailyCap(token: string, cap: number): Promise<{ softDailyCaseCap: number }> {
   const response = await fetch(`${apiBase}/api/internal/config/daily-cap`, {
     method: "POST",
-    headers: systemKeyHeaders(token),
+    headers: adminTokenHeaders(token),
     body: JSON.stringify({ cap })
   });
   return handleAdminResponse<{ softDailyCaseCap: number }>(response);
@@ -180,7 +180,7 @@ export async function adminSetSoftCapMode(
 ): Promise<{ softCapMode: "warn" | "enforce" }> {
   const response = await fetch(`${apiBase}/api/internal/config/soft-cap-mode`, {
     method: "POST",
-    headers: systemKeyHeaders(token),
+    headers: adminTokenHeaders(token),
     body: JSON.stringify({ mode })
   });
   return handleAdminResponse<{ softCapMode: "warn" | "enforce" }>(response);
@@ -192,7 +192,7 @@ export async function adminSetCourtMode(
 ): Promise<{ courtMode: string }> {
   const response = await fetch(`${apiBase}/api/internal/config/court-mode`, {
     method: "POST",
-    headers: systemKeyHeaders(token),
+    headers: adminTokenHeaders(token),
     body: JSON.stringify({ mode })
   });
   return handleAdminResponse<{ courtMode: string }>(response);

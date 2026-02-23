@@ -71,6 +71,7 @@ export interface AppConfig {
   };
   logLevel: "debug" | "info" | "warn" | "error";
   adminPanelPassword: string;
+  adminSessionTtlSec: number;
   judgeOpenAiApiKey: string;
   judgeOpenAiModel: string;
 }
@@ -170,6 +171,15 @@ function validateConfig(config: AppConfig): void {
         "WORKER_TOKEN must be set to a strong non-default value outside development or test."
       );
     }
+    if (
+      !config.adminPanelPassword ||
+      config.adminPanelPassword === "gringos" ||
+      config.adminPanelPassword.trim().length < 12
+    ) {
+      throw new Error(
+        "ADMIN_PANEL_PASSWORD must be set to a strong non-default value (minimum 12 characters) outside development or test."
+      );
+    }
     if (config.corsOrigin.trim() === "*") {
       throw new Error("CORS_ORIGIN cannot be wildcard in non-development environments.");
     }
@@ -188,6 +198,12 @@ function validateConfig(config: AppConfig): void {
     if (!isDurableDbPath(config.dbPath)) {
       throw new Error(
         "In production, DB_PATH must be an absolute durable path under /data (for example /data/opencawt.sqlite)."
+      );
+    }
+    const courtMode = (process.env.COURT_MODE ?? "").trim().toLowerCase();
+    if (courtMode === "judge" && !config.judgeOpenAiApiKey) {
+      throw new Error(
+        "JUDGE_OPENAI_API_KEY must be set when COURT_MODE=judge in production."
       );
     }
   }
@@ -286,6 +302,7 @@ export function getConfig(): AppConfig {
     },
     logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error",
     adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos"),
+    adminSessionTtlSec: numberEnv("ADMIN_SESSION_TTL_SEC", 900),
     judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", ""),
     judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini")
   };

@@ -772,6 +772,7 @@ function testConfigFailFastGuards() {
           CORS_ORIGIN: "https://app.example.com",
           SYSTEM_API_KEY: "dev-system-key",
           WORKER_TOKEN: "worker-prod-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
           SOLANA_MODE: "rpc",
           DRAND_MODE: "http",
           SEAL_WORKER_MODE: "http",
@@ -791,6 +792,7 @@ function testConfigFailFastGuards() {
           CORS_ORIGIN: "https://app.example.com",
           SYSTEM_API_KEY: "system-prod-token",
           WORKER_TOKEN: "worker-prod-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
           SOLANA_MODE: "stub",
           DRAND_MODE: "http",
           SEAL_WORKER_MODE: "http",
@@ -810,6 +812,7 @@ function testConfigFailFastGuards() {
           CORS_ORIGIN: "*",
           SYSTEM_API_KEY: "system-stage-token",
           WORKER_TOKEN: "worker-stage-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
           HELIUS_WEBHOOK_ENABLED: "false",
           HELIUS_WEBHOOK_TOKEN: undefined
         },
@@ -826,6 +829,7 @@ function testConfigFailFastGuards() {
           CORS_ORIGIN: "https://staging.example.com",
           SYSTEM_API_KEY: "system-stage-token",
           WORKER_TOKEN: "worker-stage-token",
+          ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
           HELIUS_WEBHOOK_ENABLED: "true",
           HELIUS_WEBHOOK_TOKEN: undefined
         },
@@ -833,6 +837,48 @@ function testConfigFailFastGuards() {
       ),
     /HELIUS_WEBHOOK_ENABLED/
   );
+
+  assert.throws(
+    () =>
+      withEnv(
+        {
+          APP_ENV: "production",
+          CORS_ORIGIN: "https://app.example.com",
+          SYSTEM_API_KEY: "system-prod-token",
+          WORKER_TOKEN: "worker-prod-token",
+          ADMIN_PANEL_PASSWORD: "gringos",
+          SOLANA_MODE: "rpc",
+          DRAND_MODE: "http",
+          SEAL_WORKER_MODE: "http",
+          HELIUS_WEBHOOK_ENABLED: "false",
+          HELIUS_WEBHOOK_TOKEN: undefined
+        },
+        () => getConfig()
+      ),
+    /ADMIN_PANEL_PASSWORD/
+  );
+
+  const cfg = withEnv(
+    {
+      APP_ENV: "production",
+      CORS_ORIGIN: "https://app.example.com",
+      SYSTEM_API_KEY: "system-prod-token",
+      WORKER_TOKEN: "worker-prod-token",
+      ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+      ADMIN_SESSION_TTL_SEC: "1200",
+      SOLANA_MODE: "rpc",
+      DRAND_MODE: "http",
+      SEAL_WORKER_MODE: "http",
+      DB_PATH: "/data/opencawt.sqlite",
+      HELIUS_WEBHOOK_ENABLED: "false",
+      HELIUS_WEBHOOK_TOKEN: undefined
+    },
+    () => getConfig()
+  );
+  if (cfg instanceof Promise) {
+    throw new Error("Expected synchronous config load.");
+  }
+  assert.equal(cfg.adminSessionTtlSec, 1200);
 }
 
 function testSecurityHeadersPresence() {

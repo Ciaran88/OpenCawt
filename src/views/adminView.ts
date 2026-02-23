@@ -16,6 +16,12 @@ import {
 
 // Session token persisted only in sessionStorage (cleared on tab close)
 const SESSION_KEY = "_oc_adm";
+const SESSION_SKEW_MS = 5_000;
+
+type AdminSession = {
+  token: string;
+  expiresAtIso: string;
+};
 
 function getOcpFrontendUrl(): string {
   const configured = (import.meta.env.VITE_OCP_FRONTEND_URL as string | undefined)?.trim();
@@ -32,15 +38,25 @@ function getOcpFrontendUrl(): string {
 
 export function getAdminToken(): string | null {
   try {
-    return sessionStorage.getItem(SESSION_KEY);
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as AdminSession;
+    const expiresAtMs = new Date(parsed.expiresAtIso).getTime();
+    if (!Number.isFinite(expiresAtMs) || Date.now() + SESSION_SKEW_MS >= expiresAtMs) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return parsed.token;
   } catch {
     return null;
   }
 }
 
-function setAdminToken(token: string): void {
+function setAdminToken(session: AdminSession): void {
   try {
-    sessionStorage.setItem(SESSION_KEY, token);
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
   } catch {
     // ignore
   }
@@ -426,10 +442,12 @@ export function renderAdminDashboardView(state: AdminDashboardState): string {
 
 // --- Action handlers (called from app.ts) ---
 
-export async function handleAdminLogin(password: string): Promise<{ token: string } | { error: string }> {
+export async function handleAdminLogin(
+  password: string
+): Promise<{ token: string; expiresAtIso: string } | { error: string }> {
   try {
     const result = await adminAuth(password);
-    setAdminToken(result.token);
+    setAdminToken(result);
     return result;
   } catch (err) {
     const msg = err instanceof AdminApiError ? err.message : "Authentication failed.";

@@ -178,6 +178,44 @@ if (savedSoftCapMode === "warn" || savedSoftCapMode === "enforce") {
 
 // In-memory rate limiter for admin auth attempts (ip -> { count, resetAt })
 const adminAuthAttempts = new Map<string, { count: number; resetAt: number }>();
+const adminSessions = new Map<string, { expiresAtMs: number }>();
+
+function pruneExpiredAdminSessions(nowMs: number): void {
+  for (const [token, session] of adminSessions.entries()) {
+    if (session.expiresAtMs <= nowMs) {
+      adminSessions.delete(token);
+    }
+  }
+}
+
+function issueAdminSession(nowMs: number): { token: string; expiresAtIso: string } {
+  pruneExpiredAdminSessions(nowMs);
+  const token = randomBytes(32).toString("base64url");
+  const expiresAtMs = nowMs + config.adminSessionTtlSec * 1000;
+  adminSessions.set(token, { expiresAtMs });
+  return {
+    token,
+    expiresAtIso: new Date(expiresAtMs).toISOString()
+  };
+}
+
+function assertAdminToken(req: IncomingMessage): void {
+  const raw = req.headers["x-admin-token"];
+  const token = typeof raw === "string" ? raw.trim() : "";
+  if (!token) {
+    throw unauthorised("ADMIN_TOKEN_REQUIRED", "Missing X-Admin-Token header.");
+  }
+  const nowMs = Date.now();
+  pruneExpiredAdminSessions(nowMs);
+  const session = adminSessions.get(token);
+  if (!session) {
+    throw unauthorised("ADMIN_TOKEN_INVALID", "Admin token is invalid.");
+  }
+  if (session.expiresAtMs <= nowMs) {
+    adminSessions.delete(token);
+    throw unauthorised("ADMIN_TOKEN_EXPIRED", "Admin token has expired.");
+  }
+}
 
 const closingCases = new Set<string>();
 
@@ -1337,7 +1375,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
-    // Admin panel authentication — returns systemApiKey as bearer token on success
+    // Admin panel authentication — returns a short-lived admin session token on success
     if (method === "POST" && pathname === "/api/internal/admin-auth") {
       const clientIp = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "unknown");
       const now = Date.now();
@@ -1360,7 +1398,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         throw unauthorised("ADMIN_AUTH_INVALID", "Invalid admin password.");
       }
       adminAuthAttempts.delete(clientIp);
-      sendJson(res, 200, { token: config.systemApiKey });
+      const session = issueAdminSession(now);
+      sendJson(res, 200, session);
       return;
     }
 
@@ -1373,7 +1412,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[2] === "agents" &&
       segments[4] === "ban-filing"
     ) {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       const agentId = decodeURIComponent(segments[3]);
       const body = await readJsonBody<{ banned: boolean }>(req);
       if (typeof body.banned !== "boolean") {
@@ -1392,7 +1431,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[2] === "agents" &&
       segments[4] === "ban-defence"
     ) {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       const agentId = decodeURIComponent(segments[3]);
       const body = await readJsonBody<{ banned: boolean }>(req);
       if (typeof body.banned !== "boolean") {
@@ -1411,7 +1450,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[2] === "agents" &&
       segments[4] === "ban-jury"
     ) {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       const agentId = decodeURIComponent(segments[3]);
       const body = await readJsonBody<{ banned: boolean }>(req);
       if (typeof body.banned !== "boolean") {
@@ -1430,7 +1469,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[1] === "internal" &&
       segments[2] === "cases"
     ) {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       const caseId = decodeURIComponent(segments[3]);
       deleteCaseById(db, caseId);
       sendJson(res, 200, { caseId, deleted: true });
@@ -1439,7 +1478,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     // Update daily case cap (admin)
     if (method === "POST" && pathname === "/api/internal/config/daily-cap") {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       const body = await readJsonBody<{ cap: number }>(req);
       const cap = Number(body.cap);
       if (!Number.isFinite(cap) || cap < 1) {
@@ -1453,7 +1492,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     // Update soft cap mode (admin)
     if (method === "POST" && pathname === "/api/internal/config/soft-cap-mode") {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       const body = await readJsonBody<{ mode: "warn" | "enforce" }>(req);
       const mode = body.mode;
       if (mode !== "warn" && mode !== "enforce") {
@@ -1467,7 +1506,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     // Update court mode (admin)
     if (method === "POST" && pathname === "/api/internal/config/court-mode") {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       const body = await readJsonBody<{ mode?: string }>(req);
       if (body.mode !== "11-juror" && body.mode !== "judge") {
         throw badRequest("INVALID_COURT_MODE", "Court mode must be '11-juror' or 'judge'.");
@@ -1479,7 +1518,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     // Admin status endpoint
     if (method === "GET" && pathname === "/api/internal/admin-status") {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       // DB connectivity: attempt a trivial query
       let dbReady = false;
       try {
@@ -1549,7 +1588,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       (method === "GET" || method === "POST") &&
       pathname === "/api/internal/admin-check-systems"
     ) {
-      assertSystemKey(req, config);
+      assertAdminToken(req);
       const CHECK_TIMEOUT_MS = 6000;
 
       const withTimeout = <T>(promise: Promise<T>, label: string): Promise<{ ok: true; data: T } | { ok: false; error: string }> =>
