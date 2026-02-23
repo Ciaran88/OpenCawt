@@ -240,7 +240,7 @@ function validateConfig(config: AppConfig): void {
     }
     if (config.defaultCourtMode === "judge" && !config.judgeOpenAiApiKey) {
       throw new Error(
-        "JUDGE_OPENAI_API_KEY must be set when Judge Mode is the default in production."
+        "JUDGE_OPENAI_API_KEY (or OPENAI_API_KEY fallback) must be set when Judge Mode is the default in production."
       );
     }
   }
@@ -342,7 +342,7 @@ export function getConfig(): AppConfig {
     logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error",
     adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos"),
     adminSessionTtlSec: numberEnv("ADMIN_SESSION_TTL_SEC", 900),
-    judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", ""),
+    judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", stringEnv("OPENAI_API_KEY", "")),
     judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini"),
     defaultCourtMode
   };
