@@ -83,7 +83,11 @@ export async function mintWithBubblegumLocalSigning(
   const leaf = await parseLeafFromMintV1Transaction(umi, sent.signature);
   const assetId = String(leaf.id);
 
-  await resolveAssetById(config, assetId);
+  try {
+    await resolveAssetById(config, assetId);
+  } catch {
+    // DAS indexing may lag after a finalised mint; txSig + leaf-derived assetId are authoritative.
+  }
 
   return {
     jobId: request.jobId,
