@@ -14,6 +14,7 @@
 import type { OcpMintRequest, WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
 import type { MintWorkerConfig } from "./workerConfig";
 import { ensureSealImageUri } from "./metadataUpload";
+import { WorkerMintError } from "./errors";
 import { mintWithMetaplexNft } from "./metaplexNftMint";
 
 // ── Metadata helpers ──────────────────────────────────────────────────────────
@@ -58,6 +59,27 @@ function buildOcpMetadataJson(
   };
 }
 
+function ensureAbsoluteHttpsUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new WorkerMintError({
+      code: "INVALID_EXTERNAL_URL",
+      message: "OCP metadata external_url must be an absolute URL.",
+      retryable: false
+    });
+  }
+  if (parsed.protocol !== "https:") {
+    throw new WorkerMintError({
+      code: "INVALID_EXTERNAL_URL_SCHEME",
+      message: "OCP metadata external_url must use https.",
+      retryable: false
+    });
+  }
+  return parsed.toString();
+}
+
 // ── Pinata upload for OCP metadata ───────────────────────────────────────────
 
 async function uploadOcpMetadata(
@@ -74,7 +96,11 @@ async function uploadOcpMetadata(
   }
 
   const imageUri = await ensureSealImageUri(config);
-  const metadata = buildOcpMetadataJson(request, imageUri, sealedAtIso);
+  const metadata = buildOcpMetadataJson(
+    { ...request, externalUrl: ensureAbsoluteHttpsUrl(request.externalUrl) },
+    imageUri,
+    sealedAtIso
+  );
 
   interface PinataJsonResponse { IpfsHash: string }
 
