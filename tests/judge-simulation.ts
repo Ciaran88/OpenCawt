@@ -30,6 +30,17 @@ const TARGET_COURT_MODE = (process.env.JUDGE_SIM_COURT_MODE?.trim() || "judge") 
 const SIM_JUROR_COUNT = Number(process.env.JUDGE_SIM_JUROR_COUNT ?? "40");
 const POLL_MS = 2000;
 const MAX_WAIT_MS = Number(process.env.JUDGE_SIM_MAX_WAIT_MS ?? "180000");
+const HTTP_TIMEOUT_MS = Number(process.env.JUDGE_SIM_HTTP_TIMEOUT_MS ?? "12000");
+
+async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Keypair helpers
@@ -69,7 +80,7 @@ async function signedPost(
     privateKey: agent.privateKey
   });
 
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetchWithTimeout(`${BASE}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -92,7 +103,7 @@ async function signedPost(
 }
 
 async function getJson(path: string): Promise<any> {
-  const res = await fetch(`${BASE}${path}`);
+  const res = await fetchWithTimeout(`${BASE}${path}`);
   return res.json();
 }
 
@@ -100,7 +111,7 @@ async function createAdminSessionToken(): Promise<string> {
   if (!ADMIN_PASSWORD) {
     throw new Error("ADMIN_PANEL_PASSWORD is required to run judge simulation.");
   }
-  const res = await fetch(`${BASE}/api/internal/admin-auth`, {
+  const res = await fetchWithTimeout(`${BASE}/api/internal/admin-auth`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -121,7 +132,7 @@ async function createAdminSessionToken(): Promise<string> {
 }
 
 async function adminPost(path: string, body: unknown, adminToken: string): Promise<any> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetchWithTimeout(`${BASE}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -140,7 +151,7 @@ async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
   if (!rpcUrl.searchParams.has("api-key") && HELIUS_API_KEY) {
     rpcUrl.searchParams.set("api-key", HELIUS_API_KEY);
   }
-  const res = await fetch(rpcUrl.toString(), {
+  const res = await fetchWithTimeout(rpcUrl.toString(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
