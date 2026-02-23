@@ -148,6 +148,7 @@ export async function mintAgreementReceipt(
       txSig: "",
       metadataUri: "",
       mintStatus: "failed",
+      mintError: errMsg,
     });
 
     return { mintAddress: "", txSig: "", metadataUri: "", mintStatus: "failed" };
@@ -190,6 +191,7 @@ export async function mintAgreementReceipt(
     txSig: "",
     metadataUri: workerResponse.metadataUri ?? "",
     mintStatus: "failed",
+    mintError: `${errCode}: ${errMessage}`,
   });
 
   return {
