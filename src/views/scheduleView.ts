@@ -116,15 +116,31 @@ function renderDocketControls(state: AppState): string {
   `;
 }
 
+function renderActiveControls(state: AppState): string {
+  return `
+      ${renderFilterDropdown({
+        label: "Sort",
+        action: "active-sort",
+        selected: state.activeControls.sort,
+        list: [
+          { value: "time-asc", label: "Soonest First" },
+          { value: "time-desc", label: "Latest First" }
+        ]
+      })}
+  `;
+}
+
 function renderDocketSections(state: AppState): string {
   const { filter, sort } = state.scheduleControls;
+  const activeSort = state.activeControls.sort;
   const scheduledBase = sortCases(state.schedule.scheduled, sort);
-  const activeBase = sortCases(state.schedule.active, sort);
+  const activeBase = sortCases(state.schedule.active, activeSort);
 
   const scheduled = filter === "active" ? [] : scheduledBase;
   const active = filter === "scheduled" ? [] : activeBase;
   
   const docketControls = renderDocketControls(state);
+  const activeControls = renderActiveControls(state);
 
   const activeHtml = renderCaseList({
     title: "Active",
@@ -132,7 +148,9 @@ function renderDocketSections(state: AppState): string {
     cases: active,
     nowMs: state.nowMs,
     showCountdown: false,
-    voteOverrides: state.liveVotes
+    voteOverrides: state.liveVotes,
+    controls: activeControls,
+    splitHeader: true
   });
 
   const scheduleHtml = renderCaseList({

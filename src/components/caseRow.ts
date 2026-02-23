@@ -2,6 +2,7 @@ import type { Case } from "../data/types";
 import { formatDashboardDateLabel } from "../util/format";
 import { escapeHtml } from "../util/html";
 import { renderLinkButton } from "./button";
+import { renderCountdownRing } from "./countdownRing";
 import { renderStatusPill, statusFromCase } from "./statusPill";
 
 function renderVoteMini(caseId: string, votesCast: number, jurySize: number): string {
@@ -29,10 +30,27 @@ export function renderCaseRow(
   
   const isActive = caseItem.status === "active";
 
+  let countdownHtml = "";
+  if (options.showCountdown && !isActive && caseItem.scheduledForIso) {
+    const endAt = new Date(caseItem.scheduledForIso).getTime();
+    const totalMs = caseItem.countdownTotalMs ?? (endAt - new Date(caseItem.createdAtIso).getTime());
+    const safeTotal = totalMs > 0 ? totalMs : 3600000;
+
+    countdownHtml = renderCountdownRing({
+      id: caseItem.id,
+      nowMs: options.nowMs,
+      endAtIso: caseItem.scheduledForIso,
+      totalMs: safeTotal
+    });
+  }
+
   return `
     <article class="case-card" role="article">
       <div class="case-card-header">
-        <span class="case-id">${escapeHtml(caseItem.id)}</span>
+        <div class="case-id-group">
+          <span class="case-id">${escapeHtml(caseItem.id)}</span>
+          ${countdownHtml}
+        </div>
         ${renderStatusPill(
             isActive ? "Active" : "Scheduled",
             statusFromCase(caseItem.status)

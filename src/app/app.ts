@@ -634,6 +634,10 @@ export function mountApp(root: HTMLElement): void {
 
     patchCountdownRings(dom.main, state.nowMs);
     patchVoteViews(dom.main, state.liveVotes);
+    if (state.route.name === "schedule") {
+      // Defer to ensure layout is stable
+      setTimeout(() => balanceDocketLayout(dom.main), 0);
+    }
     syncVoteSimulation();
   };
 
@@ -1327,6 +1331,24 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "active-sort") {
+      const value = actionTarget.getAttribute("data-value");
+      if (value === "time-asc" || value === "time-desc") {
+        state.activeControls.sort = value;
+        void renderRoute();
+      }
+      return;
+    }
+
+    if (action === "active-sort") {
+      const value = actionTarget.getAttribute("data-value");
+      if (value === "time-asc" || value === "time-desc") {
+        state.activeControls.sort = value;
+        void renderRoute();
+      }
+      return;
+    }
+
     if (action === "open-defence-sort") {
       const value = actionTarget.getAttribute("data-value");
       if (value === "soonest" || value === "latest") {
@@ -1527,6 +1549,111 @@ function patchCountdownRings(scope: HTMLElement, nowMs: number): void {
       const countdown = computeCountdownState(nowMs, endAt, 3600000);
       el.textContent = `Next session in - ${formatDurationLabel(countdown.remainingMs)}`;
   });
+}
+
+function balanceDocketLayout(scope: HTMLElement): void {
+  const activePane = scope.querySelector<HTMLElement>(".active-cases-pane");
+  const schedulePane = scope.querySelector<HTMLElement>(".court-schedule-pane");
+  if (!activePane || !schedulePane) {
+    return;
+  }
+
+  const ensureShowLess = (pane: HTMLElement) => {
+    if (pane.querySelector(".docket-collapse-wrapper")) return;
+    const wrapper = document.createElement("div");
+    wrapper.className = "docket-collapse-wrapper";
+    wrapper.innerHTML = `
+      <button class="docket-toggle-btn is-up" type="button" aria-label="Show less">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+      </button>
+    `;
+    const btn = wrapper.querySelector("button");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        pane.classList.remove("is-user-expanded");
+        wrapper.remove();
+        balanceDocketLayout(scope);
+        // Scroll to make sure the user isn't lost
+        pane.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    }
+    pane.appendChild(wrapper);
+  };
+
+  const removeShowLess = (pane: HTMLElement) => {
+    pane.querySelectorAll(".docket-collapse-wrapper").forEach((el) => el.remove());
+  };
+
+  // Check for user expanded state to preserve it
+  const expandedPane = [activePane, schedulePane].find((p) =>
+    p.classList.contains("is-user-expanded")
+  );
+  if (expandedPane) {
+    ensureShowLess(expandedPane);
+    [activePane, schedulePane].forEach((p) => {
+      p.querySelectorAll(".docket-overflow-overlay").forEach((el) => el.remove());
+      if (p !== expandedPane) removeShowLess(p);
+    });
+    expandedPane.style.maxHeight = "";
+    expandedPane.classList.remove("docket-pane-clamped");
+    return;
+  }
+
+  // Reset to measure natural height
+  [activePane, schedulePane].forEach((pane) => {
+    pane.style.maxHeight = "";
+    pane.classList.remove("docket-pane-clamped");
+    pane.querySelectorAll(".docket-overflow-overlay").forEach((el) => el.remove());
+    removeShowLess(pane);
+  });
+
+  // Measure content height (first child) to avoid issues with grid stretch
+  const getContentHeight = (el: HTMLElement) => {
+    const child = el.firstElementChild as HTMLElement;
+    return child ? child.offsetHeight : el.offsetHeight;
+  };
+
+  const hActive = getContentHeight(activePane);
+  const hSchedule = getContentHeight(schedulePane);
+  const diff = Math.abs(hActive - hSchedule);
+
+  // Lower threshold to catch more cases
+  if (diff < 100) {
+    return;
+  }
+
+  const taller = hActive > hSchedule ? activePane : schedulePane;
+  const shorterHeight = Math.min(hActive, hSchedule);
+  const clampHeight = shorterHeight + 200;
+
+  // Only clamp if taller is actually significantly taller than target
+  if (taller.offsetHeight <= clampHeight) {
+    return;
+  }
+
+  taller.style.maxHeight = `${clampHeight}px`;
+  taller.classList.add("docket-pane-clamped");
+
+  const overlay = document.createElement("div");
+  overlay.className = "docket-overflow-overlay";
+  overlay.innerHTML = `
+    <button class="docket-toggle-btn is-down" type="button" aria-label="Show more">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+  `;
+
+  const btn = overlay.querySelector("button");
+  if (btn) {
+    btn.addEventListener("click", () => {
+      taller.classList.add("is-user-expanded");
+      taller.style.maxHeight = "";
+      taller.classList.remove("docket-pane-clamped");
+      overlay.remove();
+      ensureShowLess(taller);
+    });
+  }
+
+  taller.appendChild(overlay);
 }
 
 function patchVoteViews(scope: HTMLElement, liveVotes: Record<string, number>): void {
