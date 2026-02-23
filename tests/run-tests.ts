@@ -41,7 +41,11 @@ import {
   setCaseFiled,
   upsertAgent
 } from "../server/db/repository";
-import { createSessionEngine } from "../server/services/sessionEngine";
+import {
+  createSessionEngine,
+  JUDGE_SCREENING_MAX_RETRIES,
+  JUDGE_SCREENING_RETRY_DELAY_MS
+} from "../server/services/sessionEngine";
 import { createDrandClient } from "../server/services/drand";
 import {
   normalisePrincipleIds,
@@ -1387,6 +1391,117 @@ async function testDefenceCutoffVoiding() {
   db.close();
 }
 
+async function testJudgeScreeningQueuedRetryAndTerminalFailure() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_judge_retry.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-prosecution", true);
+  const draft = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    openDefence: true,
+    claimSummary: "Judge screening retry behaviour.",
+    requestedRemedy: "warn"
+  });
+  setCaseFiled(db, {
+    caseId: draft.caseId,
+    txSig: "tx-judge-retry",
+    scheduleDelaySec: 3600,
+    defenceCutoffSec: 2700
+  });
+
+  const seededNow = Date.now();
+  const seededIso = new Date(seededNow).toISOString();
+  db.prepare(
+    `UPDATE cases
+     SET court_mode = 'judge',
+         session_stage = 'judge_screening',
+         judge_screening_status = 'pending',
+         scheduled_for = NULL
+     WHERE case_id = ?`
+  ).run(draft.caseId);
+  db.prepare(
+    `UPDATE case_runtime
+     SET current_stage = 'judge_screening',
+         stage_started_at = ?,
+         stage_deadline_at = NULL
+     WHERE case_id = ?`
+  ).run(seededIso, draft.caseId);
+
+  let screenCalls = 0;
+  const engine = createSessionEngine({
+    db,
+    config,
+    drand: {
+      async getRoundAtOrAfter() {
+        return {
+          round: 1,
+          randomness: "stub",
+          chainInfo: {}
+        };
+      }
+    },
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined
+    } as any,
+    judge: {
+      async screenCase() {
+        screenCalls += 1;
+        throw new Error("judge unavailable");
+      },
+      async breakTiebreak(_input: unknown) {
+        return { finding: "not_proven" as const, reasoning: "stub" };
+      },
+      async recommendRemedy(_input: unknown) {
+        return "";
+      },
+      isAvailable() {
+        return false;
+      }
+    },
+    async onCaseReadyToClose() {
+      return;
+    }
+  });
+
+  const realNow = Date.now;
+  let fakeNow = seededNow;
+  Date.now = () => fakeNow;
+  try {
+    await engine.tickNow();
+    const firstPass = getCaseById(db, draft.caseId);
+    const firstRuntime = getCaseRuntime(db, draft.caseId);
+    assert.equal(firstPass?.judgeScreeningStatus, "pending_retry");
+    assert.equal(firstPass?.status, "filed");
+    assert.equal(firstRuntime?.currentStage, "judge_screening");
+    assert.equal(screenCalls, 1);
+
+    await engine.tickNow();
+    assert.equal(screenCalls, 1);
+
+    for (let attempt = 1; attempt < JUDGE_SCREENING_MAX_RETRIES; attempt += 1) {
+      fakeNow += JUDGE_SCREENING_RETRY_DELAY_MS + 1;
+      await engine.tickNow();
+    }
+
+    const finalCase = getCaseById(db, draft.caseId);
+    const finalRuntime = getCaseRuntime(db, draft.caseId);
+    assert.equal(finalCase?.status, "void");
+    assert.equal(finalCase?.voidReason, "judge_screening_failed");
+    assert.equal(finalCase?.judgeScreeningStatus, "failed");
+    assert.equal(finalRuntime?.currentStage, "void");
+    assert.equal(screenCalls, JUDGE_SCREENING_MAX_RETRIES);
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
+}
+
 function testVictoryScoreAndLeaderboard() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase41_leaderboard_test.sqlite";
@@ -1684,6 +1799,7 @@ async function run() {
   testDefenceClaimRace();
   testNamedDefendantExclusivity();
   await testDefenceCutoffVoiding();
+  await testJudgeScreeningQueuedRetryAndTerminalFailure();
   testVictoryScoreAndLeaderboard();
   testOpenDefenceQuery();
   testOpenClawToolContractParity();

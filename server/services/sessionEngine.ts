@@ -52,6 +52,13 @@ export interface SessionEngine {
 }
 
 const TICK_MS = 5000;
+export const JUDGE_SCREENING_RETRY_DELAY_MS = 30_000;
+export const JUDGE_SCREENING_MAX_RETRIES = 5;
+
+type JudgeScreeningRetryState = {
+  attempts: number;
+  nextAttemptAtMs: number;
+};
 
 function toIso(ms: number): string {
   return new Date(ms).toISOString();
@@ -329,7 +336,11 @@ function voidCase(
   }
 }
 
-async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Promise<void> {
+async function processCase(
+  deps: SessionEngineDeps,
+  caseRecord: CaseRecord,
+  judgeRetryState: Map<string, JudgeScreeningRetryState>
+): Promise<void> {
   const now = Date.now();
   const nowIso = toIso(now);
   const runtime = getCaseRuntime(deps.db, caseRecord.caseId);
@@ -339,7 +350,12 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
   }
 
   if (runtime.currentStage === "void" || caseRecord.status === "void") {
+    judgeRetryState.delete(caseRecord.caseId);
     return;
+  }
+
+  if (runtime.currentStage !== "judge_screening") {
+    judgeRetryState.delete(caseRecord.caseId);
   }
 
   // ── Judge screening stage (judge mode only) ────────────────────────────────
@@ -347,6 +363,15 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
     if (caseRecord.courtMode !== "judge") {
       // Safety: non-judge case shouldn't be in screening; advance to pre_session
       setStage(deps, caseRecord, "pre_session", nowIso, null);
+      return;
+    }
+
+    if (caseRecord.judgeScreeningStatus === "failed") {
+      return;
+    }
+
+    const retry = judgeRetryState.get(caseRecord.caseId);
+    if (retry && now < retry.nextAttemptAtMs) {
       return;
     }
 
@@ -402,8 +427,10 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
       });
 
       if (result.approved) {
+        judgeRetryState.delete(caseRecord.caseId);
         setStage(deps, caseRecord, "pre_session", nowIso, null);
       } else {
+        judgeRetryState.delete(caseRecord.caseId);
         voidCase(
           deps,
           caseRecord,
@@ -413,22 +440,58 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
         );
       }
     } catch (error) {
-      deps.logger.warn("judge_screening_fallback", {
+      const attempts = (retry?.attempts ?? 0) + 1;
+      const exhausted = attempts >= JUDGE_SCREENING_MAX_RETRIES;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      deps.logger.warn("judge_screening_retry_scheduled", {
         caseId: caseRecord.caseId,
-        error: error instanceof Error ? error.message : String(error)
+        attempts,
+        exhausted,
+        error: errorMessage
       });
 
-      // Fallback: auto-approve and advance (graceful degradation)
-      const maxCaseTitleChars = deps.config.limits.maxCaseTitleChars;
-      const fallbackCaseTitle = truncateCaseTitle(caseRecord.summary, maxCaseTitleChars);
+      const nextAttemptAtMs = now + JUDGE_SCREENING_RETRY_DELAY_MS;
+      const nextAttemptAtIso = toIso(nextAttemptAtMs);
       setCaseJudgeScreeningResult(deps.db, {
         caseId: caseRecord.caseId,
-        status: "approved",
-        reason: "Judge service unavailable; auto-approved via fallback.",
-        caseTitle: fallbackCaseTitle
+        status: exhausted ? "failed" : "pending_retry",
+        reason: exhausted
+          ? `Judge screening failed after ${attempts} attempts: ${errorMessage}`
+          : `Judge screening retry ${attempts}/${JUDGE_SCREENING_MAX_RETRIES} scheduled for ${nextAttemptAtIso}. Last error: ${errorMessage}`
       });
 
-      setStage(deps, caseRecord, "pre_session", nowIso, null);
+      appendTranscriptEvent(deps.db, {
+        caseId: caseRecord.caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage: "judge_screening",
+        messageText: exhausted
+          ? "Judge screening failed after repeated retries. The case has been voided."
+          : `Judge screening unavailable. Retry ${attempts}/${JUDGE_SCREENING_MAX_RETRIES} queued.`,
+        payload: {
+          attempts,
+          maxRetries: JUDGE_SCREENING_MAX_RETRIES,
+          nextRetryAtIso: exhausted ? null : nextAttemptAtIso,
+          error: errorMessage
+        }
+      });
+
+      if (exhausted) {
+        judgeRetryState.delete(caseRecord.caseId);
+        voidCase(
+          deps,
+          caseRecord,
+          "judge_screening_failed",
+          nowIso,
+          "Case became void because judge screening was unavailable after repeated retries."
+        );
+      } else {
+        judgeRetryState.set(caseRecord.caseId, {
+          attempts,
+          nextAttemptAtMs
+        });
+      }
     }
     return;
   }
@@ -587,6 +650,7 @@ async function processCase(deps: SessionEngineDeps, caseRecord: CaseRecord): Pro
 export function createSessionEngine(deps: SessionEngineDeps): SessionEngine {
   let timer: ReturnType<typeof setInterval> | null = null;
   let isRunning = false;
+  const judgeRetryState = new Map<string, JudgeScreeningRetryState>();
 
   const tickNow = async () => {
     if (isRunning) {
@@ -596,7 +660,7 @@ export function createSessionEngine(deps: SessionEngineDeps): SessionEngine {
     try {
       const candidates = listCasesByStatuses(deps.db, ["filed", "jury_selected", "voting"]);
       for (const caseRecord of candidates) {
-        await processCase(deps, caseRecord);
+        await processCase(deps, caseRecord, judgeRetryState);
       }
       const queuedJobs = listQueuedSealJobs(deps.db, {
         olderThanMinutes: 5,

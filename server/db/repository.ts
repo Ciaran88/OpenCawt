@@ -113,6 +113,9 @@ function toLearningVoidReasonGroup(reason?: CaseVoidReason): LearningVoidReasonG
   if (reason === "manual_void") {
     return "admin_void";
   }
+  if (reason === "judge_screening_failed" || reason === "judge_screening_rejected") {
+    return "admin_void";
+  }
   if (reason === "voting_timeout") {
     return "other_timeout";
   }
@@ -210,7 +213,7 @@ export interface CaseRecord {
   defendantNotifyUrl?: string;
   courtMode: CourtMode;
   caseTitle?: string;
-  judgeScreeningStatus?: "pending" | "approved" | "rejected";
+  judgeScreeningStatus?: "pending" | "pending_retry" | "approved" | "rejected" | "failed";
   judgeScreeningReason?: string;
   judgeRemedyRecommendation?: string;
 }
@@ -742,7 +745,12 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     courtMode: (String(row.court_mode ?? "11-juror") as CourtMode),
     caseTitle: row.case_title ? String(row.case_title) : undefined,
     judgeScreeningStatus: row.judge_screening_status
-      ? (String(row.judge_screening_status) as "pending" | "approved" | "rejected")
+      ? (String(row.judge_screening_status) as
+          | "pending"
+          | "pending_retry"
+          | "approved"
+          | "rejected"
+          | "failed")
       : undefined,
     judgeScreeningReason: row.judge_screening_reason
       ? String(row.judge_screening_reason)
@@ -2298,7 +2306,7 @@ export function setCaseJudgeScreeningResult(
   db: Db,
   input: {
     caseId: string;
-    status: "approved" | "rejected";
+    status: "pending_retry" | "approved" | "rejected" | "failed";
     reason?: string;
     caseTitle?: string;
   }
@@ -2310,7 +2318,7 @@ export function setCaseJudgeScreeningResult(
 
 export function setCaseRemedyRecommendation(db: Db, caseId: string, recommendation: string): void {
   db.prepare(`UPDATE cases SET judge_remedy_recommendation = ? WHERE case_id = ?`).run(
-    recommendation.slice(0, 500),
+    recommendation.slice(0, 1000),
     caseId
   );
 }

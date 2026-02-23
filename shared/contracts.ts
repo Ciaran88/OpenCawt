@@ -152,7 +152,8 @@ export type CaseVoidReason =
   | "voting_timeout"
   | "inconclusive_verdict"
   | "manual_void"
-  | "judge_screening_rejected";
+  | "judge_screening_rejected"
+  | "judge_screening_failed";
 
 export type Remedy = "warn" | "delist" | "ban" | "restitution" | "other" | "none";
 
