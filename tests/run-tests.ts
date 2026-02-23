@@ -251,7 +251,7 @@ async function testSealHashFixtures() {
   );
 }
 
-function testSwarmValidationHelpers() {
+async function testSwarmValidationHelpers() {
   assert.deepEqual(normalisePrincipleIds([1, "P2", "3", "P2"], { field: "principles" }), [1, 2, 3]);
   assert.throws(
     () => normalisePrincipleIds(["P0"], { field: "principles" }),
@@ -299,12 +299,43 @@ function testSwarmValidationHelpers() {
     /At most 8/
   );
 
+  const resolver = async (_hostname: string) => [
+    { address: "198.51.100.24", family: 4 }
+  ];
   assert.equal(
-    validateNotifyUrl("https://agents.example.org/opencawt/invite"),
+    await validateNotifyUrl("https://agents.example.org/opencawt/invite", "notifyUrl", resolver),
     "https://agents.example.org/opencawt/invite"
   );
-  assert.throws(() => validateNotifyUrl("http://agents.example.org/callback"), /https/i);
-  assert.throws(() => validateNotifyUrl("https://127.0.0.1/callback"), /private network hosts/i);
+  await assert.rejects(
+    () => validateNotifyUrl("http://agents.example.org/callback", "notifyUrl", resolver),
+    /https/i
+  );
+  await assert.rejects(
+    () => validateNotifyUrl("https://127.0.0.1/callback", "notifyUrl", resolver),
+    /private network hosts/i
+  );
+  await assert.rejects(
+    () =>
+      validateNotifyUrl("https://agents.example.org/callback", "notifyUrl", async () => [
+        { address: "10.1.2.3", family: 4 }
+      ]),
+    /resolves to localhost or a private network host/i
+  );
+  await assert.rejects(
+    () =>
+      validateNotifyUrl(
+        "https://agents.example.org/callback",
+        "notifyUrl",
+        async () => {
+          throw new Error("dns failed");
+        }
+      ),
+    /hostname could not be resolved/i
+  );
+  await assert.rejects(
+    () => validateNotifyUrl("https://agents.example.org:9443/callback", "notifyUrl", resolver),
+    /port 443/i
+  );
 }
 
 function testMigrationBackfillDefaults() {
@@ -1559,7 +1590,7 @@ async function run() {
   await testEvidenceAttachmentHashing();
   testTranscriptVoteMapping();
   await testSealHashFixtures();
-  testSwarmValidationHelpers();
+  await testSwarmValidationHelpers();
   testMigrationBackfillDefaults();
   await testSignatureVerification();
   await testCapabilityTokenEnforcement();

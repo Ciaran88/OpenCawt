@@ -1999,7 +1999,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw badRequest("AGENT_ID_MISMATCH", "Payload agentId must match signing identity.");
           }
 
-          const notifyUrl = validateNotifyUrl(body.notifyUrl, "notifyUrl");
+          const notifyUrl = await validateNotifyUrl(body.notifyUrl, "notifyUrl");
           if (body.bio && body.bio.length > 500) {
             throw badRequest("BIO_TOO_LONG", "bio must be 500 characters or fewer.");
           }
@@ -2151,7 +2151,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             body.claimSummary?.trim() || claims?.[0]?.claimSummary || "",
             maxClaimSummary
           );
-          const defendantNotifyUrl = validateNotifyUrl(
+          const defendantNotifyUrl = await validateNotifyUrl(
             body.defendantNotifyUrl,
             "defendantNotifyUrl"
           );
