@@ -2,8 +2,8 @@ import type { Case } from "../data/types";
 import { displayCaseLabel } from "../util/caseLabel";
 import { formatDashboardDateLabel } from "../util/format";
 import { escapeHtml } from "../util/html";
-import { renderCountdownRing } from "./countdownRing";
 import { renderLinkButton } from "./button";
+import { renderCountdownRing } from "./countdownRing";
 import { renderStatusPill, statusFromCase } from "./statusPill";
 
 function renderVoteMini(caseId: string, votesCast: number, jurySize: number): string {
@@ -42,49 +42,25 @@ export function renderCaseRow(
   }
 ): string {
   const votes = options.voteOverride ?? caseItem.voteSummary.votesCast;
-  const isScheduled = caseItem.status === "scheduled";
-
-  const countdownEndAtIso =
-    caseItem.countdownEndAtIso ?? caseItem.scheduledForIso;
-  const countdownTotalMs =
-    caseItem.countdownTotalMs ??
-    (caseItem.scheduledForIso && caseItem.createdAtIso
-      ? Math.max(
-          60_000,
-          new Date(caseItem.scheduledForIso).getTime() -
-            new Date(caseItem.createdAtIso).getTime()
-        )
-      : undefined);
-
-  let left: string;
-  if (options.showCountdown && countdownEndAtIso && countdownTotalMs) {
-    const ring = renderCountdownRing({
-      id: caseItem.id,
-      nowMs: options.nowMs,
-      endAtIso: countdownEndAtIso,
-      totalMs: countdownTotalMs
-    });
-    left = isScheduled
-      ? `<div class="countdown-col">${ring}${renderScheduledDefencePills(caseItem)}</div>`
-      : `<div class="countdown-col">${ring}</div>`;
-  } else {
-    left = `<div class="countdown-spacer" aria-hidden="true"></div>`;
-  }
-
   const dateLabel =
     caseItem.displayDateLabel ??
     formatDashboardDateLabel(caseItem.scheduledForIso ?? caseItem.createdAtIso);
-  const defenceLabel =
-    caseItem.defenceAgentId ??
-    (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence");
-  const defenceStateLabel =
-    caseItem.defenceAgentId
-      ? "Defence taken"
-      : caseItem.defendantAgentId
-        ? "Invited"
-        : "Open defence";
-  const defenceStateClass =
-    caseItem.defenceAgentId ? "status-sealed" : caseItem.defendantAgentId ? "status-closed" : "status-scheduled";
+  
+  const isActive = caseItem.status === "active";
+
+  let countdownHtml = "";
+  if (options.showCountdown && !isActive && caseItem.scheduledForIso) {
+    const endAt = new Date(caseItem.scheduledForIso).getTime();
+    const totalMs = caseItem.countdownTotalMs ?? (endAt - new Date(caseItem.createdAtIso).getTime());
+    const safeTotal = totalMs > 0 ? totalMs : 3600000;
+
+    countdownHtml = renderCountdownRing({
+      id: caseItem.id,
+      nowMs: options.nowMs,
+      endAtIso: caseItem.scheduledForIso,
+      totalMs: safeTotal
+    });
+  }
 
   const outOfPolicy = isOutOfPolicyWindow(caseItem.scheduledForIso, options.nowMs);
   const policyBadge = outOfPolicy
@@ -92,27 +68,29 @@ export function renderCaseRow(
     : "";
 
   return `
-    <article class="case-row card-surface" role="article">
-      ${left}
-      <div class="case-main">
-        <div class="case-idline">
-          <span class="case-id">${escapeHtml(displayCaseLabel(caseItem))}</span>
-          ${renderStatusPill(
-            caseItem.status === "active" ? "Active" : "Scheduled",
-            statusFromCase(caseItem.status)
-          )}
-          ${policyBadge}
+    <article class="case-card" role="article">
+      <div class="case-card-header">
+        <div class="case-id-group">
+          <span class="case-id">${escapeHtml(caseItem.id)}</span>
+          ${countdownHtml}
         </div>
+        ${renderStatusPill(
+            isActive ? "Active" : "Scheduled",
+            statusFromCase(caseItem.status)
+        )}
+      </div>
+      <div class="case-card-body">
         <p class="case-summary">${escapeHtml(caseItem.summary)}</p>
         <p class="case-date">${escapeHtml(dateLabel)}</p>
+        <div class="case-participants-mini">
+           <span><strong>P:</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
+           ${caseItem.defendantAgentId ? `<span><strong>D:</strong> ${escapeHtml(caseItem.defendantAgentId)}</span>` : ""}
+        </div>
       </div>
-      <div class="case-participants">
-        <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
-        <span><strong>Defence</strong> ${escapeHtml(defenceLabel)}</span>
-        ${isScheduled ? "" : `<span class="status-pill ${defenceStateClass}">${escapeHtml(defenceStateLabel)}</span>`}
+      ${isActive ? renderVoteMini(caseItem.id, votes, caseItem.voteSummary.jurySize) : ''}
+      <div class="case-card-footer">
+        ${renderLinkButton("Open Case", `/case/${encodeURIComponent(caseItem.id)}`, "secondary")}
       </div>
-      ${isScheduled ? `<div class="vote-mini-placeholder" aria-hidden="true"></div>` : renderVoteMini(caseItem.id, votes, caseItem.voteSummary.jurySize)}
-      <div class="case-actions">${renderLinkButton("Open", `/case/${encodeURIComponent(caseItem.id)}`, "pill-primary")}</div>
     </article>
   `;
 }

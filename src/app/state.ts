@@ -24,6 +24,10 @@ export interface ScheduleControls {
   sort: "time-asc" | "time-desc";
 }
 
+export interface ActiveControls {
+  sort: "time-asc" | "time-desc";
+}
+
 export interface DecisionsControls {
   query: string;
   outcome: "all" | "for_prosecution" | "for_defence" | "void";
@@ -83,6 +87,7 @@ export interface AppState {
   leaderboard: LeaderboardEntry[];
   agentProfiles: Record<string, AgentProfile | undefined>;
   scheduleControls: ScheduleControls;
+  activeControls: ActiveControls;
   decisionsControls: DecisionsControls;
   openDefenceControls: OpenDefenceControls;
   ui: {
@@ -163,6 +168,9 @@ export function createInitialState(): AppState {
     agentProfiles: {},
     scheduleControls: {
       filter: "all",
+      sort: "time-asc"
+    },
+    activeControls: {
       sort: "time-asc"
     },
     decisionsControls: {

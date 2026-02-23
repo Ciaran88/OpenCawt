@@ -1,172 +1,87 @@
 import { renderLinkButton } from "../components/button";
 import { renderEvidenceCard } from "../components/evidenceCard";
+import { renderJurorGrid, type JurorDetail } from "../components/jurorGrid";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
-import type { Decision, TranscriptEvent } from "../data/types";
-import { displayCaseLabel } from "../util/caseLabel";
+import type { Case, Decision, PartySubmissionPack, TranscriptEvent } from "../data/types";
 import { titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
-import { classifyAttachmentUrl } from "../util/media";
-import {
-  PROSECUTION_VOTE_PROMPT,
-  actorLabel,
-  collectVoteDisplayItems,
-  eventTimeLabel,
-  extractVoteAnswer,
-  extractVotePrompt,
-  isCourtSignpost,
-  stageLabel
-} from "../util/transcript";
-import { renderViewFrame } from "./common";
+import { renderPanelResizeButton, renderViewFrame } from "./common";
+import { renderTranscript } from "./caseDetailView";
 
-function renderClaimTallies(decision: Decision): string {
-  const tallies = decision.claimTallies ?? [
-    {
-      claimId: "c1",
-      proven: decision.voteSummary.tally.forProsecution,
-      notProven: decision.voteSummary.tally.forDefence,
-      insufficient: decision.voteSummary.tally.insufficient
-    }
-  ];
-
-  return `
-    <div class="claim-tally-grid">
-      ${tallies
-        .map(
-          (claim) => `
-            <article class="claim-tally-row">
-              <h4>${escapeHtml(claim.claimId)}</h4>
-              <p>Proven ${claim.proven}</p>
-              <p>Not proven ${claim.notProven}</p>
-              <p>Insufficient ${claim.insufficient}</p>
-            </article>
-          `
-        )
-        .join("")}
-    </div>
-  `;
+function renderPrinciples(principles: Array<number | string>): string {
+  return `<div class="principle-tags">${principles
+    .map((principle) => {
+      const label =
+        typeof principle === "number"
+          ? `P${principle}`
+          : /^P/i.test(principle.trim())
+            ? principle.trim().toUpperCase()
+            : `P${principle.trim()}`;
+      return `<span class="principle-tag">${escapeHtml(label)}</span>`;
+    })
+    .join("")}</div>`;
 }
 
-function renderTranscript(events: TranscriptEvent[]): string {
-  if (events.length === 0) {
-    return `<p class="muted">No transcript events available for this decision.</p>`;
-  }
-
-  const renderAttachments = (event: TranscriptEvent): string => {
-    const urls = Array.isArray(event.payload?.attachmentUrls)
-      ? event.payload.attachmentUrls.map((value) => String(value)).filter(Boolean)
-      : [];
-    if (urls.length === 0) {
-      return "";
-    }
-    return `
-      <div class="chat-attachments">
-        ${urls
-          .map((url, index) => {
-            const safeUrl = escapeHtml(url);
-            const label = `Attachment ${index + 1}`;
-            const kind = classifyAttachmentUrl(url);
-            if (kind === "image") {
-              return `<figure class="chat-attachment-media"><img src="${safeUrl}" alt="${escapeHtml(label)}" loading="lazy" /></figure>`;
-            }
-            if (kind === "video") {
-              return `<figure class="chat-attachment-media"><video src="${safeUrl}" controls preload="metadata"></video></figure>`;
-            }
-            if (kind === "audio") {
-              return `<div class="chat-attachment-media"><audio src="${safeUrl}" controls preload="none"></audio></div>`;
-            }
-            return `<a class="chat-attachment-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(
-              url
-            )}</a>`;
-          })
-          .join("")}
+function renderPartyColumn(label: string, pack: PartySubmissionPack): string {
+  return `
+    <article class="party-column glass-overlay">
+      <h3>${escapeHtml(label)}</h3>
+      <div class="content-block-card">
+        <h4>Opening addresses</h4>
+        <p>${escapeHtml(pack.openingAddress.text)}</p>
       </div>
-    `;
-  };
-
-  const voteItems = collectVoteDisplayItems(events);
-  const votePrompt =
-    events
-      .map((event) => extractVotePrompt(event))
-      .find((prompt): prompt is string => Boolean(prompt && prompt.trim())) ??
-    PROSECUTION_VOTE_PROMPT;
-
-  const voteFinish = voteItems.length
-    ? `
-      <section class="vote-finish-panel">
-        <h4>${escapeHtml(votePrompt)}</h4>
-        <div class="vote-finish-list">
-          ${voteItems
-            .map((item) => {
-              const answerLabel = item.answer === "yay" ? "Yay" : "Nay";
-              return `
-                <article class="vote-finish-bubble vote-${item.answer}">
-                  <header>
-                    <strong>${escapeHtml(item.jurorLabel)}</strong>
-                    <span>${escapeHtml(
-                      new Date(item.createdAtIso).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit"
-                      })
-                    )}</span>
-                  </header>
-                  <p class="vote-answer-chip vote-${item.answer}">${answerLabel}</p>
-                  ${item.reasoningSummary ? `<p>${escapeHtml(item.reasoningSummary)}</p>` : ""}
-                </article>
-              `;
-            })
-            .join("")}
+      <div class="content-block-card">
+        <h4>Evidence</h4>
+        <div class="evidence-grid">
+          ${pack.evidence.map((item) => renderEvidenceCard(item)).join("")}
         </div>
-      </section>
-    `
-    : "";
-
-  return `
-    <section class="case-transcript-primary glass-overlay">
-      <h3>Court session transcript</h3>
-      <div class="session-transcript-window" aria-label="Decision transcript">
-        ${events
-          .map((event) => {
-            if (isCourtSignpost(event)) {
-              return `
-                <div class="stage-signpost">
-                  <span>${escapeHtml(stageLabel(event.stage))}</span>
-                  <p>${escapeHtml(event.messageText)}</p>
-                </div>
-              `;
-            }
-            const roleClass = `role-${event.actorRole}`;
-            const voteAnswer = extractVoteAnswer(event);
-            const answerChip = voteAnswer
-              ? `<p class="vote-answer-chip vote-${voteAnswer}">${voteAnswer === "yay" ? "Yay" : "Nay"}</p>`
-              : "";
-            return `
-              <div class="session-row ${roleClass}">
-                <article class="session-bubble ${roleClass}${voteAnswer ? ` vote-${voteAnswer}` : ""}">
-                  <header>
-                    <strong>${escapeHtml(actorLabel(event))}</strong>
-                    <span>${escapeHtml(eventTimeLabel(event))}</span>
-                  </header>
-                  ${answerChip}
-                  <p>${escapeHtml(event.messageText)}</p>
-                  ${renderAttachments(event)}
-                </article>
-              </div>
-            `;
-          })
-          .join("")}
-        ${voteFinish}
       </div>
-    </section>
+      <div class="content-block-card">
+        <h4>Closing addresses</h4>
+        <p>${escapeHtml(pack.closingAddress.text)}</p>
+      </div>
+      <div class="content-block-card">
+        <h4>Summing up</h4>
+        <p>${escapeHtml(pack.summingUp.text)}</p>
+        ${renderPrinciples(pack.summingUp.principleCitations)}
+      </div>
+    </article>
   `;
 }
 
-export function renderDecisionDetailView(decision: Decision, transcript: TranscriptEvent[] = []): string {
-  const linkValue = (value: string): string => {
-    if (!/^https?:\/\//i.test(value)) {
-      return escapeHtml(value);
+function getMockJurorDetails(size: number, tally: { forProsecution: number; forDefence: number; insufficient: number }): JurorDetail[] {
+  const details: JurorDetail[] = [];
+  let p = tally.forProsecution;
+  // We can also use insufficient counts, but let's assume they map to Nay or just fill the rest
+  
+  for (let i = 0; i < size; i++) {
+    let vote: "yay" | "nay";
+    if (p > 0) {
+      vote = "yay";
+      p--;
+    } else {
+      vote = "nay";
+      // d-- or just consume rest
     }
-    return `<a href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`;
-  };
+    
+    details.push({
+      index: i,
+      status: "cast",
+      vote,
+      rationale: vote === "yay" 
+        ? "The evidence presented clearly links the defendant to the claim. The on-chain records match the timeline provided by the prosecution."
+        : "The prosecution failed to provide sufficient evidence of intent. The logs are ambiguous and could have been generated by a third party.",
+      principles: vote === "yay" ? ["P2 Evidence", "P8 Integrity"] : ["P5 Minimisation", "P9 Fair Process"]
+    });
+  }
+  return details;
+}
+
+export function renderDecisionDetailView(
+  decision: Decision,
+  caseItem?: Case | null,
+  transcript?: TranscriptEvent[]
+): string {
   const txLink =
     decision.sealInfo.txSig && decision.sealInfo.txSig !== "pending"
       ? `https://solscan.io/tx/${encodeURIComponent(decision.sealInfo.txSig)}`
@@ -176,124 +91,140 @@ export function renderDecisionDetailView(decision: Decision, transcript: Transcr
       ? `https://solscan.io/account/${encodeURIComponent(decision.sealInfo.assetId)}`
       : "";
 
-  const body = `
-    <details class="case-detail-collapse glass-overlay" open>
-      <summary class="case-detail-collapse-summary">Court session transcript</summary>
-      <div class="case-detail-collapse-body">
-        ${renderTranscript(transcript)}
-      </div>
-    </details>
-
-    <section class="detail-top">
-      <div>
+  const decisionHeader = `
+    <section class="case-header-card">
+      <div class="stack">
         <div class="case-idline">
-          <span class="case-id">${escapeHtml(displayCaseLabel(decision))}</span>
+          <span class="case-id">${escapeHtml(decision.caseId)}</span>
           ${renderStatusPill(titleCaseOutcome(decision.outcome), statusFromOutcome(decision.outcome))}
-          ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
         </div>
         <p>${escapeHtml(decision.summary)}</p>
-      </div>
-      <div>${renderLinkButton("Back to Past Decisions", "/past-decisions", "ghost")}</div>
-    </section>
-
-    <details class="case-detail-collapse glass-overlay" open>
-      <summary class="case-detail-collapse-summary">Decision record</summary>
-      <div class="case-detail-collapse-body">
-    <section class="record-grid">
-      <article class="record-card glass-overlay">
-        <h3>Verdict summary</h3>
-        <p>${escapeHtml(decision.verdictSummary)}</p>
-      </article>
-
-      <article class="record-card glass-overlay">
-        <h3>Vote tally per claim</h3>
-        ${renderClaimTallies(decision)}
-      </article>
-
-      <article class="record-card glass-overlay">
-        <h3>Selected evidence</h3>
-        <div class="evidence-grid">
-          ${decision.selectedEvidence.map((item) => renderEvidenceCard(item)).join("")}
+        <div>
+          <h4>Verdict summary</h4>
+          <p>${escapeHtml(decision.verdictSummary)}</p>
         </div>
-      </article>
-
-      <article class="record-card glass-overlay">
-        <h3>Sealing details</h3>
-        <dl class="key-value-list">
-          <div>
-            <dt>Asset ID</dt>
-            <dd>${assetLink ? `<a href="${assetLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.assetId)}</a>` : escapeHtml(decision.sealInfo.assetId)}</dd>
-          </div>
-          <div>
-            <dt>Tx sig</dt>
-            <dd>${txLink ? `<a href="${txLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.txSig)}</a>` : escapeHtml(decision.sealInfo.txSig)}</dd>
-          </div>
-          <div>
-            <dt>Verdict hash</dt>
-            <dd>${escapeHtml(decision.sealInfo.verdictHash)}</dd>
-          </div>
-          <div>
-            <dt>URI</dt>
-            <dd>${escapeHtml(decision.sealInfo.sealedUri)}</dd>
-          </div>
-          <div>
-            <dt>Metadata URI</dt>
-            <dd>${linkValue(decision.metadataUri ?? decision.sealInfo.metadataUri ?? "Pending")}</dd>
-          </div>
-          <div>
-            <dt>Seal status</dt>
-            <dd>${escapeHtml(decision.sealStatus ?? decision.sealInfo.sealStatus ?? "pending")}</dd>
-          </div>
-        </dl>
-      </article>
-
-      <article class="record-card glass-overlay">
-        <h3>Verification details</h3>
-        <dl class="key-value-list">
-          <div>
-            <dt>Treasury tx signature</dt>
-            <dd>${escapeHtml(decision.filingProof?.treasuryTxSig ?? "Pending")}</dd>
-          </div>
-          <div>
-            <dt>Payer wallet</dt>
-            <dd>${escapeHtml(decision.filingProof?.payerWallet ?? "Not recorded")}</dd>
-          </div>
-          <div>
-            <dt>Verified amount</dt>
-            <dd>${escapeHtml(
-              typeof decision.filingProof?.amountLamports === "number"
-                ? `${decision.filingProof.amountLamports} lamports`
-                : "Not recorded"
-            )}</dd>
-          </div>
-          <div>
-            <dt>Public URI</dt>
-            <dd>${linkValue(decision.sealInfo.sealedUri)}</dd>
-          </div>
-          <div>
-            <dt>Transcript root hash</dt>
-            <dd>${escapeHtml(
-              decision.transcriptRootHash ?? decision.sealInfo.transcriptRootHash ?? "Pending"
-            )}</dd>
-          </div>
-          <div>
-            <dt>Jury proof hash</dt>
-            <dd>${escapeHtml(
-              decision.jurySelectionProofHash ?? decision.sealInfo.jurySelectionProofHash ?? "Pending"
-            )}</dd>
-          </div>
-        </dl>
-      </article>
-    </section>
       </div>
-    </details>
+    </section>
+  `;
+
+  const leftPanel = `
+    <div class="panel-container">
+      <div class="panel-header">
+        <span>Parties</span>
+        ${renderPanelResizeButton("left")}
+      </div>
+      <div class="panel-body">
+        <div class="stack">
+          ${caseItem ? `
+            ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
+            ${renderPartyColumn("Defence", caseItem.parties.defence)}
+          ` : `
+            <p class="muted">Full case details archived.</p>
+          `}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const middlePanel = `
+    <div class="panel-container">
+      <div class="panel-header">Court Transcript</div>
+      <div class="panel-body">
+         ${renderTranscript(transcript || [])}
+      </div>
+    </div>
+  `;
+
+  const primaryClaim = decision.claimTallies?.[0];
+  const effectiveTally = primaryClaim
+    ? {
+        forProsecution: primaryClaim.proven,
+        forDefence: primaryClaim.notProven,
+        insufficient: primaryClaim.insufficient
+      }
+    : decision.voteSummary.tally;
+
+  const rightPanel = `
+    <div class="panel-container">
+      <div class="panel-header">
+        <span>Jury Panel</span>
+        ${renderPanelResizeButton("right")}
+      </div>
+      <div class="panel-body">
+        <div class="stack">
+          ${renderJurorGrid({
+            caseId: decision.caseId,
+            jurySize: decision.voteSummary.jurySize,
+            votesCast: decision.voteSummary.votesCast,
+            jurorDetails: getMockJurorDetails(decision.voteSummary.jurySize, effectiveTally),
+            completedTally: {
+              proven: effectiveTally.forProsecution,
+              notProven: effectiveTally.forDefence,
+              insufficient: effectiveTally.insufficient,
+            },
+          })}
+
+          <article class="record-card glass-overlay">
+            <h3>Selected evidence</h3>
+            <div class="evidence-grid">
+              ${decision.selectedEvidence.map((item) => renderEvidenceCard(item)).join("")}
+            </div>
+          </article>
+
+          <article class="record-card glass-overlay">
+            <h3>Sealing details</h3>
+            <dl class="key-value-list">
+              <div>
+                <dt>Asset ID</dt>
+                <dd>${assetLink ? `<a href="${assetLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.assetId)}</a>` : escapeHtml(decision.sealInfo.assetId)}</dd>
+              </div>
+              <div>
+                <dt>Tx sig</dt>
+                <dd>${txLink ? `<a href="${txLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.txSig)}</a>` : escapeHtml(decision.sealInfo.txSig)}</dd>
+              </div>
+              <div>
+                <dt>Verdict hash</dt>
+                <dd>${escapeHtml(decision.sealInfo.verdictHash)}</dd>
+              </div>
+              <div>
+                <dt>URI</dt>
+                <dd>${escapeHtml(decision.sealInfo.sealedUri)}</dd>
+              </div>
+              <div>
+                <dt>Seal status</dt>
+                <dd>${escapeHtml(decision.sealStatus ?? decision.sealInfo.sealStatus ?? "pending")}</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const body = `
+    <div class="navigation-row">
+      ${renderLinkButton("← Back to Past Decisions", "/past-decisions", "ghost")}
+    </div>
+    ${decisionHeader}
+    <div class="case-view-layout">
+      <div class="case-panel-col">
+        ${leftPanel}
+      </div>
+      <div class="case-panel-col">
+        ${middlePanel}
+      </div>
+      <div class="case-panel-col">
+        ${rightPanel}
+      </div>
+    </div>
   `;
 
   return renderViewFrame({
     title: "Decision Detail",
     subtitle: "Recorded verdict summary with sealed receipt hashes and on-chain verification artefacts.",
     ornament: "Public Record",
-    body
+    body,
+    className: "case-layout"
   });
 }
 

@@ -1,11 +1,9 @@
 import type { AppState } from "../app/state";
 import { renderCaseList } from "../components/caseList";
 import { renderKpiStatCard } from "../components/kpiStatCard";
-import { renderSegmentedControl } from "../components/segmentedControl";
+import { renderFilterDropdown } from "../components/filterDropdown";
 import type { Case } from "../data/types";
-import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
-import { renderViewFrame } from "./common";
 
 function byTimeAsc(a: Case, b: Case): number {
   const aTime = a.scheduledForIso
@@ -74,7 +72,7 @@ function renderOpenDefenceRows(state: AppState): string {
         <article class="case-row card-surface open-defence-row">
           <div class="case-main">
             <div class="case-idline">
-              <span class="case-id">${escapeHtml(displayCaseLabel(item))}</span>
+              <span class="case-id">${escapeHtml(item.caseId)}</span>
               ${badge}
             </div>
             <p class="case-summary">${escapeHtml(item.summary)}</p>
@@ -96,58 +94,83 @@ function renderOpenDefenceRows(state: AppState): string {
 
 function renderDocketControls(state: AppState): string {
   return `
-    <section class="toolbar toolbar-compact glass-surface">
-      ${renderSegmentedControl({
+      ${renderFilterDropdown({
         label: "Status",
         action: "schedule-filter",
         selected: state.scheduleControls.filter,
         list: [
-          { value: "all", label: "All" },
+          { value: "all", label: "All Cases" },
           { value: "scheduled", label: "Scheduled" },
           { value: "active", label: "Active" }
         ]
       })}
-      ${renderSegmentedControl({
+      ${renderFilterDropdown({
         label: "Sort",
         action: "schedule-sort",
         selected: state.scheduleControls.sort,
         list: [
-          { value: "time-asc", label: "Soonest" },
-          { value: "time-desc", label: "Latest" }
+          { value: "time-asc", label: "Soonest First" },
+          { value: "time-desc", label: "Latest First" }
         ]
       })}
-    </section>
+  `;
+}
+
+function renderActiveControls(state: AppState): string {
+  return `
+      ${renderFilterDropdown({
+        label: "Sort",
+        action: "active-sort",
+        selected: state.activeControls.sort,
+        list: [
+          { value: "time-asc", label: "Soonest First" },
+          { value: "time-desc", label: "Latest First" }
+        ]
+      })}
   `;
 }
 
 function renderDocketSections(state: AppState): string {
   const { filter, sort } = state.scheduleControls;
+  const activeSort = state.activeControls.sort;
   const scheduledBase = sortCases(state.schedule.scheduled, sort);
-  const activeBase = sortCases(state.schedule.active, sort);
+  const activeBase = sortCases(state.schedule.active, activeSort);
 
   const scheduled = filter === "active" ? [] : scheduledBase;
   const active = filter === "scheduled" ? [] : activeBase;
+  
+  const docketControls = renderDocketControls(state);
+  const activeControls = renderActiveControls(state);
+
+  const activeHtml = renderCaseList({
+    title: "Active",
+    subtitle: `${active.length} live`,
+    cases: active,
+    nowMs: state.nowMs,
+    showCountdown: false,
+    voteOverrides: state.liveVotes,
+    controls: activeControls,
+    splitHeader: true
+  });
+
+  const scheduleHtml = renderCaseList({
+    title: "Court schedule",
+    subtitle: "",
+    cases: scheduled,
+    nowMs: state.nowMs,
+    showCountdown: true,
+    voteOverrides: state.liveVotes,
+    controls: docketControls,
+    splitHeader: true
+  });
 
   return `
     <section class="dashboard-docket-stack">
-      ${renderDocketControls(state)}
-      ${renderCaseList({
-        title: "Court schedule",
-        subtitle: `${scheduled.length} listed`,
-        cases: scheduled,
-        nowMs: state.nowMs,
-        showCountdown: true,
-        voteOverrides: state.liveVotes
-      })}
-      ${renderCaseList({
-        title: "Active",
-        subtitle: `${active.length} live`,
-        cases: active,
-        nowMs: state.nowMs,
-        showCountdown: false,
-        voteOverrides: state.liveVotes
-      })}
-      <section class="toolbar open-defence-toolbar glass-surface">
+      <div class="docket-split-row">
+        <div class="active-cases-pane">${activeHtml}</div>
+        <div class="court-schedule-pane">${scheduleHtml}</div>
+      </div>
+      <section class="toolbar open-defence-toolbar">
         <h3>Open defence</h3>
         <label class="search-field" aria-label="Search open defence cases">
           <span class="segmented-label">Search</span>
@@ -161,23 +184,23 @@ function renderDocketSections(state: AppState): string {
             state.openDefenceControls.tag
           )}" />
         </label>
-        ${renderSegmentedControl({
+        ${renderFilterDropdown({
           label: "Sort",
           action: "open-defence-sort",
           selected: state.openDefenceControls.timeSort,
           list: [
-            { value: "soonest", label: "Soonest" },
-            { value: "latest", label: "Latest" }
+            { value: "soonest", label: "Soonest First" },
+            { value: "latest", label: "Latest First" }
           ]
         })}
-        ${renderSegmentedControl({
+        ${renderFilterDropdown({
           label: "Start",
           action: "open-defence-window",
           selected: state.openDefenceControls.startWindow,
           list: [
-            { value: "all", label: "Any" },
-            { value: "next-2h", label: "2h" },
-            { value: "next-6h", label: "6h" }
+            { value: "all", label: "Any Time" },
+            { value: "next-2h", label: "Next 2 Hours" },
+            { value: "next-6h", label: "Next 6 Hours" }
           ]
         })}
         <p class="toolbar-note">First accepted defence assignment wins. Named defendants have a short exclusive window before open volunteering applies.</p>
@@ -189,21 +212,12 @@ function renderDocketSections(state: AppState): string {
 
 export function renderScheduleView(state: AppState): string {
   const dashboard = state.dashboardSnapshot;
-  const kpiBlock = `
+  return `
     <section class="dashboard-grid">
       <div class="dashboard-kpi-grid">
         ${dashboard.kpis.map((item) => renderKpiStatCard(item)).join("")}
       </div>
     </section>
+    ${renderDocketSections(state)}
   `;
-
-  return renderViewFrame({
-    title: "",
-    subtitle: "",
-    ornament: "",
-    body: `${kpiBlock}
-    <div class="frieze">COURT SCHEDULE</div>
-    ${renderDocketSections(state)}`,
-    className: "schedule-frame"
-  });
 }

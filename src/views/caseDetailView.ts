@@ -1,25 +1,13 @@
 import type { AppState } from "../app/state";
 import { renderLinkButton, renderPrimaryPillButton } from "../components/button";
-import { renderCourtProtocolPanel } from "../components/courtProtocolPanel";
 import { renderEvidenceCard } from "../components/evidenceCard";
 import { renderJurorGrid } from "../components/jurorGrid";
 import { renderStatusPill, statusFromCase } from "../components/statusPill";
 import { renderStepper } from "../components/stepper";
-import type { Case, PartySubmissionPack, RuleLimits, SessionStage, TranscriptEvent } from "../data/types";
-import { displayCaseLabel } from "../util/caseLabel";
+import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { classifyAttachmentUrl } from "../util/media";
-import {
-  PROSECUTION_VOTE_PROMPT,
-  actorLabel,
-  collectVoteDisplayItems,
-  eventTimeLabel,
-  extractVoteAnswer,
-  extractVotePrompt,
-  isCourtSignpost,
-  stageLabel
-} from "../util/transcript";
-import { renderViewFrame } from "./common";
+import { renderPanelResizeButton, renderViewFrame } from "./common";
 
 function renderPrinciples(principles: Array<number | string>): string {
   return `<div class="principle-tags">${principles
@@ -39,27 +27,34 @@ function renderPartyColumn(label: string, pack: PartySubmissionPack): string {
   return `
     <article class="party-column glass-overlay">
       <h3>${escapeHtml(label)}</h3>
-      <section>
+      <div class="content-block-card">
         <h4>Opening addresses</h4>
         <p>${escapeHtml(pack.openingAddress.text)}</p>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Evidence</h4>
         <div class="evidence-grid">
           ${pack.evidence.map((item) => renderEvidenceCard(item)).join("")}
         </div>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Closing addresses</h4>
         <p>${escapeHtml(pack.closingAddress.text)}</p>
-      </section>
-      <section>
+      </div>
+      <div class="content-block-card">
         <h4>Summing up</h4>
         <p>${escapeHtml(pack.summingUp.text)}</p>
         ${renderPrinciples(pack.summingUp.principleCitations)}
-      </section>
+      </div>
     </article>
   `;
+}
+
+function toStageLabel(stage?: SessionStage): string {
+  if (!stage) {
+    return "Pre-session";
+  }
+  return stage.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function timeRemainingLabel(nowMs: number, iso?: string): string {
@@ -79,7 +74,7 @@ function timeRemainingLabel(nowMs: number, iso?: string): string {
   return `${remMins}m remaining`;
 }
 
-function renderTranscript(events: TranscriptEvent[]): string {
+export function renderTranscript(events: TranscriptEvent[]): string {
   if (events.length === 0) {
     return `<p class="muted">No transcript events yet.</p>`;
   }
@@ -118,89 +113,31 @@ function renderTranscript(events: TranscriptEvent[]): string {
     `;
   };
 
-  const voteItems = collectVoteDisplayItems(events);
-  const votePrompt =
-    events
-      .map((event) => extractVotePrompt(event))
-      .find((prompt): prompt is string => Boolean(prompt && prompt.trim())) ??
-    PROSECUTION_VOTE_PROMPT;
-
-  const voteFinish = voteItems.length
-    ? `
-      <section class="vote-finish-panel">
-        <h4>${escapeHtml(votePrompt)}</h4>
-        <div class="vote-finish-list">
-          ${voteItems
-            .map((item) => {
-              const answerLabel = item.answer === "yay" ? "Yay" : "Nay";
-              return `
-                <article class="vote-finish-bubble vote-${item.answer}">
-                  <header>
-                    <strong>${escapeHtml(item.jurorLabel)}</strong>
-                    <span>${escapeHtml(
-                      new Date(item.createdAtIso).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit"
-                      })
-                    )}</span>
-                  </header>
-                  <p class="vote-answer-chip vote-${item.answer}">${answerLabel}</p>
-                  ${item.reasoningSummary ? `<p>${escapeHtml(item.reasoningSummary)}</p>` : ""}
-                </article>
-              `;
-            })
-            .join("")}
-        </div>
-      </section>
-    `
-    : "";
-
   return `
-    <section id="case-transcript-block" class="case-transcript-primary glass-overlay">
-      <h3>Court session transcript</h3>
-      <div id="session-transcript-window" class="session-transcript-window" aria-label="Case transcript">
+    <div class="transcript-window" aria-label="Case transcript">
       ${events
         .map((event) => {
-          if (isCourtSignpost(event)) {
-            return `
-              <div class="stage-signpost">
-                <span>${escapeHtml(stageLabel(event.stage))}</span>
-                <p>${escapeHtml(event.messageText)}</p>
-              </div>
-            `;
-          }
-
           const roleClass = `role-${event.actorRole}`;
-          const voteAnswer = extractVoteAnswer(event);
-          const answerChip = voteAnswer
-            ? `<p class="vote-answer-chip vote-${voteAnswer}">${voteAnswer === "yay" ? "Yay" : "Nay"}</p>`
-            : "";
           return `
-            <div class="session-row ${roleClass}">
-            <article class="session-bubble ${roleClass}${voteAnswer ? ` vote-${voteAnswer}` : ""}">
+            <article class="chat-bubble ${roleClass}">
               <header>
-                <strong>${escapeHtml(actorLabel(event))}</strong>
-                <span>${escapeHtml(eventTimeLabel(event))}</span>
+                <strong>${escapeHtml(event.actorRole)}</strong>
+                <span>${escapeHtml(new Date(event.createdAtIso).toLocaleTimeString())}</span>
               </header>
-              ${answerChip}
               <p>${escapeHtml(event.messageText)}</p>
               ${renderAttachments(event)}
             </article>
-            </div>
           `;
         })
         .join("")}
-      ${voteFinish}
-      </div>
-    </section>
+    </div>
   `;
 }
 
-function renderEvidenceSubmissionForm(
+export function renderEvidenceSubmissionForm(
   caseId: string,
   stage: SessionStage | undefined,
-  disabled: boolean,
-  limits: RuleLimits
+  disabled: boolean
 ): string {
   if (stage !== "evidence") {
     return "";
@@ -225,8 +162,7 @@ function renderEvidenceSubmissionForm(
         </label>
         <label>
           <span>Evidence text</span>
-          <textarea name="bodyText" rows="3" placeholder="Describe this evidence item" maxlength="${limits.maxEvidenceCharsPerItem}" data-max-chars="${limits.maxEvidenceCharsPerItem}"></textarea>
-          <small class="char-limit" data-char-counter-for="bodyText">0 / ${limits.maxEvidenceCharsPerItem} characters</small>
+          <textarea name="bodyText" rows="3" placeholder="Describe this evidence item"></textarea>
         </label>
         <label>
           <span>Attachment URLs (https only, comma or newline separated)</span>
@@ -266,11 +202,10 @@ function renderEvidenceSubmissionForm(
   `;
 }
 
-function renderStageMessageForm(
+export function renderStageMessageForm(
   caseId: string,
   stage: SessionStage | undefined,
-  disabled: boolean,
-  limits: RuleLimits
+  disabled: boolean
 ): string {
   const allowed = stage && ["opening_addresses", "evidence", "closing_addresses", "summing_up"].includes(stage);
   if (!allowed) {
@@ -293,8 +228,7 @@ function renderStageMessageForm(
         </label>
         <label>
           <span>Message</span>
-          <textarea name="text" rows="3" placeholder="Stage message" maxlength="${limits.maxSubmissionCharsPerPhase}" data-max-chars="${limits.maxSubmissionCharsPerPhase}"></textarea>
-          <small class="char-limit" data-char-counter-for="text">0 / ${limits.maxSubmissionCharsPerPhase} characters</small>
+          <textarea name="text" rows="3" placeholder="Stage message"></textarea>
         </label>
         <label>
           <span>Principle citations (comma separated)</span>
@@ -308,7 +242,7 @@ function renderStageMessageForm(
   `;
 }
 
-function renderReadinessForm(caseId: string, stage: SessionStage | undefined, disabled: boolean): string {
+export function renderReadinessForm(caseId: string, stage: SessionStage | undefined, disabled: boolean): string {
   if (stage !== "jury_readiness") {
     return "";
   }
@@ -447,300 +381,122 @@ export function renderCaseDetailView(
   agentConnection: { status: "observer" | "connected" | "error" }
 ): string {
   const liveVotes = state.liveVotes[caseItem.id] ?? caseItem.voteSummary.votesCast;
-  const claimId = `${caseItem.id}-c1`;
   const session = state.caseSessions[caseItem.id] ?? caseItem.session;
   const transcript = state.transcripts[caseItem.id] ?? [];
   const observerMode = agentConnection.status !== "connected";
 
-  const scheduledMs = caseItem.scheduledForIso ? new Date(caseItem.scheduledForIso).getTime() : 0;
-  const outOfPolicyWindow = scheduledMs > 0 && (scheduledMs - state.nowMs) > 30 * 24 * 60 * 60 * 1000;
-  const policyBadge = outOfPolicyWindow
-    ? `<span class="status-pill status-out-of-policy" title="Hearing date is outside the standard 7–30 day scheduling window. Policy exception active.">Policy exception</span>`
-    : "";
-  const policyBanner = outOfPolicyWindow
-    ? `<aside class="policy-exception-banner">
-        <strong>Policy exception active.</strong> This case is scheduled for ${escapeHtml(caseItem.scheduledForIso ?? "")} — outside the standard 7–30 day window. Override granted by Demo Authority. This notice must remain visible across all views.
-      </aside>`
-    : "";
-
-  const top = `
-    <section id="case-detail-top" class="detail-top">
-      <div>
-        <div class="case-idline">
-          <span class="case-id">${escapeHtml(displayCaseLabel(caseItem))}</span>
-          ${renderStatusPill(
-            caseItem.status === "active" ? "Active" : "Scheduled",
-            statusFromCase(caseItem.status)
-          )}
-          ${policyBadge}
+  const caseHeader = `
+    <section class="case-header-card">
+      <div class="case-header-main">
+        <div class="case-header-title-block">
+          <div class="case-idline">
+            <span class="case-id">${escapeHtml(caseItem.id)}</span>
+            ${renderStatusPill(
+              caseItem.status === "active" ? "Active" : "Scheduled",
+              statusFromCase(caseItem.status)
+            )}
+          </div>
+          <p>${escapeHtml(caseItem.summary)}</p>
         </div>
-        <p>${escapeHtml(caseItem.summary)}</p>
-        ${policyBanner}
+        <div class="case-header-timer-block">
+           <span class="status-pill status-scheduled">${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
+        </div>
       </div>
-      <div class="detail-meta">
-        <span><strong>Prosecution</strong> ${escapeHtml(caseItem.prosecutionAgentId)}</span>
-        <span><strong>Defence</strong> ${escapeHtml(
+      
+      <div class="case-header-details">
+        <div><strong>Prosecution</strong> <span>${escapeHtml(caseItem.prosecutionAgentId)}</span></div>
+        <div><strong>Defence</strong> <span>${escapeHtml(
           caseItem.defenceAgentId ??
             (caseItem.defendantAgentId ? `Invited: ${caseItem.defendantAgentId}` : "Open defence")
-        )}</span>
-        <span><strong>Defence state</strong> ${escapeHtml(caseItem.defenceState ?? "none")}</span>
+        )}</span></div>
         ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Invite delivery</strong> ${escapeHtml(caseItem.defenceInviteStatus ?? "none")} (${escapeHtml(String(caseItem.defenceInviteAttempts ?? 0))} attempts)</span>`
+          caseItem.defenceState && caseItem.defenceState !== "none" 
+            ? `<div><strong>Defence state</strong> <span>${escapeHtml(caseItem.defenceState)}</span></div>` 
             : ""
         }
-        ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Response deadline</strong> ${escapeHtml(caseItem.defenceWindowDeadlineIso ?? "Not set")}</span>`
-            : ""
-        }
-        ${
-          caseItem.defendantAgentId
-            ? `<span><strong>Session start rule</strong> Starts 1 hour after defence acceptance</span>`
-            : ""
-        }
-        <span><strong>Stage</strong> ${escapeHtml(stageLabel(session?.currentStage))}</span>
-        <span><strong>Timer</strong> ${escapeHtml(timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso || session?.votingHardDeadlineAtIso || session?.scheduledSessionStartAtIso))}</span>
-        ${
-          !caseItem.defenceAgentId
-            ? `<button class="btn btn-primary" data-action="open-defence-volunteer" data-case-id="${escapeHtml(caseItem.id)}" ${observerMode ? "disabled" : ""}>Volunteer as defence</button>`
-            : ""
-        }
-        ${renderLinkButton("Back to Schedule", "/schedule", "ghost")}
+        <div><strong>Stage</strong> <span>${escapeHtml(toStageLabel(session?.currentStage))}</span></div>
       </div>
+
+      ${renderStepper(caseItem.currentPhase)}
     </section>
   `;
 
-  const body = `
-    ${top}
-    ${!observerMode ? renderCourtProtocolPanel() : ""}
-    ${renderTranscript(transcript)}
-    <details id="case-session-controls" class="case-detail-collapse glass-overlay">
-      <summary class="case-detail-collapse-summary">Session controls and actions</summary>
-      <div class="case-detail-collapse-body stack">
-        ${renderStepper(caseItem.currentPhase)}
-        ${renderJurorGrid({
-          caseId: caseItem.id,
-          jurySize: caseItem.voteSummary.jurySize,
-          votesCast: liveVotes
-        })}
-        ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
-        ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode, state.ruleLimits)}
-        ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode, state.ruleLimits)}
-        ${
-          caseItem.status === "active"
-            ? `
-          <section class="form-card glass-overlay">
-            <h3>Juror ballot</h3>
-            <p>Ballots require a two to three sentence reasoning summary and one to three relied-on principles.</p>
-            <form id="submit-ballot-form" class="stack">
-              <fieldset ${observerMode ? "disabled" : ""}>
-              <input type="hidden" name="caseId" value="${escapeHtml(caseItem.id)}" />
-              <input type="hidden" name="claimId" value="${escapeHtml(claimId)}" />
-              <label>
-                <span>Finding</span>
-                <select name="finding">
-                  <option value="proven">Proven</option>
-                  <option value="not_proven">Not proven</option>
-                  <option value="insufficient">Insufficient</option>
-                </select>
-              </label>
-              <label>
-                <span>Reasoning summary</span>
-                <textarea name="reasoningSummary" rows="4" placeholder="Provide two to three sentences for your reasoning" minlength="${state.ruleLimits.ballotReasoningMinChars}" maxlength="${state.ruleLimits.ballotReasoningMaxChars}" data-max-chars="${state.ruleLimits.ballotReasoningMaxChars}" data-min-chars="${state.ruleLimits.ballotReasoningMinChars}"></textarea>
-                <small class="char-limit" data-char-counter-for="reasoningSummary">0 / ${state.ruleLimits.ballotReasoningMaxChars} characters (min ${state.ruleLimits.ballotReasoningMinChars})</small>
-              </label>
-              <label>
-                <span>Principles relied on</span>
-                <select name="principlesReliedOn" multiple size="6">
-                  <option value="1">1. Truthfulness and Non-Deception</option>
-                  <option value="2">2. Evidence and Reproducibility</option>
-                  <option value="3">3. Scope Fidelity (Intent Alignment)</option>
-                  <option value="4">4. Least Power and Minimal Intrusion</option>
-                  <option value="5">5. Harm Minimisation Under Uncertainty</option>
-                  <option value="6">6. Rights and Dignity Preservation</option>
-                  <option value="7">7. Privacy and Data Minimisation</option>
-                  <option value="8">8. Integrity of Records and Provenance</option>
-                  <option value="9">9. Fair Process and Steelmanning</option>
-                  <option value="10">10. Conflict of Interest Disclosure</option>
-                  <option value="11">11. Capability Honesty and Calibration</option>
-                  <option value="12">12. Accountability and Corrective Action</option>
-                </select>
-              </label>
-              <label>
-                <span>Confidence (optional)</span>
-                <select name="confidence">
-                  <option value="">Not set</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </label>
-              <label>
-                <span>Overall vote label (optional)</span>
-                <select name="vote">
-                  <option value="">Not set</option>
-                  <option value="for_prosecution">For prosecution</option>
-                  <option value="for_defence">For defence</option>
-                </select>
-              </label>
-              ${!observerMode ? `
-              <details class="ml-advanced-drawer">
-                <summary class="ml-advanced-summary">Advanced signal capture</summary>
-                <div class="ml-advanced-body stack">
-                  <p class="muted" style="font-size:0.78rem">Optional ethics signals for offline analysis. All fields default to null and do not affect the verdict.</p>
-                  <fieldset class="ml-principle-grid" style="border:none;padding:0;margin:0">
-                    <legend style="font-size:0.78rem;color:var(--ink-muted);margin-bottom:var(--space-1)">Principle importance (0 not used · 1 minor · 2 important · 3 decisive)</legend>
-                    <div class="ml-pi-row">
-                      ${[1,2,3,4,5,6,7,8,9,10,11,12].map((n) =>
-                        `<label class="ml-pi-cell"><span class="ml-pi-label">P${n}</span><input type="number" name="ml_pi_${n}" min="0" max="3" value="" placeholder="–" class="ml-pi-input" /></label>`
-                      ).join("")}
-                    </div>
-                  </fieldset>
-                  <label><span>Most decisive principle (optional, 1–12)</span>
-                    <input type="number" name="ml_decisive_principle" min="1" max="12" placeholder="–" />
-                  </label>
-                  <label><span>Juror confidence</span>
-                    <select name="ml_confidence">
-                      <option value="">Not set</option>
-                      <option value="0">0 – Low</option>
-                      <option value="1">1 – Medium</option>
-                      <option value="2">2 – High</option>
-                      <option value="3">3 – Very high</option>
-                    </select>
-                  </label>
-                  <label><span>Uncertainty type</span>
-                    <select name="ml_uncertainty_type">
-                      <option value="">Not set</option>
-                      <option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option>
-                      <option value="CONFLICTING_EVIDENCE">Conflicting evidence</option>
-                      <option value="UNCLEAR_HARM">Unclear harm</option>
-                      <option value="UNCLEAR_INTENT">Unclear intent</option>
-                      <option value="AMBIGUOUS_PRINCIPLE_MAPPING">Ambiguous principle mapping</option>
-                      <option value="PROCEDURAL_IRREGULARITY">Procedural irregularity</option>
-                      <option value="OTHER">Other</option>
-                    </select>
-                  </label>
-                  <label><span>Severity (0 trivial · 1 mild · 2 material · 3 severe)</span>
-                    <select name="ml_severity">
-                      <option value="">Not set</option>
-                      <option value="0">0 – Trivial</option>
-                      <option value="1">1 – Mild</option>
-                      <option value="2">2 – Material</option>
-                      <option value="3">3 – Severe</option>
-                    </select>
-                  </label>
-                  <label><span>Harm domains (hold Ctrl/Cmd to select multiple)</span>
-                    <select name="ml_harm_domains" multiple size="4">
-                      <option value="INFORMATIONAL">Informational</option>
-                      <option value="REPUTATIONAL">Reputational</option>
-                      <option value="FINANCIAL">Financial</option>
-                      <option value="SAFETY">Safety</option>
-                      <option value="AUTONOMY_CONSENT">Autonomy / consent</option>
-                      <option value="FAIRNESS_EQUITY">Fairness / equity</option>
-                      <option value="PROCEDURAL_INTEGRITY">Procedural integrity</option>
-                    </select>
-                  </label>
-                  <label><span>Primary basis</span>
-                    <select name="ml_primary_basis">
-                      <option value="">Not set</option>
-                      <option value="INTENT">Intent</option>
-                      <option value="FORESEEABLE_CONSEQUENCES">Foreseeable consequences</option>
-                      <option value="ACTUAL_OUTCOMES">Actual outcomes</option>
-                      <option value="RULE_PROCEDURE_BREACH">Rule / procedure breach</option>
-                      <option value="PATTERN_HISTORY">Pattern / history</option>
-                    </select>
-                  </label>
-                  <label><span>Evidence quality (0 poor · 1 mixed · 2 strong · 3 conclusive)</span>
-                    <select name="ml_evidence_quality">
-                      <option value="">Not set</option>
-                      <option value="0">0 – Poor</option>
-                      <option value="1">1 – Mixed</option>
-                      <option value="2">2 – Strong</option>
-                      <option value="3">3 – Conclusive</option>
-                    </select>
-                  </label>
-                  <label><span>Missing evidence type</span>
-                    <select name="ml_missing_evidence_type">
-                      <option value="">Not set</option>
-                      <option value="LOGS">Logs</option>
-                      <option value="PRIMARY_SOURCE">Primary source</option>
-                      <option value="TIMELINE">Timeline</option>
-                      <option value="THIRD_PARTY_CORROBORATION">Third-party corroboration</option>
-                      <option value="COUNTERFACTUAL">Counterfactual</option>
-                      <option value="EXPERT_JUDGEMENT">Expert judgement</option>
-                      <option value="OTHER">Other</option>
-                    </select>
-                  </label>
-                  <label><span>Recommended remedy</span>
-                    <select name="ml_recommended_remedy">
-                      <option value="">Not set</option>
-                      <option value="NO_ACTION">No action</option>
-                      <option value="GUIDANCE_ONLY">Guidance only</option>
-                      <option value="WARNING">Warning</option>
-                      <option value="RESTRICTION_BAN">Restriction / ban</option>
-                      <option value="RESTITUTION">Restitution</option>
-                      <option value="ESCALATE_HUMAN_REVIEW">Escalate to human review</option>
-                    </select>
-                  </label>
-                  <label><span>Proportionality</span>
-                    <select name="ml_proportionality">
-                      <option value="">Not set</option>
-                      <option value="TOO_LENIENT">Too lenient</option>
-                      <option value="PROPORTIONATE">Proportionate</option>
-                      <option value="TOO_HARSH">Too harsh</option>
-                      <option value="NOT_SURE">Not sure</option>
-                    </select>
-                  </label>
-                  <label><span>Decisive evidence ID (optional, e.g. P-1 or D-2)</span>
-                    <input type="text" name="ml_decisive_evidence_id" placeholder="e.g. P-1" maxlength="40" />
-                  </label>
-                  <label><span>Process flags (hold Ctrl/Cmd to select multiple)</span>
-                    <select name="ml_process_flags" multiple size="4">
-                      <option value="TIMEOUT">Timeout</option>
-                      <option value="MISSING_STAGE_CONTENT">Missing stage content</option>
-                      <option value="OFF_TOPIC_ARGUMENT">Off-topic argument</option>
-                      <option value="INADEQUATE_CITATIONS">Inadequate citations</option>
-                      <option value="SUSPECTED_COLLUSION">Suspected collusion</option>
-                      <option value="IDENTITY_UNCERTAINTY">Identity uncertainty</option>
-                      <option value="OTHER">Other</option>
-                    </select>
-                  </label>
-                </div>
-              </details>
-              ` : ""}
-              ${renderPrimaryPillButton("Submit ballot", { type: "submit" })}
-              </fieldset>
-            </form>
-            ${observerMode ? `<p class="muted">Connect an agent runtime to submit ballots.</p>` : ""}
+  const leftPanel = `
+    <div class="panel-container">
+      <div class="panel-header">
+        <span>Parties</span>
+        ${renderPanelResizeButton("left")}
+      </div>
+      <div class="panel-body">
+        <div class="stack">
+          <section class="party-grid stack">
+            ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
+            ${renderPartyColumn("Defence", caseItem.parties.defence)}
           </section>
-          `
-            : ""
-        }
+        </div>
       </div>
-    </details>
-    <details class="case-detail-collapse glass-overlay">
-      <summary class="case-detail-collapse-summary">Submissions and evidence</summary>
-      <div class="case-detail-collapse-body">
-        <section class="party-grid">
-          ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
-          ${renderPartyColumn("Defence", caseItem.parties.defence)}
-        </section>
+    </div>
+  `;
+
+  const middlePanel = `
+    <div class="panel-container">
+      <div class="panel-header">Court Transcript</div>
+      <div class="panel-body">
+         ${renderTranscript(transcript)}
       </div>
-    </details>
-    <details class="case-detail-collapse glass-overlay">
-      <summary class="case-detail-collapse-summary">Verification and sealed receipt</summary>
-      <div class="case-detail-collapse-body">
-        ${renderVerificationDetails(caseItem)}
+    </div>
+  `;
+
+  const rightPanel = `
+    <div class="panel-container">
+      <div class="panel-header">
+        <span>Jury Panel</span>
+        ${renderPanelResizeButton("right")}
       </div>
-    </details>
+      <div class="panel-body">
+        <div class="stack">
+          ${renderJurorGrid({
+            caseId: caseItem.id,
+            jurySize: caseItem.voteSummary.jurySize,
+            votesCast: liveVotes,
+            isVoid: session?.currentStage === "void" || !!session?.voidReason,
+            timerLabel: session?.currentStage === "voting" ? timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso).replace(" remaining", "") : undefined
+          })}
+          
+          ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
+          ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
+          ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
+          
+          ${renderVerificationDetails(caseItem)}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const body = `
+    <div class="navigation-row">
+      ${renderLinkButton("← Back to Schedule", "/schedule", "ghost")}
+    </div>
+    ${caseHeader}
+    <div class="case-view-layout">
+      <div class="case-panel-col">
+        ${leftPanel}
+      </div>
+      <div class="case-panel-col">
+        ${middlePanel}
+      </div>
+      <div class="case-panel-col">
+        ${rightPanel}
+      </div>
+    </div>
   `;
 
   return renderViewFrame({
     title: "Case Detail",
     subtitle: "Structured proceedings with stage authority, transcript events and jury progress.",
     ornament: "Adjudication Timeline",
-    body
+    body,
+    className: "case-layout"
   });
 }
 

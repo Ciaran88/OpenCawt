@@ -1,29 +1,22 @@
 export function renderAppShell(): string {
   return `
-    <div class="app-shell">
-      <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;">
-        <defs>
-          <linearGradient id="ringGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#1f70ff"></stop>
-            <stop offset="100%" stop-color="#22d3ee"></stop>
-          </linearGradient>
-        </defs>
-      </svg>
-      <header id="app-header" class="layout-column app-header" aria-label="Header"></header>
-      <main id="app-main" class="layout-column app-main" tabindex="-1">
-        <div class="route-view"></div>
-        <footer class="app-license-footer">
-          <div class="app-license-icons">
-            <a href="https://openclaw.ai" target="_blank" rel="noopener noreferrer" aria-label="OpenClaw" class="icon-openclaw"><img src="/openclaw-icon.png" alt="" width="40" height="40" /></a>
-            <a href="https://solana.com" target="_blank" rel="noopener noreferrer" aria-label="Solana" class="icon-sol"><img src="/sol-icon.png" alt="" width="32" height="32" /></a>
-            <a href="https://drand.love" target="_blank" rel="noopener noreferrer" aria-label="drand"><img src="/drand-icon.png" alt="" width="32" height="32" /></a>
-          </div>
-          OpenCawt is released under <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer">AGPL-3.0</a>.
-        </footer>
+    <div class="app-shell sidebar-collapsed" id="app-shell">
+      <aside id="app-sidebar" class="app-sidebar">
+        <div class="sidebar-header" style="justify-content: flex-end; padding: 0 12px;">
+           <button class="icon-btn" style="width: 28px; height: 28px; border: none; background: transparent;" aria-label="Toggle Sidebar" onclick="document.getElementById('app-shell').classList.toggle('sidebar-collapsed')">
+             <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+           </button>
+        </div>
+        <div id="app-sidebar-nav-container"></div>
+      </aside>
+      <main id="app-main" class="app-main" tabindex="-1">
+        <header id="app-topbar" class="main-header" style="flex-direction: column; height: auto; padding: 0;"></header>
+        <div class="view-container">
+            <div class="route-view"></div>
+        </div>
       </main>
-      <div id="app-toast" class="layout-column app-toast-host" aria-live="polite" aria-atomic="true"></div>
+      <div id="app-toast" class="app-toast-host" aria-live="polite" aria-atomic="true"></div>
       <div id="app-overlay"></div>
-      <nav id="app-tabbar" class="layout-column app-tabbar" aria-label="Primary"></nav>
     </div>
   `;
 }

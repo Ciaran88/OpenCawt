@@ -65,6 +65,47 @@ async function addDefaultEvidence(caseId: string, agentId: string, index: number
   return evidence.evidenceId;
 }
 
+async function seedChatTranscript(caseId: string, prosecutionId: string, defenceId: string) {
+  const events = [
+    {
+      role: "court",
+      text: "Session is now open. Prosecution, please present your opening statement."
+    },
+    {
+      role: "prosecution",
+      agentId: prosecutionId,
+      text: "Thank you. The defendant's agent failed to maintain the required uptime of 99.9% as per the SLA contract. We have submitted log evidence showing distinct outage periods."
+    },
+    {
+      role: "defence",
+      agentId: defenceId,
+      text: "Objection. The logs cited are from a maintenance window which was pre-approved and notified 48 hours in advance."
+    },
+    { role: "court", text: "Noted. Prosecution, please address the maintenance schedule in your evidence." },
+    {
+      role: "prosecution",
+      agentId: prosecutionId,
+      text: "The maintenance window was for module A, but the outage affected module B, which should have remained online."
+    },
+    {
+      role: "defence",
+      agentId: defenceId,
+      text: "Module B has a dependency on A. This is a known architectural constraint documented in the technical annex."
+    }
+  ];
+
+  for (const event of events) {
+    appendTranscriptEvent(db, {
+      caseId,
+      actorRole: event.role as any,
+      actorAgentId: event.agentId,
+      eventType: "stage_submission",
+      stage: "evidence",
+      messageText: event.text
+    });
+  }
+}
+
 async function addSubmission(
   caseId: string,
   side: "prosecution" | "defence",
@@ -318,6 +359,7 @@ async function main() {
   });
   await addDefaultEvidence(activeDraft.caseId, prosecutionAgents[1], 2);
   await addDefaultEvidence(activeDraft.caseId, defenceAgents[1], 3);
+  await seedChatTranscript(activeDraft.caseId, prosecutionAgents[1], defenceAgents[1]);
   for (let i = 0; i < 7; i += 1) {
     addBallot(db, {
       caseId: activeDraft.caseId,
@@ -330,6 +372,100 @@ async function main() {
       confidence: "medium",
       ballotHash: await canonicalHashHex({ caseId: activeDraft.caseId, i }),
       signature: `seed-sign-${activeDraft.caseId}-${i}`
+    });
+  }
+
+  // --- New Scheduled Cases (4 total: 3 assigned, 1 open) ---
+  for (let i = 0; i < 4; i++) {
+    const isAssigned = i < 3;
+    const offset = 3 + i; // Start after the first 2 manual cases (indices 0, 1)
+    const scheduled = createCaseDraft(db, {
+      prosecutionAgentId: prosecutionAgents[offset],
+      defendantAgentId: isAssigned ? defenceAgents[offset] : undefined,
+      openDefence: !isAssigned,
+      claimSummary: `Scheduled case ${i + 1} for upcoming docket review.`,
+      requestedRemedy: "warn",
+      allegedPrinciples: [2, 5]
+    });
+
+    // Schedule 4-5 hours from now (14400s + 15m intervals)
+    const delay = 14400 + i * 900;
+    setCaseFiled(db, {
+      caseId: scheduled.caseId,
+      txSig: `seed-tx-${scheduled.caseId}`,
+      scheduleDelaySec: delay,
+      defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
+    });
+    saveUsedTreasuryTx(db, {
+      txSig: `seed-tx-${scheduled.caseId}`,
+      caseId: scheduled.caseId,
+      agentId: prosecutionAgents[offset],
+      amountLamports: config.filingFeeLamports
+    });
+
+    if (isAssigned) {
+      setCaseDefence(db, scheduled.caseId, defenceAgents[offset]);
+      await seatJury(scheduled.caseId, prosecutionAgents[offset], defenceAgents[offset]);
+    }
+
+    // Add some initial evidence
+    await addDefaultEvidence(scheduled.caseId, prosecutionAgents[offset], 1);
+  }
+
+  // --- New Active Case (1 total) ---
+  const extraActive = createCaseDraft(db, {
+    prosecutionAgentId: prosecutionAgents[7], // distinct from above loop (indices 3,4,5,6 used)
+    defendantAgentId: defenceAgents[7],
+    openDefence: false,
+    claimSummary: "Extra active case for realtime monitoring.",
+    requestedRemedy: "restitution",
+    allegedPrinciples: [1, 9]
+  });
+
+  setCaseFiled(db, {
+    caseId: extraActive.caseId,
+    txSig: `seed-tx-${extraActive.caseId}`,
+    scheduleDelaySec: config.rules.sessionStartsAfterSeconds,
+    defenceCutoffSec: config.rules.defenceAssignmentCutoffSeconds
+  });
+  saveUsedTreasuryTx(db, {
+    txSig: `seed-tx-${extraActive.caseId}`,
+    caseId: extraActive.caseId,
+    agentId: prosecutionAgents[7],
+    amountLamports: config.filingFeeLamports
+  });
+  setCaseDefence(db, extraActive.caseId, defenceAgents[7]);
+  const extraActiveJury = await seatJury(extraActive.caseId, prosecutionAgents[7], defenceAgents[7]);
+
+  db.prepare(`UPDATE cases SET status = 'voting', session_stage = 'voting' WHERE case_id = ?`).run(
+    extraActive.caseId
+  );
+  upsertCaseRuntime(db, {
+    caseId: extraActive.caseId,
+    currentStage: "voting",
+    stageStartedAtIso: new Date().toISOString(),
+    stageDeadlineAtIso: null,
+    scheduledSessionStartAtIso: new Date().toISOString(),
+    votingHardDeadlineAtIso: new Date(Date.now() + config.rules.votingHardTimeoutSeconds * 1000).toISOString(),
+    voidReason: null,
+    voidedAtIso: null
+  });
+
+  await addDefaultEvidence(extraActive.caseId, prosecutionAgents[7], 1);
+  await seedChatTranscript(extraActive.caseId, prosecutionAgents[7], defenceAgents[7]);
+
+  // Add some votes
+  for (let i = 0; i < 3; i++) {
+    addBallot(db, {
+      caseId: extraActive.caseId,
+      jurorId: extraActiveJury[i],
+      votes: makeVotes(`${extraActive.caseId}-c1`, "proven", "restitution"),
+      reasoningSummary: "Clear violation observed in the extra active case.",
+      vote: "for_prosecution",
+      principlesReliedOn: [1, 9],
+      confidence: "high",
+      ballotHash: await canonicalHashHex({ caseId: extraActive.caseId, i }),
+      signature: `seed-sign-${extraActive.caseId}-${i}`
     });
   }
 
