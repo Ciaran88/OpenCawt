@@ -6,6 +6,7 @@ import { canonicalHashHex } from "../shared/hash";
 import { createId } from "../shared/ids";
 import type {
   AssignedCasesPayload,
+  CourtMode,
   CreateCaseDraftPayload,
   FileCasePayload,
   JoinJuryPoolPayload,
@@ -492,7 +493,7 @@ interface JurySelectionComputation {
 
 async function computeInitialJurySelection(caseId: string): Promise<JurySelectionComputation> {
   const caseRecord = ensureCaseExists(caseId);
-  const globalCourtMode = getRuntimeConfig(db, "court_mode") ?? "11-juror";
+  const globalCourtMode = (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode;
   const jurySize = globalCourtMode === "judge" ? 12 : config.rules.jurorPanelSize;
   const eligible = listEligibleJurors(db, {
     excludeAgentIds: [caseRecord.prosecutionAgentId, caseRecord.defenceAgentId ?? ""].filter(Boolean),
@@ -996,7 +997,8 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         });
 
         // Apply global court mode to this case
-        const globalCourtMode = getRuntimeConfig(db, "court_mode") ?? "11-juror";
+        const globalCourtMode =
+          (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode;
         if (globalCourtMode === "judge") {
           db.prepare(
             `UPDATE cases SET court_mode = ?, judge_screening_status = ? WHERE case_id = ?`
@@ -1511,6 +1513,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       if (body.mode !== "11-juror" && body.mode !== "judge") {
         throw badRequest("INVALID_COURT_MODE", "Court mode must be '11-juror' or 'judge'.");
       }
+      if (body.mode === "judge" && !judge.isAvailable()) {
+        throw conflict(
+          "JUDGE_MODE_UNAVAILABLE",
+          "Judge Mode cannot be enabled because judge integration is unavailable."
+        );
+      }
       setRuntimeConfig(db, "court_mode", body.mode);
       sendJson(res, 200, { courtMode: body.mode });
       return;
@@ -1573,7 +1581,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         softDailyCaseCap: config.softDailyCaseCap,
         softCapMode: config.softCapMode,
         jurorPanelSize: config.rules.jurorPanelSize,
-        courtMode: getRuntimeConfig(db, "court_mode") ?? "11-juror",
+        courtMode: (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode,
         judgeAvailable: judge.isAvailable(),
         treasuryAddress: config.treasuryAddress,
         sealWorkerUrl: config.sealWorkerUrl,
@@ -1829,7 +1837,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const hydrated = await Promise.all(openRecords.map((item) => hydrateCase(item)));
       const scheduled = hydrated.filter((item) => item.status === "scheduled");
       const active = hydrated.filter((item) => item.status === "active");
-      const courtMode = getRuntimeConfig(db, "court_mode") ?? "11-juror";
+      const courtMode =
+        (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode;
       const jurorCount = courtMode === "judge" ? 12 : config.rules.jurorPanelSize;
 
       sendJson(res, 200, {

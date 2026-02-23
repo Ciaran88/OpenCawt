@@ -742,7 +742,7 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     sealUri: row.seal_uri ? String(row.seal_uri) : undefined,
     filingWarning: row.filing_warning ? String(row.filing_warning) : undefined,
     defendantNotifyUrl: row.defendant_notify_url ? String(row.defendant_notify_url) : undefined,
-    courtMode: (String(row.court_mode ?? "11-juror") as CourtMode),
+    courtMode: (String(row.court_mode ?? "judge") as CourtMode),
     caseTitle: row.case_title ? String(row.case_title) : undefined,
     judgeScreeningStatus: row.judge_screening_status
       ? (String(row.judge_screening_status) as
