@@ -125,6 +125,16 @@ export function getConfig(): OcpConfig {
     paymentEstimateCacheSec: getInt(env, "OCP_PAYMENT_ESTIMATE_CACHE_SEC", 20),
   };
 
+  let parsedPublicBaseUrl: URL;
+  try {
+    parsedPublicBaseUrl = new URL(config.publicBaseUrl);
+  } catch {
+    throw new Error("[OCP Config] OCP_PUBLIC_URL (or OCP_CORS_ORIGIN fallback) must be an absolute URL.");
+  }
+  if (!["http:", "https:"].includes(parsedPublicBaseUrl.protocol)) {
+    throw new Error("[OCP Config] OCP_PUBLIC_URL must use http or https.");
+  }
+
   if (isProduction) {
     if (!config.notifySigningKey) throw new Error("[OCP Config] OCP_NOTIFY_SIGNING_KEY required in production");
     if (!config.systemApiKey) throw new Error("[OCP Config] OCP_SYSTEM_API_KEY required in production");
@@ -138,6 +148,15 @@ export function getConfig(): OcpConfig {
       if (!config.mintWorkerUrl || config.mintWorkerUrl === "http://localhost:8790") {
         throw new Error("[OCP Config] OCP_MINT_WORKER_URL must be set to the remote mint worker URL in production.");
       }
+      let parsedMintWorkerUrl: URL;
+      try {
+        parsedMintWorkerUrl = new URL(config.mintWorkerUrl);
+      } catch {
+        throw new Error("[OCP Config] OCP_MINT_WORKER_URL must be a valid absolute URL.");
+      }
+      if (parsedMintWorkerUrl.protocol !== "https:") {
+        throw new Error("[OCP Config] OCP_MINT_WORKER_URL must use https in production.");
+      }
       if (!config.mintWorkerToken || config.mintWorkerToken === "dev-worker-token") {
         throw new Error("[OCP Config] OCP_MINT_WORKER_TOKEN must be set and not the dev default in production.");
       }
@@ -146,6 +165,18 @@ export function getConfig(): OcpConfig {
       }
       if (!config.treasuryAddress || config.treasuryAddress === "OpenCawtTreasury111111111111111111111111111") {
         throw new Error("[OCP Config] OCP_TREASURY_ADDRESS must be set to a real Solana address in production.");
+      }
+    }
+  }
+
+  if (!isDevelopment) {
+    if (parsedPublicBaseUrl.protocol !== "https:") {
+      throw new Error("[OCP Config] OCP_PUBLIC_URL must use https outside development or test.");
+    }
+    if (config.solanaMode === "rpc") {
+      const parsedMintWorkerUrl = new URL(config.mintWorkerUrl);
+      if (parsedMintWorkerUrl.protocol !== "https:") {
+        throw new Error("[OCP Config] OCP_MINT_WORKER_URL must use https outside development or test.");
       }
     }
   }
