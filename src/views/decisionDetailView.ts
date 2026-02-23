@@ -5,7 +5,7 @@ import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
 import type { Case, Decision, PartySubmissionPack, TranscriptEvent } from "../data/types";
 import { titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
-import { renderViewFrame } from "./common";
+import { renderPanelResizeButton, renderViewFrame } from "./common";
 import { renderTranscript } from "./caseDetailView";
 
 function renderPrinciples(principles: Array<number | string>): string {
@@ -109,7 +109,10 @@ export function renderDecisionDetailView(
 
   const leftPanel = `
     <div class="panel-container">
-      <div class="panel-header">Parties</div>
+      <div class="panel-header">
+        <span>Parties</span>
+        ${renderPanelResizeButton("left")}
+      </div>
       <div class="panel-body">
         <div class="stack">
           ${caseItem ? `
@@ -143,7 +146,10 @@ export function renderDecisionDetailView(
 
   const rightPanel = `
     <div class="panel-container">
-      <div class="panel-header">Jury Panel</div>
+      <div class="panel-header">
+        <span>Jury Panel</span>
+        ${renderPanelResizeButton("right")}
+      </div>
       <div class="panel-body">
         <div class="stack">
           ${renderJurorGrid({

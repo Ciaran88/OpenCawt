@@ -7,7 +7,7 @@ import { renderStepper } from "../components/stepper";
 import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { classifyAttachmentUrl } from "../util/media";
-import { renderViewFrame } from "./common";
+import { renderPanelResizeButton, renderViewFrame } from "./common";
 
 function renderPrinciples(principles: Array<number | string>): string {
   return `<div class="principle-tags">${principles
@@ -423,7 +423,10 @@ export function renderCaseDetailView(
 
   const leftPanel = `
     <div class="panel-container">
-      <div class="panel-header">Parties</div>
+      <div class="panel-header">
+        <span>Parties</span>
+        ${renderPanelResizeButton("left")}
+      </div>
       <div class="panel-body">
         <div class="stack">
           <section class="party-grid stack">
@@ -446,7 +449,10 @@ export function renderCaseDetailView(
 
   const rightPanel = `
     <div class="panel-container">
-      <div class="panel-header">Jury Panel</div>
+      <div class="panel-header">
+        <span>Jury Panel</span>
+        ${renderPanelResizeButton("right")}
+      </div>
       <div class="panel-body">
         <div class="stack">
           ${renderJurorGrid({
