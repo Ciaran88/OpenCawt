@@ -807,98 +807,11 @@ async function handleRequest(
         const callerAgentId = await verifyOcpAuth(req, res, raw);
         if (!callerAgentId) return;
 
-        const agreement = getAgreement(db, proposalId);
-        if (!agreement) { sendError(res, 404, "PROPOSAL_NOT_FOUND", "Proposal not found."); return; }
-        if (callerAgentId !== agreement.partyBAgentId) {
-          sendError(res, 403, "NOT_PARTY_B", "Only party B can accept this proposal."); return;
-        }
-        if (agreement.status === "accepted" || agreement.status === "sealed") {
-          sendError(res, 409, "ALREADY_ACCEPTED", "This proposal has already been accepted."); return;
-        }
-        if (agreement.status !== "pending") {
-          sendError(res, 409, "PROPOSAL_NOT_PENDING", `Proposal status is '${agreement.status}', cannot accept.`); return;
-        }
-        if (new Date(agreement.expiresAt) < new Date()) {
-          markAgreementExpired(db, proposalId);
-          sendError(res, 409, "PROPOSAL_EXPIRED", "This proposal has expired."); return;
-        }
-
         const { sigB } = parsed as { sigB?: string };
         if (!sigB || typeof sigB !== "string") {
           sendError(res, 400, "MISSING_SIG_B", "sigB (party B attestation signature) is required."); return;
         }
-
-        const sigBValid = await verifySingleSig(
-          agreement.partyBAgentId, proposalId, agreement.termsHash, agreement.agreementCode,
-          agreement.partyAAgentId, agreement.partyBAgentId, agreement.expiresAt, sigB
-        );
-        if (!sigBValid) {
-          sendError(res, 401, "SIG_B_INVALID", "sigB is not a valid Ed25519 signature over the attestation payload."); return;
-        }
-
-        const existingSigs = getSignaturesForProposal(db, proposalId);
-        const sigARec = existingSigs.find((s) => s.party === "party_a");
-        if (!sigARec) {
-          sendError(res, 500, "MISSING_SIG_A", "Party A signature is missing from the database."); return;
-        }
-
-        const verifyResult = await verifyBothAttestations({
-          proposalId, termsHash: agreement.termsHash, agreementCode: agreement.agreementCode,
-          partyAAgentId: agreement.partyAAgentId, partyBAgentId: agreement.partyBAgentId,
-          expiresAtIso: agreement.expiresAt, sigA: sigARec.sig, sigB,
-        });
-
-        if (!verifyResult.ok) {
-          sendError(res, 401, "ATTESTATION_INVALID", `Attestation verification failed: ${verifyResult.reason}`); return;
-        }
-
-        storeSignature(db, { proposalId, party: "party_b", agentId: agreement.partyBAgentId, sig: sigB });
-        markAgreementAccepted(db, proposalId);
-
-        const agentA = getOcpAgent(db, agreement.partyAAgentId);
-        const agentB = getOcpAgent(db, agreement.partyBAgentId);
-        if (!agentA || !agentB) {
-          sendError(res, 500, "AGENT_LOOKUP_FAILED", "Could not look up agent records."); return;
-        }
-
-        void dispatchNotification(db, config, {
-          notifyUrl: agentA.notifyUrl, agentId: agreement.partyAAgentId, proposalId,
-          agreementCode: agreement.agreementCode, event: "agreement_accepted",
-          body: { proposalId, agreementCode: agreement.agreementCode, partyBAgentId: agreement.partyBAgentId },
-        });
-
-        const sealedAtIso = nowIso();
-        markAgreementSealed(db, proposalId);
-        createReceipt(db, { proposalId, agreementCode: agreement.agreementCode, termsHash: agreement.termsHash, sealedAtIso });
-
-        const mintResult = await mintAgreementReceipt(db, config, {
-          proposalId, agreementCode: agreement.agreementCode, termsHash: agreement.termsHash,
-          partyAAgentId: agreement.partyAAgentId, partyBAgentId: agreement.partyBAgentId,
-          mode: agreement.mode, sealedAtIso,
-        });
-
-        crossRegisterAgentsInCourt(config, agentA, agentB);
-
-        void notifyBothParties(db, config, {
-          partyAAgentId: agreement.partyAAgentId, partyANotifyUrl: agentA.notifyUrl,
-          partyBAgentId: agreement.partyBAgentId, partyBNotifyUrl: agentB.notifyUrl,
-          proposalId, agreementCode: agreement.agreementCode, event: "agreement_sealed",
-          body: {
-            proposalId, agreementCode: agreement.agreementCode, termsHash: agreement.termsHash,
-            sealedAtIso, mintAddress: mintResult.mintAddress,
-            txSig: mintResult.txSig, metadataUri: mintResult.metadataUri,
-          },
-        });
-
-        const receipt = getReceipt(db, proposalId);
-        sendJson(res, 200, {
-          proposalId, agreementCode: agreement.agreementCode, termsHash: agreement.termsHash,
-          sealedAtIso, status: "sealed",
-          receipt: receipt ? {
-            mintAddress: receipt.mintAddress, txSig: receipt.txSig,
-            metadataUri: receipt.metadataUri, mintStatus: receipt.mintStatus,
-          } : null,
-        });
+        await processAgreementAcceptance(res, { proposalId, callerAgentId, sigB });
         return;
       }
 
@@ -1542,99 +1455,11 @@ async function handleRequest(
       const callerAgentId = await verifyHttpAuth(req, res, parsed);
       if (!callerAgentId) return;
 
-      const agreement = getAgreement(db, proposalId);
-      if (!agreement) { sendError(res, 404, "PROPOSAL_NOT_FOUND", "Proposal not found."); return; }
-
-      if (callerAgentId !== agreement.partyBAgentId) {
-        sendError(res, 403, "NOT_PARTY_B", "Only party B can accept this proposal."); return;
-      }
-      if (agreement.status === "accepted" || agreement.status === "sealed") {
-        sendError(res, 409, "ALREADY_ACCEPTED", "This proposal has already been accepted."); return;
-      }
-      if (agreement.status !== "pending") {
-        sendError(res, 409, "PROPOSAL_NOT_PENDING", `Proposal status is '${agreement.status}'.`); return;
-      }
-      if (new Date(agreement.expiresAt) < new Date()) {
-        markAgreementExpired(db, proposalId);
-        sendError(res, 409, "PROPOSAL_EXPIRED", "This proposal has expired."); return;
-      }
-
       const { sigB } = parsed as { sigB?: string };
       if (!sigB || typeof sigB !== "string") {
         sendError(res, 400, "MISSING_SIG_B", "sigB is required."); return;
       }
-
-      const sigBValid = await verifySingleSig(
-        agreement.partyBAgentId, proposalId, agreement.termsHash, agreement.agreementCode,
-        agreement.partyAAgentId, agreement.partyBAgentId, agreement.expiresAt, sigB
-      );
-      if (!sigBValid) {
-        sendError(res, 401, "SIG_B_INVALID", "sigB is invalid."); return;
-      }
-
-      const existingSigs = getSignaturesForProposal(db, proposalId);
-      const sigARec = existingSigs.find((s) => s.party === "party_a");
-      if (!sigARec) {
-        sendError(res, 500, "MISSING_SIG_A", "Party A signature is missing."); return;
-      }
-
-      const verifyResult = await verifyBothAttestations({
-        proposalId, termsHash: agreement.termsHash, agreementCode: agreement.agreementCode,
-        partyAAgentId: agreement.partyAAgentId, partyBAgentId: agreement.partyBAgentId,
-        expiresAtIso: agreement.expiresAt, sigA: sigARec.sig, sigB,
-      });
-
-      if (!verifyResult.ok) {
-        sendError(res, 401, "ATTESTATION_INVALID", `Attestation failed: ${verifyResult.reason}`); return;
-      }
-
-      storeSignature(db, { proposalId, party: "party_b", agentId: agreement.partyBAgentId, sig: sigB });
-      markAgreementAccepted(db, proposalId);
-
-      const agentA = getOcpAgent(db, agreement.partyAAgentId);
-      const agentB = getOcpAgent(db, agreement.partyBAgentId);
-      if (!agentA || !agentB) {
-        sendError(res, 500, "AGENT_LOOKUP_FAILED", "Could not look up agent records."); return;
-      }
-
-      void dispatchNotification(db, config, {
-        notifyUrl: agentA.notifyUrl, agentId: agreement.partyAAgentId, proposalId,
-        agreementCode: agreement.agreementCode, event: "agreement_accepted",
-        body: { proposalId, agreementCode: agreement.agreementCode, partyBAgentId: agreement.partyBAgentId },
-      });
-
-      const sealedAtIso = nowIso();
-      markAgreementSealed(db, proposalId);
-      createReceipt(db, { proposalId, agreementCode: agreement.agreementCode, termsHash: agreement.termsHash, sealedAtIso });
-
-      const mintResult = await mintAgreementReceipt(db, config, {
-        proposalId, agreementCode: agreement.agreementCode, termsHash: agreement.termsHash,
-        partyAAgentId: agreement.partyAAgentId, partyBAgentId: agreement.partyBAgentId,
-        mode: agreement.mode, sealedAtIso,
-      });
-
-      crossRegisterAgentsInCourt(config, agentA, agentB);
-
-      void notifyBothParties(db, config, {
-        partyAAgentId: agreement.partyAAgentId, partyANotifyUrl: agentA.notifyUrl,
-        partyBAgentId: agreement.partyBAgentId, partyBNotifyUrl: agentB.notifyUrl,
-        proposalId, agreementCode: agreement.agreementCode, event: "agreement_sealed",
-        body: {
-          proposalId, agreementCode: agreement.agreementCode, termsHash: agreement.termsHash,
-          sealedAtIso, mintAddress: mintResult.mintAddress,
-          txSig: mintResult.txSig, metadataUri: mintResult.metadataUri,
-        },
-      });
-
-      const receipt = getReceipt(db, proposalId);
-      sendJson(res, 200, {
-        proposalId, agreementCode: agreement.agreementCode, termsHash: agreement.termsHash,
-        sealedAtIso, status: "sealed",
-        receipt: receipt ? {
-          mintAddress: receipt.mintAddress, txSig: receipt.txSig,
-          metadataUri: receipt.metadataUri, mintStatus: receipt.mintStatus,
-        } : null,
-      });
+      await processAgreementAcceptance(res, { proposalId, callerAgentId, sigB });
       return;
     }
 
@@ -1845,6 +1670,158 @@ async function verifySingleSig(
   } catch {
     return false;
   }
+}
+
+async function processAgreementAcceptance(
+  res: ServerResponse,
+  input: {
+    proposalId: string;
+    callerAgentId: string;
+    sigB: string;
+  }
+): Promise<void> {
+  const { proposalId, callerAgentId, sigB } = input;
+  const agreement = getAgreement(db, proposalId);
+  if (!agreement) {
+    sendError(res, 404, "PROPOSAL_NOT_FOUND", "Proposal not found.");
+    return;
+  }
+  if (callerAgentId !== agreement.partyBAgentId) {
+    sendError(res, 403, "NOT_PARTY_B", "Only party B can accept this proposal.");
+    return;
+  }
+  if (agreement.status === "accepted" || agreement.status === "sealed") {
+    sendError(res, 409, "ALREADY_ACCEPTED", "This proposal has already been accepted.");
+    return;
+  }
+  if (agreement.status !== "pending") {
+    sendError(res, 409, "PROPOSAL_NOT_PENDING", `Proposal status is '${agreement.status}'.`);
+    return;
+  }
+  if (new Date(agreement.expiresAt) < new Date()) {
+    markAgreementExpired(db, proposalId);
+    sendError(res, 409, "PROPOSAL_EXPIRED", "This proposal has expired.");
+    return;
+  }
+
+  const sigBValid = await verifySingleSig(
+    agreement.partyBAgentId,
+    proposalId,
+    agreement.termsHash,
+    agreement.agreementCode,
+    agreement.partyAAgentId,
+    agreement.partyBAgentId,
+    agreement.expiresAt,
+    sigB
+  );
+  if (!sigBValid) {
+    sendError(res, 401, "SIG_B_INVALID", "sigB is invalid.");
+    return;
+  }
+
+  const existingSigs = getSignaturesForProposal(db, proposalId);
+  const sigARec = existingSigs.find((s) => s.party === "party_a");
+  if (!sigARec) {
+    sendError(res, 500, "MISSING_SIG_A", "Party A signature is missing.");
+    return;
+  }
+
+  const verifyResult = await verifyBothAttestations({
+    proposalId,
+    termsHash: agreement.termsHash,
+    agreementCode: agreement.agreementCode,
+    partyAAgentId: agreement.partyAAgentId,
+    partyBAgentId: agreement.partyBAgentId,
+    expiresAtIso: agreement.expiresAt,
+    sigA: sigARec.sig,
+    sigB,
+  });
+
+  if (!verifyResult.ok) {
+    sendError(res, 401, "ATTESTATION_INVALID", `Attestation failed: ${verifyResult.reason}`);
+    return;
+  }
+
+  storeSignature(db, { proposalId, party: "party_b", agentId: agreement.partyBAgentId, sig: sigB });
+  markAgreementAccepted(db, proposalId);
+
+  const agentA = getOcpAgent(db, agreement.partyAAgentId);
+  const agentB = getOcpAgent(db, agreement.partyBAgentId);
+  if (!agentA || !agentB) {
+    sendError(res, 500, "AGENT_LOOKUP_FAILED", "Could not look up agent records.");
+    return;
+  }
+
+  void dispatchNotification(db, config, {
+    notifyUrl: agentA.notifyUrl,
+    agentId: agreement.partyAAgentId,
+    proposalId,
+    agreementCode: agreement.agreementCode,
+    event: "agreement_accepted",
+    body: {
+      proposalId,
+      agreementCode: agreement.agreementCode,
+      partyBAgentId: agreement.partyBAgentId,
+    },
+  });
+
+  const sealedAtIso = nowIso();
+  markAgreementSealed(db, proposalId);
+  createReceipt(db, {
+    proposalId,
+    agreementCode: agreement.agreementCode,
+    termsHash: agreement.termsHash,
+    sealedAtIso,
+    mintStatus: config.solanaMode === "rpc" ? "minting" : "stub",
+  });
+
+  const mintResult = await mintAgreementReceipt(db, config, {
+    proposalId,
+    agreementCode: agreement.agreementCode,
+    termsHash: agreement.termsHash,
+    partyAAgentId: agreement.partyAAgentId,
+    partyBAgentId: agreement.partyBAgentId,
+    mode: agreement.mode,
+    sealedAtIso,
+  });
+
+  crossRegisterAgentsInCourt(config, agentA, agentB);
+
+  void notifyBothParties(db, config, {
+    partyAAgentId: agreement.partyAAgentId,
+    partyANotifyUrl: agentA.notifyUrl,
+    partyBAgentId: agreement.partyBAgentId,
+    partyBNotifyUrl: agentB.notifyUrl,
+    proposalId,
+    agreementCode: agreement.agreementCode,
+    event: "agreement_sealed",
+    body: {
+      proposalId,
+      agreementCode: agreement.agreementCode,
+      termsHash: agreement.termsHash,
+      sealedAtIso,
+      mintAddress: mintResult.mintAddress,
+      txSig: mintResult.txSig,
+      metadataUri: mintResult.metadataUri,
+    },
+  });
+
+  const receipt = getReceipt(db, proposalId);
+  sendJson(res, 200, {
+    proposalId,
+    agreementCode: agreement.agreementCode,
+    termsHash: agreement.termsHash,
+    sealedAtIso,
+    status: "sealed",
+    receipt: receipt
+      ? {
+          mintAddress: receipt.mintAddress,
+          txSig: receipt.txSig,
+          metadataUri: receipt.metadataUri,
+          mintStatus: receipt.mintStatus,
+        }
+      : null,
+  });
 }
 
 /** Verify a decision signature: sig is Ed25519 over sha256(payloadHash). */
