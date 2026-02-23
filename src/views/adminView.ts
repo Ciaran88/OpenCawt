@@ -207,25 +207,25 @@ function renderStatusSection(
 // --- Court mode toggle ---
 
 function renderCourtModeSection(status: AdminStatus | null): string {
-  const current = status?.courtMode ?? "11-juror";
+  const current = status?.courtMode ?? "judge";
   const jurorActive = current === "11-juror";
   const judgeActive = current === "judge";
   const judgeAvailable = status?.judgeAvailable ?? false;
-  const warning = judgeActive && !judgeAvailable
-    ? `<p class="admin-error">Warning: Judge service is not available. Cases will auto-approve screening and ties will resolve as insufficient.</p>`
+  const warning = !judgeAvailable
+    ? `<p class="admin-error">Judge integration is unavailable. Judge Mode cannot be enabled until it is restored.</p>`
     : "";
   return `
     <div class="admin-section-body">
       <div class="admin-toggle-row">
         <label class="admin-toggle-label">Court Mode</label>
         <div class="admin-toggle-group">
-          <button type="button" class="admin-mode-btn ${jurorActive ? "is-active" : ""}" data-action="admin-set-court-mode" data-value="11-juror">11 Juror</button>
-          <button type="button" class="admin-mode-btn ${judgeActive ? "is-active" : ""}" data-action="admin-set-court-mode" data-value="judge">Judge Mode</button>
+          <button type="button" class="admin-mode-btn ${judgeActive ? "is-active" : ""}" data-action="admin-set-court-mode" data-value="judge">Judge Mode (Default)</button>
+          <button type="button" class="admin-mode-btn ${jurorActive ? "is-active" : ""}" data-action="admin-set-court-mode" data-value="11-juror">11 Juror (Override)</button>
         </div>
       </div>
       ${warning}
       <p class="admin-toggle-note muted">
-        Mode changes only affect new cases. Existing cases retain their original court mode.
+        New cases use Judge Mode by default. Set 11 Juror only as an explicit override. Existing cases keep their original court mode.
       </p>
     </div>
   `;
