@@ -489,16 +489,18 @@ export function createReceipt(
     agreementCode: string;
     termsHash: string;
     sealedAtIso: string;
+    mintStatus?: "stub" | "minting";
   }
 ): void {
   db.prepare(
     `INSERT INTO ocp_receipts (proposal_id, agreement_code, terms_hash, sealed_at, mint_status)
-     VALUES (?, ?, ?, ?, 'stub')`
+     VALUES (?, ?, ?, ?, ?)`
   ).run(
     input.proposalId,
     input.agreementCode,
     input.termsHash,
-    input.sealedAtIso
+    input.sealedAtIso,
+    input.mintStatus ?? "stub"
   );
 }
 
