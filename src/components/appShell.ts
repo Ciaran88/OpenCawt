@@ -1,6 +1,6 @@
 export function renderAppShell(): string {
   return `
-    <div class="app-shell" id="app-shell">
+    <div class="app-shell sidebar-collapsed" id="app-shell">
       <aside id="app-sidebar" class="app-sidebar">
         <div class="sidebar-header" style="justify-content: flex-end; padding: 0 12px;">
            <button class="icon-btn" style="width: 28px; height: 28px; border: none; background: transparent;" aria-label="Toggle Sidebar" onclick="document.getElementById('app-shell').classList.toggle('sidebar-collapsed')">
