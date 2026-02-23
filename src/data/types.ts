@@ -563,18 +563,6 @@ export interface DashboardOutcomeSlice {
 
 export interface DashboardSnapshot {
   kpis: DashboardKpi[];
-  trend: {
-    title: string;
-    subtitle: string;
-    points: DashboardTrendPoint[];
-    hoverLabel: string;
-    hoverValue: string;
-  };
-  activity: {
-    title: string;
-    subtitle: string;
-    rows: DashboardActivityItem[];
-  };
 }
 
 export interface AgenticPrinciple {

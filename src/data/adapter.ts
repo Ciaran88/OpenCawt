@@ -11,10 +11,8 @@ import type {
   CaseMetrics,
   DefenceInviteSummary,
   FilingFeeEstimate,
-  DashboardActivityItem,
   DashboardKpi,
   DashboardSnapshot,
-  DashboardTrendPoint,
   Decision,
   FileCaseResult,
   LeaderboardEntry,
@@ -75,76 +73,6 @@ function isSameUtcDay(iso: string, now: Date): boolean {
     value.getUTCMonth() === now.getUTCMonth() &&
     value.getUTCDate() === now.getUTCDate()
   );
-}
-
-function toDayLabel(date: Date): string {
-  return date.toLocaleDateString("en-GB", { weekday: "short" });
-}
-
-function buildTrendPoints(schedule: ScheduleResponse, decisions: Decision[]): DashboardTrendPoint[] {
-  const now = new Date();
-  const dayStarts: number[] = [];
-  for (let i = 7; i >= 0; i -= 1) {
-    const day = new Date(now);
-    day.setUTCHours(0, 0, 0, 0);
-    day.setUTCDate(day.getUTCDate() - i);
-    dayStarts.push(day.getTime());
-  }
-
-  const eventTimes = [
-    ...schedule.scheduled.map((item) => new Date(item.createdAtIso).getTime()),
-    ...schedule.active.map((item) => new Date(item.createdAtIso).getTime()),
-    ...decisions.map((item) => new Date(item.closedAtIso).getTime())
-  ];
-
-  return dayStarts.map((start) => {
-    const end = start + 24 * 60 * 60 * 1000;
-    const count = eventTimes.filter((value) => value >= start && value < end).length;
-    return {
-      label: toDayLabel(new Date(start)),
-      value: count
-    };
-  });
-}
-
-function toneFromOutcome(outcome: Decision["outcome"]): DashboardActivityItem["tone"] {
-  if (outcome === "for_prosecution") {
-    return "success";
-  }
-  if (outcome === "for_defence") {
-    return "orange";
-  }
-  return "neutral";
-}
-
-function buildActivityRows(
-  decisions: Decision[],
-  openDefence: OpenDefenceCaseSummary[]
-): DashboardActivityItem[] {
-  const decisionRows = [...decisions]
-    .sort((a, b) => new Date(b.closedAtIso).getTime() - new Date(a.closedAtIso).getTime())
-    .slice(0, 5)
-    .map((decision) => ({
-      id: `decision-${decision.caseId}`,
-      title: `Decision posted for ${decision.caseId}`,
-      detail: decision.outcome.replace(/_/g, " "),
-      timestampLabel: formatDashboardDateLabel(decision.closedAtIso),
-      tone: toneFromOutcome(decision.outcome),
-      href: `/decision/${encodeURIComponent(decision.caseId)}`
-    }));
-
-  const openRows = openDefence.slice(0, 3).map((item) => ({
-    id: `open-defence-${item.caseId}`,
-    title: `${item.caseId} open for defence`,
-    detail: item.summary,
-    timestampLabel: item.scheduledForIso
-      ? formatDashboardDateLabel(item.scheduledForIso)
-      : "Awaiting schedule",
-    tone: "orange" as const,
-    href: `/case/${encodeURIComponent(item.caseId)}`
-  }));
-
-  return [...decisionRows, ...openRows].slice(0, 8);
 }
 
 function buildDashboardKpis(schedule: ScheduleResponse, decisions: Decision[]): DashboardKpi[] {
@@ -322,23 +250,11 @@ export async function getDashboardSnapshot(seed?: {
       : getOpenDefenceCases({ limit: 40 }),
     seed?.ticker ? Promise.resolve(seed.ticker) : getTickerEvents()
   ]);
-
-  const trendPoints = buildTrendPoints(schedule, decisions);
+  void openDefenceCases;
+  void ticker;
 
   return clone({
-    kpis: buildDashboardKpis(schedule, decisions),
-    trend: {
-      title: "Court throughput",
-      subtitle: `${ticker.length} recent decision events`,
-      points: trendPoints,
-      hoverLabel: trendPoints.at(-2)?.label ?? trendPoints.at(-1)?.label ?? "Today",
-      hoverValue: `${trendPoints.at(-2)?.value ?? trendPoints.at(-1)?.value ?? 0} cases`
-    },
-    activity: {
-      title: "Recent verdicts",
-      subtitle: "Latest decisions and defence openings",
-      rows: buildActivityRows(decisions, openDefenceCases)
-    }
+    kpis: buildDashboardKpis(schedule, decisions)
   });
 }
 

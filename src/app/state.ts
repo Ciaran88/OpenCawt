@@ -154,19 +154,7 @@ export function createInitialState(): AppState {
     defenceInvites: [],
     openDefenceCases: [],
     dashboardSnapshot: {
-      kpis: [],
-      trend: {
-        title: "Court throughput",
-        subtitle: "",
-        points: [],
-        hoverLabel: "",
-        hoverValue: ""
-      },
-      activity: {
-        title: "Recent verdicts",
-        subtitle: "",
-        rows: []
-      }
+      kpis: []
     },
     caseMetrics: {
       closedCasesCount: 0
