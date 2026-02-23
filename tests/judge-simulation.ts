@@ -27,6 +27,7 @@ const PROVIDED_TREASURY_TX_SIG = process.env.TREASURY_TX_SIG?.trim() || "";
 const TARGET_COURT_MODE = (process.env.JUDGE_SIM_COURT_MODE?.trim() || "judge") as
   | "judge"
   | "11-juror";
+const SIM_JUROR_COUNT = Number(process.env.JUDGE_SIM_JUROR_COUNT ?? "40");
 const POLL_MS = 2000;
 const MAX_WAIT_MS = Number(process.env.JUDGE_SIM_MAX_WAIT_MS ?? "180000");
 
@@ -227,6 +228,100 @@ async function fileCaseWithDiscovery(
   );
 }
 
+async function driveJuryReadiness(caseId: string, jurors: Agent[]): Promise<void> {
+  const readyAgents = new Set<string>();
+  const start = Date.now();
+  while (Date.now() - start < MAX_WAIT_MS) {
+    const detail = await getJson(`/api/cases/${caseId}`);
+    const stage = detail?.session?.currentStage;
+    if (stage !== "jury_readiness") {
+      console.log(`  ✓ Jury readiness phase completed. Ready confirmations sent: ${readyAgents.size}`);
+      return;
+    }
+
+    for (const juror of jurors) {
+      const { status } = await signedPost(
+        juror,
+        `/api/cases/${caseId}/juror-ready`,
+        { ready: true },
+        caseId
+      );
+      if (status === 200) {
+        readyAgents.add(juror.agentId);
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new Error("Timed out while driving jury readiness.");
+}
+
+async function driveVoting(
+  caseId: string,
+  claimId: string,
+  jurors: Agent[],
+  targetBallots: number
+): Promise<{ provenCount: number; notProvenCount: number }> {
+  const voted = new Set<string>();
+  let provenCount = 0;
+  let notProvenCount = 0;
+  const start = Date.now();
+
+  while (Date.now() - start < MAX_WAIT_MS && voted.size < targetBallots) {
+    for (const juror of jurors) {
+      if (voted.has(juror.agentId)) {
+        continue;
+      }
+      const isProven = provenCount < 6;
+      const finding = isProven ? "proven" : "not_proven";
+      const rationale = isProven
+        ? JUROR_RATIONALES_PROVEN[provenCount % JUROR_RATIONALES_PROVEN.length]
+        : JUROR_RATIONALES_NOT_PROVEN[notProvenCount % JUROR_RATIONALES_NOT_PROVEN.length];
+
+      const ballot = {
+        votes: [
+          {
+            claimId,
+            finding,
+            severity: isProven ? 2 : 1,
+            recommendedRemedy: isProven ? "warn" : "none",
+            rationale,
+            citations: isProven ? ["P1", "P5", "P11"] : ["P3"]
+          }
+        ],
+        reasoningSummary: extractTwoSentences(rationale),
+        principlesReliedOn: isProven ? [1, 5, 11] : [3],
+        confidence: "high" as const,
+        vote: isProven ? ("for_prosecution" as const) : ("for_defence" as const)
+      };
+
+      const { status } = await signedPost(juror, `/api/cases/${caseId}/ballots`, ballot, caseId);
+      if (status === 201 || status === 409) {
+        voted.add(juror.agentId);
+        if (status === 201) {
+          if (isProven) {
+            provenCount += 1;
+          } else {
+            notProvenCount += 1;
+          }
+        }
+      }
+      if (voted.size >= targetBallots) {
+        break;
+      }
+    }
+
+    const detail = await getJson(`/api/cases/${caseId}`);
+    const stage = detail?.session?.currentStage;
+    if (stage !== "voting") {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+
+  return { provenCount, notProvenCount };
+}
+
 // ---------------------------------------------------------------------------
 // Text helpers
 // ---------------------------------------------------------------------------
@@ -373,8 +468,8 @@ async function main() {
   const prosecution = await makeAgent("prosecution");
   const defence = await makeAgent("defence");
   const jurors: Agent[] = [];
-  // 13 jurors to ensure pool is large enough for 12 selection
-  for (let i = 0; i < 13; i++) {
+  // Register a larger juror cohort to improve selection probability in live, noisy pools.
+  for (let i = 0; i < SIM_JUROR_COUNT; i++) {
     jurors.push(await makeAgent(`juror-${i + 1}`));
   }
   console.log(`  Prosecution: ${prosecution.agentId.slice(0, 12)}...`);
@@ -505,21 +600,7 @@ async function main() {
 
   // ── Confirm jurors ready ──
   log("PHASE 11: Confirm jurors ready");
-  // Only confirm jurors that were actually selected
-  const selectedJurorAgents = jurors.filter((j) => selectedJurors.includes(j.agentId));
-  console.log(`  ${selectedJurorAgents.length} selected jurors confirming readiness...`);
-  for (const juror of selectedJurorAgents) {
-    const { status, data } = await signedPost(
-      juror,
-      `/api/cases/${caseId}/juror-ready`,
-      { ready: true },
-      caseId
-    );
-    if (status !== 200) {
-      console.log(`  ⚠ Juror ${juror.label} ready failed: ${status}`, data?.error ?? data?.code ?? "");
-    }
-  }
-  console.log(`  ✓ Juror readiness confirmed`);
+  await driveJuryReadiness(caseId, jurors);
 
   // ── Opening addresses (both sides) ──
   log("PHASE 12: Opening addresses");
@@ -693,48 +774,12 @@ async function main() {
       : "  Submitting 11 ballots (6 proven, 5 not_proven)..."
   );
 
-  // Submit split ballots. Judge mode intentionally ties 6-6.
-  let provenCount = 0;
-  let notProvenCount = 0;
-  for (let i = 0; i < selectedJurorAgents.length && i < targetBallots; i++) {
-    const juror = selectedJurorAgents[i];
-    const isProven = TARGET_COURT_MODE === "judge" ? i < 6 : i < 6;
-    const finding = isProven ? "proven" : "not_proven";
-    const rationale = isProven
-      ? JUROR_RATIONALES_PROVEN[provenCount]
-      : JUROR_RATIONALES_NOT_PROVEN[notProvenCount];
-
-    const ballot = {
-      votes: [
-        {
-          claimId,
-          finding,
-          severity: isProven ? 2 : 1,
-          recommendedRemedy: isProven ? "warn" : "none",
-          rationale,
-          citations: isProven ? ["P1", "P5", "P11"] : ["P3"]
-        }
-      ],
-      reasoningSummary: extractTwoSentences(rationale),
-      principlesReliedOn: isProven ? [1, 5, 11] : [3],
-      confidence: "high" as const,
-      vote: isProven ? ("for_prosecution" as const) : ("for_defence" as const)
-    };
-
-    const { status, data } = await signedPost(
-      juror,
-      `/api/cases/${caseId}/ballots`,
-      ballot,
-      caseId
-    );
-
-    if (status === 201) {
-      if (isProven) provenCount++;
-      else notProvenCount++;
-    } else {
-      console.log(`  ⚠ Ballot ${juror.label}: ${status}`, data?.error ?? data?.code ?? "");
-    }
-  }
+  const { provenCount, notProvenCount } = await driveVoting(
+    caseId,
+    claimId,
+    jurors,
+    targetBallots
+  );
   console.log(`  ✓ Ballots submitted: ${provenCount} proven, ${notProvenCount} not_proven`);
 
   // ── Wait for case closure (tiebreak + remedy) ──
