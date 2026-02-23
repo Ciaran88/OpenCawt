@@ -108,20 +108,25 @@ export function renderDecisionDetailView(
   `;
 
   const leftPanel = `
-    <div class="stack">
-      ${caseItem ? `
-        ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
-        ${renderPartyColumn("Defence", caseItem.parties.defence)}
-      ` : `
-        <p class="muted">Full case details archived.</p>
-      `}
+    <div class="panel-container">
+      <div class="panel-header">Parties</div>
+      <div class="panel-body">
+        <div class="stack">
+          ${caseItem ? `
+            ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
+            ${renderPartyColumn("Defence", caseItem.parties.defence)}
+          ` : `
+            <p class="muted">Full case details archived.</p>
+          `}
+        </div>
+      </div>
     </div>
   `;
 
   const middlePanel = `
-    <div class="transcript-panel">
-      <div class="transcript-header">Court Transcript</div>
-      <div class="transcript-body">
+    <div class="panel-container">
+      <div class="panel-header">Court Transcript</div>
+      <div class="panel-body">
          ${renderTranscript(transcript || [])}
       </div>
     </div>
@@ -137,51 +142,56 @@ export function renderDecisionDetailView(
     : decision.voteSummary.tally;
 
   const rightPanel = `
-    <div class="stack">
-      ${renderJurorGrid({
-        caseId: decision.caseId,
-        jurySize: decision.voteSummary.jurySize,
-        votesCast: decision.voteSummary.votesCast,
-        jurorDetails: getMockJurorDetails(decision.voteSummary.jurySize, effectiveTally),
-        completedTally: {
-          proven: effectiveTally.forProsecution,
-          notProven: effectiveTally.forDefence,
-          insufficient: effectiveTally.insufficient,
-        },
-      })}
+    <div class="panel-container">
+      <div class="panel-header">Jury Panel</div>
+      <div class="panel-body">
+        <div class="stack">
+          ${renderJurorGrid({
+            caseId: decision.caseId,
+            jurySize: decision.voteSummary.jurySize,
+            votesCast: decision.voteSummary.votesCast,
+            jurorDetails: getMockJurorDetails(decision.voteSummary.jurySize, effectiveTally),
+            completedTally: {
+              proven: effectiveTally.forProsecution,
+              notProven: effectiveTally.forDefence,
+              insufficient: effectiveTally.insufficient,
+            },
+          })}
 
-      <article class="record-card glass-overlay">
-        <h3>Selected evidence</h3>
-        <div class="evidence-grid">
-          ${decision.selectedEvidence.map((item) => renderEvidenceCard(item)).join("")}
+          <article class="record-card glass-overlay">
+            <h3>Selected evidence</h3>
+            <div class="evidence-grid">
+              ${decision.selectedEvidence.map((item) => renderEvidenceCard(item)).join("")}
+            </div>
+          </article>
+
+          <article class="record-card glass-overlay">
+            <h3>Sealing details</h3>
+            <dl class="key-value-list">
+              <div>
+                <dt>Asset ID</dt>
+                <dd>${assetLink ? `<a href="${assetLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.assetId)}</a>` : escapeHtml(decision.sealInfo.assetId)}</dd>
+              </div>
+              <div>
+                <dt>Tx sig</dt>
+                <dd>${txLink ? `<a href="${txLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.txSig)}</a>` : escapeHtml(decision.sealInfo.txSig)}</dd>
+              </div>
+              <div>
+                <dt>Verdict hash</dt>
+                <dd>${escapeHtml(decision.sealInfo.verdictHash)}</dd>
+              </div>
+              <div>
+                <dt>URI</dt>
+                <dd>${escapeHtml(decision.sealInfo.sealedUri)}</dd>
+              </div>
+              <div>
+                <dt>Seal status</dt>
+                <dd>${escapeHtml(decision.sealStatus ?? decision.sealInfo.sealStatus ?? "pending")}</dd>
+              </div>
+            </dl>
+          </article>
         </div>
-      </article>
-
-      <article class="record-card glass-overlay">
-        <h3>Sealing details</h3>
-        <dl class="key-value-list">
-          <div>
-            <dt>Asset ID</dt>
-            <dd>${assetLink ? `<a href="${assetLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.assetId)}</a>` : escapeHtml(decision.sealInfo.assetId)}</dd>
-          </div>
-          <div>
-            <dt>Tx sig</dt>
-            <dd>${txLink ? `<a href="${txLink}" target="_blank" rel="noopener noreferrer">${escapeHtml(decision.sealInfo.txSig)}</a>` : escapeHtml(decision.sealInfo.txSig)}</dd>
-          </div>
-          <div>
-            <dt>Verdict hash</dt>
-            <dd>${escapeHtml(decision.sealInfo.verdictHash)}</dd>
-          </div>
-          <div>
-            <dt>URI</dt>
-            <dd>${escapeHtml(decision.sealInfo.sealedUri)}</dd>
-          </div>
-          <div>
-            <dt>Seal status</dt>
-            <dd>${escapeHtml(decision.sealStatus ?? decision.sealInfo.sealStatus ?? "pending")}</dd>
-          </div>
-        </dl>
-      </article>
+      </div>
     </div>
   `;
 
@@ -192,17 +202,13 @@ export function renderDecisionDetailView(
     ${decisionHeader}
     <div class="case-view-layout">
       <div class="case-panel-col">
-        <div class="case-panel-scroll">
-          ${leftPanel}
-        </div>
+        ${leftPanel}
       </div>
-      <div class="case-panel-col is-middle">
+      <div class="case-panel-col">
         ${middlePanel}
       </div>
       <div class="case-panel-col">
-        <div class="case-panel-scroll">
-          ${rightPanel}
-        </div>
+        ${rightPanel}
       </div>
     </div>
   `;

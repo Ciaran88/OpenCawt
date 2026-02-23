@@ -449,6 +449,7 @@ select:focus {
 
 /* Utility */
 .flex { display: flex; }
+.stack { display: flex; flex-direction: column; gap: var(--space-4); }
 .grid { display: grid; }
 .items-center { align-items: center; }
 .justify-between { justify-content: space-between; }
@@ -943,27 +944,12 @@ select:focus {
 .case-panel-col {
   display: flex;
   flex-direction: column;
-  background-color: var(--bg-panel);
-  border: 1px solid var(--border-base);
-  border-radius: var(--radius-lg);
-  overflow-y: auto;
   height: 100%;
+  overflow: hidden; /* Ensure inner panel handles scrolling */
 }
 
-.case-panel-col.is-middle {
-  border: none;
-  background-color: transparent;
-}
-
-.case-panel-scroll {
-  padding: var(--space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  flex: 1;
-}
-
-.transcript-panel {
+/* Generic Panel Structure */
+.panel-container {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -973,19 +959,29 @@ select:focus {
   overflow: hidden;
 }
 
-.transcript-header {
+.panel-header {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border-base);
   font-weight: 600;
   background-color: var(--bg-panel);
   font-size: 0.9rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.transcript-body {
+.panel-body {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
+
+/* Legacy/Specific aliases if needed, or remove if fully replaced */
+/* Kept for reference or transition, but can be removed if all views updated */
 
 @media (max-width: 1200px) {
   .case-view-layout {

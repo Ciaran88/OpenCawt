@@ -85,9 +85,6 @@ export function renderJurorGrid(options: {
 
   return `
     <section class="jury-panel" data-live-votes="${escapeHtml(caseId)}" data-jury-size="${jurySize}">
-      <div class="jury-panel-head">
-        <h3>Jury Panel</h3>
-      </div>
       <div class="jury-status-row">
         ${headerStats}
         ${timerLabel ? `<div class="jury-timer"><strong>Time to Vote Remaining:</strong> <span>${escapeHtml(timerLabel)}</span></div>` : ""}

@@ -422,38 +422,48 @@ export function renderCaseDetailView(
   `;
 
   const leftPanel = `
-    <div class="stack">
-      <section class="party-grid stack">
-        ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
-        ${renderPartyColumn("Defence", caseItem.parties.defence)}
-      </section>
+    <div class="panel-container">
+      <div class="panel-header">Parties</div>
+      <div class="panel-body">
+        <div class="stack">
+          <section class="party-grid stack">
+            ${renderPartyColumn("Prosecution", caseItem.parties.prosecution)}
+            ${renderPartyColumn("Defence", caseItem.parties.defence)}
+          </section>
+        </div>
+      </div>
     </div>
   `;
 
   const middlePanel = `
-    <div class="transcript-panel">
-      <div class="transcript-header">Court Transcript</div>
-      <div class="transcript-body">
+    <div class="panel-container">
+      <div class="panel-header">Court Transcript</div>
+      <div class="panel-body">
          ${renderTranscript(transcript)}
       </div>
     </div>
   `;
 
   const rightPanel = `
-    <div class="stack">
-      ${renderJurorGrid({
-        caseId: caseItem.id,
-        jurySize: caseItem.voteSummary.jurySize,
-        votesCast: liveVotes,
-        isVoid: session?.currentStage === "void" || !!session?.voidReason,
-        timerLabel: session?.currentStage === "voting" ? timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso).replace(" remaining", "") : undefined
-      })}
-      
-      ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
-      ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
-      ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
-      
-      ${renderVerificationDetails(caseItem)}
+    <div class="panel-container">
+      <div class="panel-header">Jury Panel</div>
+      <div class="panel-body">
+        <div class="stack">
+          ${renderJurorGrid({
+            caseId: caseItem.id,
+            jurySize: caseItem.voteSummary.jurySize,
+            votesCast: liveVotes,
+            isVoid: session?.currentStage === "void" || !!session?.voidReason,
+            timerLabel: session?.currentStage === "voting" ? timeRemainingLabel(state.nowMs, session?.stageDeadlineAtIso).replace(" remaining", "") : undefined
+          })}
+          
+          ${renderReadinessForm(caseItem.id, session?.currentStage, observerMode)}
+          ${renderEvidenceSubmissionForm(caseItem.id, session?.currentStage, observerMode)}
+          ${renderStageMessageForm(caseItem.id, session?.currentStage, observerMode)}
+          
+          ${renderVerificationDetails(caseItem)}
+        </div>
+      </div>
     </div>
   `;
 
@@ -464,17 +474,13 @@ export function renderCaseDetailView(
     ${caseHeader}
     <div class="case-view-layout">
       <div class="case-panel-col">
-        <div class="case-panel-scroll">
-          ${leftPanel}
-        </div>
+        ${leftPanel}
       </div>
-      <div class="case-panel-col is-middle">
+      <div class="case-panel-col">
         ${middlePanel}
       </div>
       <div class="case-panel-col">
-        <div class="case-panel-scroll">
-          ${rightPanel}
-        </div>
+        ${rightPanel}
       </div>
     </div>
   `;
