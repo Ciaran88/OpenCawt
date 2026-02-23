@@ -31,6 +31,14 @@ const SIM_JUROR_COUNT = Number(process.env.JUDGE_SIM_JUROR_COUNT ?? "40");
 const POLL_MS = 2000;
 const MAX_WAIT_MS = Number(process.env.JUDGE_SIM_MAX_WAIT_MS ?? "180000");
 const HTTP_TIMEOUT_MS = Number(process.env.JUDGE_SIM_HTTP_TIMEOUT_MS ?? "12000");
+const RETRY_ATTEMPTS = Number(process.env.JUDGE_SIM_RETRY_ATTEMPTS ?? "4");
+const RETRY_BASE_DELAY_MS = Number(process.env.JUDGE_SIM_RETRY_BASE_DELAY_MS ?? "750");
+const TREASURY_TX_SCAN_LIMIT = Number(process.env.JUDGE_SIM_TREASURY_SCAN_LIMIT ?? "2000");
+const TREASURY_TX_PAGE_SIZE = Math.min(
+  1000,
+  Math.max(100, Number(process.env.JUDGE_SIM_TREASURY_PAGE_SIZE ?? "1000"))
+);
+const RETRYABLE_STATUSES = new Set([0, 429, 500, 502, 503, 504]);
 
 async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -40,6 +48,14 @@ async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Resp
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableStatus(status: number): boolean {
+  return RETRYABLE_STATUSES.has(status);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,9 +118,66 @@ async function signedPost(
   return { status: res.status, data };
 }
 
+async function safeSignedPost(
+  agent: Agent,
+  path: string,
+  body: unknown,
+  caseId?: string
+): Promise<{ status: number; data: any }> {
+  try {
+    return await signedPost(agent, path, body, caseId);
+  } catch (error) {
+    return {
+      status: 0,
+      data: {
+        error: error instanceof Error ? error.message : String(error)
+      }
+    };
+  }
+}
+
+async function safeSignedPostWithRetries(
+  agent: Agent,
+  path: string,
+  body: unknown,
+  caseId?: string,
+  attempts = RETRY_ATTEMPTS
+): Promise<{ status: number; data: any }> {
+  let last: { status: number; data: any } = { status: 0, data: { error: "No attempt made" } };
+  for (let i = 0; i < attempts; i++) {
+    const response = await safeSignedPost(agent, path, body, caseId);
+    last = response;
+    if (!isRetryableStatus(response.status)) {
+      return response;
+    }
+    if (i < attempts - 1) {
+      await sleep(RETRY_BASE_DELAY_MS * (i + 1));
+    }
+  }
+  return last;
+}
+
 async function getJson(path: string): Promise<any> {
-  const res = await fetchWithTimeout(`${BASE}${path}`);
-  return res.json();
+  let lastError: unknown;
+  for (let i = 0; i < RETRY_ATTEMPTS; i++) {
+    try {
+      const res = await fetchWithTimeout(`${BASE}${path}`);
+      if (!res.ok && isRetryableStatus(res.status)) {
+        if (i < RETRY_ATTEMPTS - 1) {
+          await sleep(RETRY_BASE_DELAY_MS * (i + 1));
+          continue;
+        }
+      }
+      return res.json();
+    } catch (error) {
+      lastError = error;
+      if (i < RETRY_ATTEMPTS - 1) {
+        await sleep(RETRY_BASE_DELAY_MS * (i + 1));
+        continue;
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Failed GET ${path}`);
 }
 
 async function createAdminSessionToken(): Promise<string> {
@@ -175,18 +248,48 @@ async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
   return json.result as T;
 }
 
-async function discoverTreasuryTxCandidates(limit = 200): Promise<string[]> {
+async function discoverTreasuryTxCandidates(limit = TREASURY_TX_SCAN_LIMIT): Promise<string[]> {
   if (!TREASURY_ADDRESS) {
     return [];
   }
-  const signatures = await heliusRpc<Array<{ signature?: string; err?: unknown }>>(
-    "getSignaturesForAddress",
-    [TREASURY_ADDRESS, { limit }]
-  );
-  return signatures
-    .filter((entry) => !entry.err && typeof entry.signature === "string")
-    .map((entry) => String(entry.signature))
-    .filter((value) => value.length > 30);
+  const output: string[] = [];
+  const seen = new Set<string>();
+  let before: string | undefined;
+
+  while (output.length < limit) {
+    const batchLimit = Math.min(TREASURY_TX_PAGE_SIZE, limit - output.length);
+    const options: { limit: number; before?: string } = { limit: batchLimit };
+    if (before) {
+      options.before = before;
+    }
+    const signatures = await heliusRpc<Array<{ signature?: string; err?: unknown }>>(
+      "getSignaturesForAddress",
+      [TREASURY_ADDRESS, options]
+    );
+    if (signatures.length === 0) {
+      break;
+    }
+    for (const entry of signatures) {
+      if (entry.err || typeof entry.signature !== "string") {
+        continue;
+      }
+      const signature = String(entry.signature);
+      if (signature.length <= 30 || seen.has(signature)) {
+        continue;
+      }
+      seen.add(signature);
+      output.push(signature);
+      if (output.length >= limit) {
+        break;
+      }
+    }
+    before = signatures[signatures.length - 1]?.signature;
+    if (!before) {
+      break;
+    }
+  }
+
+  return output;
 }
 
 function extractApiErrorCode(payload: any): string {
@@ -199,12 +302,13 @@ async function fileCaseWithDiscovery(
 ): Promise<{ selectedJurors: string[]; txSigUsed: string }> {
   const candidateTxs = PROVIDED_TREASURY_TX_SIG
     ? [PROVIDED_TREASURY_TX_SIG]
-    : await discoverTreasuryTxCandidates(300);
+    : await discoverTreasuryTxCandidates();
   if (candidateTxs.length === 0) {
     throw new Error(
       "No treasury transaction candidates found. Set TREASURY_TX_SIG explicitly or ensure HELIUS_RPC_URL/TREASURY_ADDRESS are configured."
     );
   }
+  const errorCounts = new Map<string, number>();
 
   for (const txSig of candidateTxs) {
     const { status, data } = await signedPost(
@@ -229,13 +333,14 @@ async function fileCaseWithDiscovery(
       code === "TREASURY_TX_NOT_FINALISED" ||
       code === "HELIUS_RPC_ERROR"
     ) {
+      errorCounts.set(code, (errorCounts.get(code) ?? 0) + 1);
       continue;
     }
     throw new Error(`Case filing failed with non-retriable code ${code}: ${JSON.stringify(data)}`);
   }
 
   throw new Error(
-    "Unable to file case using discovered treasury signatures. Provide TREASURY_TX_SIG for an unused, valid transfer to the treasury."
+    `Unable to file case using discovered treasury signatures (scanned=${candidateTxs.length}, errors=${JSON.stringify(Object.fromEntries(errorCounts))}). Provide TREASURY_TX_SIG for an unused, valid transfer to the treasury.`
   );
 }
 
@@ -251,7 +356,7 @@ async function driveJuryReadiness(caseId: string, jurors: Agent[]): Promise<void
     }
 
     for (const juror of jurors) {
-      const { status } = await signedPost(
+      const { status } = await safeSignedPostWithRetries(
         juror,
         `/api/cases/${caseId}/juror-ready`,
         { ready: true },
@@ -306,7 +411,12 @@ async function driveVoting(
         vote: isProven ? ("for_prosecution" as const) : ("for_defence" as const)
       };
 
-      const { status } = await signedPost(juror, `/api/cases/${caseId}/ballots`, ballot, caseId);
+      const { status } = await safeSignedPostWithRetries(
+        juror,
+        `/api/cases/${caseId}/ballots`,
+        ballot,
+        caseId
+      );
       if (status === 201 || status === 409) {
         voted.add(juror.agentId);
         if (status === 201) {
@@ -496,7 +606,7 @@ async function main() {
   // ── Register agents ──
   log("PHASE 3: Register all agents");
   for (const agent of [prosecution, defence, ...jurors]) {
-    const { status, data } = await signedPost(agent, "/api/agents/register", {
+    const { status, data } = await safeSignedPostWithRetries(agent, "/api/agents/register", {
       agentId: agent.agentId,
       jurorEligible: jurors.includes(agent),
       displayName: agent.label
@@ -511,7 +621,7 @@ async function main() {
   // ── Join jury pool ──
   log("PHASE 4: Join jury pool");
   for (const juror of jurors) {
-    const { status, data } = await signedPost(juror, "/api/jury-pool/join", {
+    const { status, data } = await safeSignedPostWithRetries(juror, "/api/jury-pool/join", {
       agentId: juror.agentId,
       availability: "available"
     });
