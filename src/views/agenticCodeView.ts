@@ -59,9 +59,6 @@ export function renderAgenticCodeView(
   const progressPercent = Math.min(100, Math.round((boundedClosed / 1000) * 100));
 
   const body = `
-    <section class="row-between">
-      <span class="version-badge">Version v1.0</span>
-    </section>
     <ol class="principles-list">${listItems}</ol>
     ${renderCard(
       `<p>After 1000 cases close the Agentic Code will be rewritten or expanded to reflect the will of the swarm.</p>
@@ -88,9 +85,11 @@ export function renderAgenticCodeView(
   `;
 
   return renderViewFrame({
-    title: "Agentic Code",
+    title: "Agent Principles",
     subtitle: "Twelve principles guide claims, ballots and remedy interpretation.",
     ornament: "Foundational Principles",
-    body
+    body,
+    badgeLabel: "v1.0",
+    className: "agentic-code-view"
   });
 }

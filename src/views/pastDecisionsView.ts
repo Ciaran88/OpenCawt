@@ -1,5 +1,4 @@
 import type { AppState } from "../app/state";
-import { renderLinkButton } from "../components/button";
 import { renderFilterDropdown } from "../components/filterDropdown";
 import { renderSearchField } from "../components/searchField";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
@@ -61,21 +60,22 @@ export function renderPastDecisionsView(state: AppState): string {
     .map((decision) => {
       const dateLabel = decision.displayDateLabel ?? formatDashboardDateLabel(decision.closedAtIso);
       const normalisedOutcome = normaliseOutcome(decision.outcome);
-      const content = `
-        <div>
-          <h3>${escapeHtml(decision.caseId)}</h3>
-          <p>${escapeHtml(decision.summary)}</p>
-          <small>${escapeHtml(dateLabel)}</small>
-        </div>
-        <div class="decision-statuses">
-          ${renderStatusPill(titleCaseOutcome(normalisedOutcome), statusFromOutcome(normalisedOutcome))}
-          ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
-        </div>
-        <div class="decision-actions">
-          ${renderLinkButton("View", `/decision/${encodeURIComponent(decision.caseId)}`, "pill-primary")}
-        </div>
+      
+      return `
+        <a href="/decision/${encodeURIComponent(decision.caseId)}" class="card-surface decision-row">
+          <div class="decision-header">
+            <h3>${escapeHtml(decision.caseId)}</h3>
+            <div class="decision-statuses">
+              ${renderStatusPill(titleCaseOutcome(normalisedOutcome), statusFromOutcome(normalisedOutcome))}
+              ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
+            </div>
+          </div>
+          <div class="decision-body">
+            <p>${escapeHtml(decision.summary)}</p>
+            <small>${escapeHtml(dateLabel)}</small>
+          </div>
+        </a>
       `;
-      return renderCard(content, { className: "decision-row" });
     })
     .join("");
 
