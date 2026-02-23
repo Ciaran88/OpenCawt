@@ -1000,31 +1000,220 @@ select:focus {
   }
 }
 
-/* Expandable Juror Tile */
-.juror-tile.is-expandable {
+/* Juror Panel Styles */
+.jury-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  /* Remove card styling as requested */
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-bottom: var(--space-4);
+}
+
+.jury-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  
+  /* Match transcript-header styling */
+  background-color: var(--bg-panel);
+  border-bottom: 1px solid var(--border-base);
+  padding: var(--space-3) var(--space-4);
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-height: 50px; /* Ensure consistency */
+
+  /* Pull to edges of parent padding */
+  margin-left: calc(var(--space-4) * -1);
+  margin-right: calc(var(--space-4) * -1);
+  margin-top: calc(var(--space-4) * -1);
+  width: calc(100% + (var(--space-4) * 2));
+}
+
+.jury-panel-head h3 {
+  margin: 0;
+  font-size: 0.9rem; /* Match transcript header font size */
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Jury Status Row */
+.jury-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  margin-bottom: var(--space-2);
+}
+
+.jury-timer {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.jury-timer strong {
+  color: var(--text-tertiary);
+  font-weight: 500;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  margin-bottom: 2px;
+}
+
+.jury-timer span {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Donut */
+.ballot-donut {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ballot-donut svg {
+  transform: rotate(-90deg);
+}
+
+.ballot-donut text {
+  transform: rotate(90deg);
+  transform-origin: center;
+  fill: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+
+.donut-text-count {
+  font-size: 1.2rem;
+}
+
+.donut-text-void {
+  font-size: 0.9rem;
+  fill: var(--text-tertiary);
+  font-weight: 700;
+}
+
+.donut-icon-complete {
+  color: var(--accent-success);
+}
+
+/* Juror Grid */
+.juror-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+
+/* Juror Card */
+.juror-card {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  transition: all 0.2s ease;
+  min-height: 50px;
+}
+
+.juror-card:hover {
+  border-color: var(--border-light);
+}
+
+.juror-card.is-expandable {
   cursor: pointer;
 }
 
-.juror-tile.is-expandable:hover {
+.juror-card.is-expandable:hover {
   background-color: var(--bg-surface-hover);
 }
 
-.juror-detail-row {
-  margin-top: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--border-light);
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  display: none;
-}
-
-.juror-tile.is-expanded .juror-detail-row {
-  display: block;
-}
-
-.juror-tile.is-expanded {
+.juror-card.is-expanded {
   background-color: var(--bg-surface);
   border-color: var(--border-light);
+  grid-column: 1 / -1; /* Expand to full row width if possible */
+}
+
+/* Note: grid-column 1/-1 only works nicely if we don't care about flow gaps. 
+   Actually, with auto-fill, expanding one item to full width might leave gaps. 
+   For simplicity in this CSS grid, we might avoid full-width expansion unless we change grid layout.
+   Let's remove grid-column expansion for now to keep it safe, just expand height.
+*/
+.juror-card.is-expanded {
+  grid-column: auto;
+}
+
+.juror-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.juror-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.juror-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Status Colors */
+.status-pending .juror-icon {
+  color: var(--accent-purple);
+}
+
+.status-yay .juror-icon {
+  color: var(--accent-success);
+}
+
+.status-nay .juror-icon {
+  color: var(--accent-error);
+}
+
+.status-cast .juror-icon {
+  color: var(--accent-blue);
+}
+
+/* Expanded Content */
+.juror-card-body {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-base);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  animation: fadeIn 0.2s ease;
+}
+
+.juror-card-body strong {
+  color: var(--text-primary);
+  display: block;
+  margin-bottom: var(--space-1);
+}
+
+.juror-principles {
+  margin-top: var(--space-2);
+  font-size: 0.8rem;
+  color: var(--accent-blue);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Navigation Row */
