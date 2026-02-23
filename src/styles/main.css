@@ -346,15 +346,78 @@ a {
 /* Cards */
 .card-surface,
 .glass-card,
-.glass-surface {
+.glass-surface,
+.glass-overlay,
+.info-card,
+.record-card,
+.form-card {
   background-color: var(--bg-panel);
   border: 1px solid var(--border-base);
   border-radius: var(--radius-lg);
   box-shadow: none; /* No shadow by default */
 }
 
-.card-surface:hover {
+.card-surface:hover,
+.glass-overlay:hover,
+.info-card:hover,
+.record-card:hover,
+.form-card:hover {
   border-color: var(--border-light);
+}
+
+.info-card,
+.record-card,
+.form-card {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.decision-row {
+  padding: var(--space-4);
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.decision-row h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.decision-row p {
+  margin: var(--space-1) 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.decision-row small {
+  color: var(--text-tertiary);
+}
+
+.decision-statuses {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.decision-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* Fix for unstyled party columns in caseDetailView */
+.party-column {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 /* Buttons */

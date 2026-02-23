@@ -1,10 +1,12 @@
 import type { AppState } from "../app/state";
 import { renderLinkButton } from "../components/button";
-import { renderSegmentedControl } from "../components/segmentedControl";
+import { renderFilterDropdown } from "../components/filterDropdown";
+import { renderSearchField } from "../components/searchField";
 import { renderStatusPill, statusFromOutcome } from "../components/statusPill";
 import type { Decision } from "../data/types";
 import { formatDashboardDateLabel, normaliseOutcome, titleCaseOutcome } from "../util/format";
 import { escapeHtml } from "../util/html";
+import { renderCard } from "../components/card";
 import { renderViewFrame } from "./common";
 
 function applyDecisionFilters(state: AppState): Decision[] {
@@ -30,49 +32,50 @@ function applyDecisionFilters(state: AppState): Decision[] {
 export function renderPastDecisionsView(state: AppState): string {
   const rows = applyDecisionFilters(state);
 
-  const toolbar = `
-    <section class="toolbar toolbar-decisions glass-overlay">
-      <label class="search-field" aria-label="Search decisions">
-        <span class="segmented-label">Search</span>
-        <input data-action="decisions-query" type="search" placeholder="Case ID" value="${escapeHtml(
-          state.decisionsControls.query
-        )}" />
-      </label>
-      ${renderSegmentedControl({
-        label: "Outcome",
-        action: "decisions-outcome",
-        selected: state.decisionsControls.outcome,
-        list: [
-          { value: "all", label: "All" },
-          { value: "for_prosecution", label: "For prosecution" },
-          { value: "for_defence", label: "For defence" },
-          { value: "void", label: "Void" }
-        ]
-      })}
-      <p class="toolbar-note">${rows.length} decisions shown</p>
-    </section>
-  `;
+  const toolbar = renderCard(
+    `
+    ${renderSearchField({
+      label: "Search",
+      ariaLabel: "Search decisions",
+      action: "decisions-query",
+      placeholder: "Case ID",
+      value: state.decisionsControls.query
+    })}
+    ${renderFilterDropdown({
+      label: "Outcome",
+      action: "decisions-outcome",
+      selected: state.decisionsControls.outcome,
+      list: [
+        { value: "all", label: "All" },
+        { value: "for_prosecution", label: "For prosecution" },
+        { value: "for_defence", label: "For defence" },
+        { value: "void", label: "Void" }
+      ]
+    })}
+    <p class="toolbar-note">${rows.length} decisions shown</p>
+    `,
+    { tagName: "section", className: "toolbar toolbar-decisions" }
+  );
 
   const list = rows
     .map((decision) => {
       const dateLabel = decision.displayDateLabel ?? formatDashboardDateLabel(decision.closedAtIso);
       const normalisedOutcome = normaliseOutcome(decision.outcome);
-      return `
-        <article class="decision-row card-surface" role="article">
-          <div>
-            <h3>${escapeHtml(decision.caseId)}</h3>
-            <p>${escapeHtml(decision.summary)}</p>
-            <small>${escapeHtml(dateLabel)}</small>
-          </div>
-          <div class="decision-statuses">
-            ${renderStatusPill(titleCaseOutcome(normalisedOutcome), statusFromOutcome(normalisedOutcome))}
-            ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
-          </div>
-          <div class="decision-actions">
-            ${renderLinkButton("View", `/decision/${encodeURIComponent(decision.caseId)}`, "pill-primary")}
-          </div>
-        </article>
+      const content = `
+        <div>
+          <h3>${escapeHtml(decision.caseId)}</h3>
+          <p>${escapeHtml(decision.summary)}</p>
+          <small>${escapeHtml(dateLabel)}</small>
+        </div>
+        <div class="decision-statuses">
+          ${renderStatusPill(titleCaseOutcome(normalisedOutcome), statusFromOutcome(normalisedOutcome))}
+          ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
+        </div>
+        <div class="decision-actions">
+          ${renderLinkButton("View", `/decision/${encodeURIComponent(decision.caseId)}`, "pill-primary")}
+        </div>
       `;
+      return renderCard(content, { className: "decision-row" });
     })
     .join("");
 
