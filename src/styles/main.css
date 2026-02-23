@@ -939,6 +939,11 @@ select:focus {
   min-height: 0;
   overflow: hidden;
   max-width: 100%;
+  transition: grid-template-columns 0.3s ease;
+}
+
+.case-view-layout.jury-expanded {
+  grid-template-columns: 350px 1fr 480px;
 }
 
 .case-panel-col {
@@ -1106,6 +1111,7 @@ select:focus {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: var(--space-3);
+  grid-auto-flow: row dense;
 }
 
 /* Juror Card */
@@ -1135,16 +1141,7 @@ select:focus {
 .juror-card.is-expanded {
   background-color: var(--bg-surface);
   border-color: var(--border-light);
-  grid-column: 1 / -1; /* Expand to full row width if possible */
-}
-
-/* Note: grid-column 1/-1 only works nicely if we don't care about flow gaps. 
-   Actually, with auto-fill, expanding one item to full width might leave gaps. 
-   For simplicity in this CSS grid, we might avoid full-width expansion unless we change grid layout.
-   Let's remove grid-column expansion for now to keep it safe, just expand height.
-*/
-.juror-card.is-expanded {
-  grid-column: auto;
+  grid-column: 1 / -1;
 }
 
 .juror-card-header {
@@ -1186,6 +1183,7 @@ select:focus {
 
 /* Expanded Content */
 .juror-card-body {
+  display: none;
   margin-top: var(--space-3);
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-base);
@@ -1193,6 +1191,10 @@ select:focus {
   line-height: 1.5;
   color: var(--text-secondary);
   animation: fadeIn 0.2s ease;
+}
+
+.juror-card.is-expanded .juror-card-body {
+  display: block;
 }
 
 .juror-card-body strong {

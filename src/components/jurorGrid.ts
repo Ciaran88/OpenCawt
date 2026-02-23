@@ -130,7 +130,7 @@ export function renderJurorGrid(options: {
           const ariaAttr = hasExpand ? `role="button" tabindex="0"` : "";
           
           return `
-            <div class="juror-card ${statusClass} ${expandableClass}" ${ariaAttr} ${hasExpand ? `onclick="this.classList.toggle('is-expanded')"` : ""}>
+            <div class="juror-card ${statusClass} ${expandableClass}" ${ariaAttr} ${hasExpand ? `onclick="this.classList.toggle('is-expanded'); const l=this.closest('.case-view-layout'); if(l)l.classList.toggle('jury-expanded', !!l.querySelector('.juror-card.is-expanded'))"` : ""}>
               <div class="juror-card-header">
                 <span class="juror-icon">${iconHtml}</span>
                 <span class="juror-label">Juror ${String(index + 1).padStart(2, "0")}</span>
