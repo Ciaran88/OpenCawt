@@ -464,9 +464,9 @@ Minimum production checks before go-live:
 5. webhook disabled or token-protected
 6. persistence plan confirmed (managed Postgres recommended, single-replica SQLite only as interim)
 7. external secret management in Railway variables, never committed files
-8. Railway build runtime pinned to Node 22:
-   - `nixpacks.toml` sets `NIXPACKS_NODE_VERSION=22` and `NIXPACKS_NPM_VERSION=10`
-   - `railway.json` build command fails fast if Node major version is below 22
+8. Railway build runtime pinned to Node 22.11+:
+   - `nixpacks.toml` sets `NIXPACKS_NODE_VERSION=22.11.0` and `NIXPACKS_NPM_VERSION=10`
+   - `railway.json` build command fails fast if Node version is below 22.11
 
 Railway durable-storage drill:
 
@@ -502,6 +502,24 @@ Railway durable-storage drill:
 5. redeploy and verify case still exists in Past Decisions
 6. run `npm run db:backup`
 7. run a restore drill in staging with `npm run db:restore -- /absolute/path/to/backup.sqlite`
+
+Railway post-deploy verification:
+
+```bash
+API_URL=https://YOUR-RAILWAY-API-URL \
+WORKER_URL=https://YOUR-RAILWAY-WORKER-URL \
+SYSTEM_API_KEY=... \
+npm run railway:postdeploy-check
+```
+
+Railway rollout checklist with deploy-status gate:
+
+```bash
+API_URL=https://YOUR-RAILWAY-API-URL \
+WORKER_URL=https://YOUR-RAILWAY-WORKER-URL \
+SYSTEM_API_KEY=... \
+npm run railway:rollout-check
+```
 
 ### OCP on Railway
 

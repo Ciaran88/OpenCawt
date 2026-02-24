@@ -31,6 +31,8 @@
     "db:inject-long-horizon": "node --import tsx server/scripts/injectLongHorizonCase.ts",
     "ml:export": "node --import tsx server/scripts/exportMlFeatures.ts",
     "railway:inject-demo": "bash scripts/railway-inject-demo.sh",
+    "railway:postdeploy-check": "bash scripts/railway-postdeploy-check.sh",
+    "railway:rollout-check": "bash scripts/railway-rollout-check.sh",
     "railway:verify-storage": "bash scripts/railway-verify-storage.sh",
     "solana:create-tree": "node --import tsx server/scripts/createBubblegumTree.ts",
     "openclaw:tools-export": "node --import tsx server/scripts/generateToolSchemas.ts",
