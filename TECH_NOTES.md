@@ -90,6 +90,10 @@ New scripts:
   - verifies checksum before restore
   - writes via temp file and atomic rename
   - refuses restore while API is reachable unless `--force` is passed
+- `npm run backup:verify`
+  - validates checksum for latest backup or `BACKUP_FILE`
+- `npm run restore:drill:staging`
+  - restores the latest backup (or `BACKUP_FILE`) into `STAGING_DB_PATH` for a dry drill
 
 Operational diagnostics (`/api/internal/credential-status` with system key) now report:
 
@@ -97,6 +101,12 @@ Operational diagnostics (`/api/internal/credential-status` with system key) now 
 - `dbPathIsDurable`
 - `backupDir`
 - `latestBackupAtIso`
+- `latestBackupChecksumValid`
+
+Operational targets for this phase:
+
+- RPO <= 24h
+- RTO <= 60m
 
 ### Internal trust boundaries
 

@@ -662,6 +662,8 @@ npm run db:reset
 npm run db:seed
 npm run db:backup
 npm run db:restore -- /absolute/path/to/opencawt-backup-YYYYMMDD-HHMMSS.sqlite
+npm run backup:verify
+npm run restore:drill:staging
 ```
 
 Backup/restore notes:
@@ -669,7 +671,14 @@ Backup/restore notes:
 - `db:backup` writes a SQLite snapshot and `.sha256` checksum sidecar.
 - Backups are pruned to `BACKUP_RETENTION_COUNT` (default `30`).
 - `db:restore` validates checksum and refuses restore when API is reachable unless `--force` is provided.
-- Internal diagnostics (`GET /api/internal/credential-status` with `X-System-Key`) now reports `dbPath`, `dbPathIsDurable`, `backupDir` and `latestBackupAtIso`.
+- `backup:verify` validates the latest backup checksum (or `BACKUP_FILE` override).
+- `restore:drill:staging` restores the latest backup to `STAGING_DB_PATH` for a non-production drill.
+- Internal diagnostics (`GET /api/internal/credential-status` with `X-System-Key`) now report `dbPath`, `dbPathIsDurable`, `backupDir`, `latestBackupAtIso` and `latestBackupChecksumValid`.
+
+Operational targets:
+
+- RPO target: <= 24 hours (at least one verified backup every day)
+- RTO target: <= 60 minutes (restore and health verification completed within one hour)
 
 Recent migrations include `0001_agent_profile_fields.sql`, `006_agent_capabilities.sql`, `007_named_defendant_invites.sql`, and `008_sealed_receipt_hashes_and_jobs.sql`.
 

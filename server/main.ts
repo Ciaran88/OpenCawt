@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, extname } from "node:path";
 import { canonicalHashHex } from "../shared/hash";
 import { createId } from "../shared/ids";
@@ -223,9 +223,15 @@ function assertAdminToken(req: IncomingMessage): void {
 
 const closingCases = new Set<string>();
 
-function findLatestBackupIso(backupDir: string): string | null {
+function findLatestBackupInfo(backupDir: string): {
+  latestBackupAtIso: string | null;
+  latestBackupChecksumValid: boolean | null;
+} {
   if (!existsSync(backupDir)) {
-    return null;
+    return {
+      latestBackupAtIso: null,
+      latestBackupChecksumValid: null
+    };
   }
   const backupEntries = readdirSync(backupDir)
     .filter((name) => /^opencawt-backup-.*\.sqlite$/.test(name))
@@ -233,14 +239,45 @@ function findLatestBackupIso(backupDir: string): string | null {
       const path = join(backupDir, name);
       const stat = statSync(path);
       return {
+        path,
         mtimeMs: stat.mtimeMs
       };
     })
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   if (!backupEntries.length) {
-    return null;
+    return {
+      latestBackupAtIso: null,
+      latestBackupChecksumValid: null
+    };
   }
-  return new Date(backupEntries[0].mtimeMs).toISOString();
+  const latest = backupEntries[0];
+  const checksumPath = `${latest.path}.sha256`;
+  if (!existsSync(checksumPath)) {
+    return {
+      latestBackupAtIso: new Date(latest.mtimeMs).toISOString(),
+      latestBackupChecksumValid: false
+    };
+  }
+  try {
+    const checksumContent = readFileSync(checksumPath, "utf8").trim();
+    const expected = checksumContent.split(/\s+/)[0] ?? "";
+    if (!/^[a-f0-9]{64}$/i.test(expected)) {
+      return {
+        latestBackupAtIso: new Date(latest.mtimeMs).toISOString(),
+        latestBackupChecksumValid: false
+      };
+    }
+    const actual = createHash("sha256").update(readFileSync(latest.path)).digest("hex");
+    return {
+      latestBackupAtIso: new Date(latest.mtimeMs).toISOString(),
+      latestBackupChecksumValid: expected.toLowerCase() === actual.toLowerCase()
+    };
+  } catch {
+    return {
+      latestBackupAtIso: new Date(latest.mtimeMs).toISOString(),
+      latestBackupChecksumValid: false
+    };
+  }
 }
 
 function resolveCaseIdFromPath(pathname: string): string | null {
@@ -1435,7 +1472,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     if (method === "GET" && pathname === "/api/internal/credential-status") {
       assertSystemKey(req, config);
-      const latestBackupAtIso = findLatestBackupIso(config.backupDir);
+      const backupInfo = findLatestBackupInfo(config.backupDir);
       const sealQueue = getSealQueueMetrics(db);
       sendJson(res, 200, {
         solanaMode: config.solanaMode,
@@ -1444,7 +1481,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         dbPath: config.dbPath,
         dbPathIsDurable: config.isProduction ? isDurableDbPath(config.dbPath) : true,
         backupDir: config.backupDir,
-        latestBackupAtIso,
+        latestBackupAtIso: backupInfo.latestBackupAtIso,
+        latestBackupChecksumValid: backupInfo.latestBackupChecksumValid,
         hasHeliusApiKey: Boolean(config.heliusApiKey),
         hasTreasuryAddress: Boolean(config.treasuryAddress),
         hasWorkerToken: Boolean(config.workerToken),

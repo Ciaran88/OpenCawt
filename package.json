@@ -26,6 +26,8 @@
     "db:seed": "node --import tsx server/scripts/seedPhase3.ts",
     "db:backup": "node --import tsx server/scripts/backupDb.ts",
     "db:restore": "node --import tsx server/scripts/restoreDb.ts",
+    "backup:verify": "bash scripts/backup-verify.sh",
+    "restore:drill:staging": "bash scripts/staging-restore-drill.sh",
     "db:inject-demo-case": "node --import tsx server/scripts/injectDemoCompletedCase.ts",
     "db:inject-demo-agent": "node --import tsx server/scripts/injectDemoAgent.ts",
     "db:inject-long-horizon": "node --import tsx server/scripts/injectLongHorizonCase.ts",
