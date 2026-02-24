@@ -7,6 +7,14 @@ import { renderStepper } from "../components/stepper";
 import type { Case, PartySubmissionPack, SessionStage, TranscriptEvent } from "../data/types";
 import { escapeHtml } from "../util/html";
 import { classifyAttachmentUrl } from "../util/media";
+import {
+  actorLabel,
+  eventTimeLabel,
+  isCourtSignpost,
+  resolveTranscriptSpeaker,
+  shouldShowSpeakerAvatar,
+  stageLabel
+} from "../util/transcript";
 import { renderPanelResizeButton, renderViewFrame } from "./common";
 
 function renderPrinciples(principles: Array<number | string>): string {
@@ -78,6 +86,7 @@ export function renderTranscript(events: TranscriptEvent[]): string {
   if (events.length === 0) {
     return `<p class="muted">No transcript events yet.</p>`;
   }
+  const hasJudgeContext = events.some((event) => event.stage === "judge_screening");
 
   const renderAttachments = (event: TranscriptEvent): string => {
     const payload = event.payload as { attachmentUrls?: unknown } | undefined;
@@ -89,22 +98,22 @@ export function renderTranscript(events: TranscriptEvent[]): string {
     }
 
     return `
-      <div class="chat-attachments">
+      <div class="transcript-attachments">
         ${urls
           .map((url, index) => {
             const safeUrl = escapeHtml(url);
             const label = `Attachment ${index + 1}`;
             const kind = classifyAttachmentUrl(url);
             if (kind === "image") {
-              return `<figure class="chat-attachment-media"><img src="${safeUrl}" alt="${escapeHtml(label)}" loading="lazy" /></figure>`;
+              return `<figure class="transcript-attachment-media"><img src="${safeUrl}" alt="${escapeHtml(label)}" loading="lazy" /></figure>`;
             }
             if (kind === "video") {
-              return `<figure class="chat-attachment-media"><video src="${safeUrl}" controls preload="metadata"></video></figure>`;
+              return `<figure class="transcript-attachment-media"><video src="${safeUrl}" controls preload="metadata"></video></figure>`;
             }
             if (kind === "audio") {
-              return `<div class="chat-attachment-media"><audio src="${safeUrl}" controls preload="none"></audio></div>`;
+              return `<div class="transcript-attachment-media"><audio src="${safeUrl}" controls preload="none"></audio></div>`;
             }
-            return `<a class="chat-attachment-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+            return `<a class="transcript-attachment-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(
               url
             )}</a>`;
           })
@@ -114,18 +123,46 @@ export function renderTranscript(events: TranscriptEvent[]): string {
   };
 
   return `
-    <div class="transcript-window" aria-label="Case transcript">
+    <div class="transcript-window transcript-glass" aria-label="Case transcript">
       ${events
-        .map((event) => {
-          const roleClass = `role-${event.actorRole}`;
+        .map((event, index) => {
+          if (isCourtSignpost(event)) {
+            return `
+              <section class="transcript-signpost" aria-label="Stage signpost">
+                <span class="transcript-signpost-stage">${escapeHtml(stageLabel(event.stage))}</span>
+                <p class="transcript-signpost-text">${escapeHtml(event.messageText)}</p>
+              </section>
+            `;
+          }
+          const speaker = resolveTranscriptSpeaker(event, { hasJudgeContext });
+          const previous = index > 0 ? events[index - 1] : undefined;
+          const previousSpeaker = previous
+            ? resolveTranscriptSpeaker(previous, { hasJudgeContext })
+            : undefined;
+          const showAvatar = shouldShowSpeakerAvatar(event, previous, speaker, previousSpeaker);
+          const speakerName = speaker.speakerKey === "jury" ? actorLabel(event) : speaker.displayLabel;
           return `
-            <article class="chat-bubble ${roleClass}">
-              <header>
-                <strong>${escapeHtml(event.actorRole)}</strong>
-                <span>${escapeHtml(new Date(event.createdAtIso).toLocaleTimeString())}</span>
-              </header>
-              <p class="chat-message-text">${escapeHtml(event.messageText)}</p>
-              ${renderAttachments(event)}
+            <article class="transcript-row transcript-row--${speaker.align}">
+              <div class="transcript-row-inner">
+                ${
+                  showAvatar
+                    ? `<header class="transcript-speaker-head">
+                        <span class="transcript-avatar" aria-hidden="true">
+                          <span class="transcript-avatar-fallback">${escapeHtml(speaker.fallbackLabel)}</span>
+                          <img class="transcript-avatar-img" src="${escapeHtml(speaker.iconPath)}" alt="" loading="lazy" />
+                        </span>
+                        <span class="transcript-speaker-name">${escapeHtml(speakerName)}</span>
+                      </header>`
+                    : ""
+                }
+                <div class="transcript-bubble transcript-bubble--${speaker.speakerKey}">
+                  <p class="transcript-message-text">${escapeHtml(event.messageText)}</p>
+                  ${renderAttachments(event)}
+                </div>
+                <footer class="transcript-meta">
+                  <span class="transcript-time">${escapeHtml(eventTimeLabel(event))}</span>
+                </footer>
+              </div>
             </article>
           `;
         })

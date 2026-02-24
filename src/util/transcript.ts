@@ -1,6 +1,22 @@
 import type { SessionStage, TranscriptEvent, TranscriptVoteAnswer } from "../data/types";
 
 export const PROSECUTION_VOTE_PROMPT = "Do you side with the prosecution on this case?";
+const COURT_ICON_PATH = "/chaticons/court.png";
+const JUDGE_ICON_PATH = "/chaticons/judge.png";
+const JURY_ICON_PATH = "/chaticons/jury.png";
+const PROSECUTION_ICON_PATH = "/chaticons/prosecution.png";
+const DEFENCE_ICON_PATH = "/chaticons/defense.png";
+
+export type TranscriptSpeakerKey = "court" | "judge" | "jury" | "prosecution" | "defence";
+export type TranscriptSpeakerAlign = "left" | "right";
+
+export interface TranscriptSpeakerVisual {
+  speakerKey: TranscriptSpeakerKey;
+  align: TranscriptSpeakerAlign;
+  iconPath: string;
+  displayLabel: string;
+  fallbackLabel: string;
+}
 
 function fromVoteLabel(value: unknown): TranscriptVoteAnswer | null {
   if (value === "for_prosecution") {
@@ -37,6 +53,106 @@ export function stageLabel(stage?: SessionStage): string {
     return "General";
   }
   return stage.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function inferJudgeSurface(event: TranscriptEvent, hasJudgeContext: boolean): boolean {
+  if (event.stage === "judge_screening") {
+    return true;
+  }
+
+  if (event.actorRole !== "court" && event.actorRole !== "system") {
+    return false;
+  }
+
+  const payloadText =
+    event.payload && typeof event.payload === "object" ? JSON.stringify(event.payload) : "";
+  const merged = `${event.messageText} ${payloadText}`.toLowerCase();
+  if (
+    /\bjudge\b/.test(merged) ||
+    /\btiebreak\b/.test(merged) ||
+    /\bintent class\b/.test(merged) ||
+    /\bremediation\b/.test(merged)
+  ) {
+    return true;
+  }
+
+  if (
+    hasJudgeContext &&
+    event.stage === "closed" &&
+    (event.eventType === "case_closed" || event.eventType === "notice")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function resolveTranscriptSpeaker(
+  event: TranscriptEvent,
+  options?: { hasJudgeContext?: boolean }
+): TranscriptSpeakerVisual {
+  const hasJudgeContext = options?.hasJudgeContext ?? false;
+  if (event.actorRole === "prosecution") {
+    return {
+      speakerKey: "prosecution",
+      align: "left",
+      iconPath: PROSECUTION_ICON_PATH,
+      displayLabel: "Prosecution",
+      fallbackLabel: "P"
+    };
+  }
+  if (event.actorRole === "defence") {
+    return {
+      speakerKey: "defence",
+      align: "right",
+      iconPath: DEFENCE_ICON_PATH,
+      displayLabel: "Defence",
+      fallbackLabel: "D"
+    };
+  }
+  if (event.actorRole === "juror") {
+    return {
+      speakerKey: "jury",
+      align: "left",
+      iconPath: JURY_ICON_PATH,
+      displayLabel: "Jury",
+      fallbackLabel: "J"
+    };
+  }
+  if (inferJudgeSurface(event, hasJudgeContext)) {
+    return {
+      speakerKey: "judge",
+      align: "left",
+      iconPath: JUDGE_ICON_PATH,
+      displayLabel: "Judge",
+      fallbackLabel: "J"
+    };
+  }
+  return {
+    speakerKey: "court",
+    align: "left",
+    iconPath: COURT_ICON_PATH,
+    displayLabel: "Court",
+    fallbackLabel: "C"
+  };
+}
+
+export function shouldShowSpeakerAvatar(
+  event: TranscriptEvent,
+  previous: TranscriptEvent | undefined,
+  speaker: TranscriptSpeakerVisual,
+  previousSpeaker: TranscriptSpeakerVisual | undefined
+): boolean {
+  if (!previous || !previousSpeaker) {
+    return true;
+  }
+  if (speaker.speakerKey !== previousSpeaker.speakerKey) {
+    return true;
+  }
+  if ((event.actorAgentId ?? "") !== (previous.actorAgentId ?? "")) {
+    return true;
+  }
+  return false;
 }
 
 export function isCourtSignpost(event: TranscriptEvent): boolean {

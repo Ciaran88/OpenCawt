@@ -65,7 +65,12 @@ import {
   formatDurationLabel
 } from "../src/util/countdown";
 import { renderTicker } from "../src/components/ticker";
-import type { TickerEvent } from "../src/data/types";
+import type { TickerEvent, TranscriptEvent } from "../src/data/types";
+import { renderTranscript } from "../src/views/caseDetailView";
+import {
+  resolveTranscriptSpeaker,
+  shouldShowSpeakerAvatar
+} from "../src/util/transcript";
 import { parseRoute, routeToPath } from "../src/util/router";
 import { loadOpenClawToolRegistry } from "../server/integrations/openclaw/exampleToolRegistry";
 import { OPENCAWT_OPENCLAW_TOOLS } from "../shared/openclawTools";
@@ -245,6 +250,111 @@ function testTickerOutcomeMapping() {
   assert.ok(upCount >= 2, `Expected at least 2 thumbs-up icons, got ${upCount}`);
   // 2:for_defence + 5:for_defense + 6:label Nay => down
   assert.ok(downCount >= 3, `Expected at least 3 thumbs-down icons, got ${downCount}`);
+}
+
+function testTranscriptSpeakerMapping() {
+  const prosecutionEvent: TranscriptEvent = {
+    eventId: "E-1",
+    caseId: "OC-TX-001",
+    seqNo: 1,
+    actorRole: "prosecution",
+    eventType: "stage_submission",
+    messageText: "Prosecution message",
+    createdAtIso: new Date().toISOString()
+  };
+  const prosecutionSpeaker = resolveTranscriptSpeaker(prosecutionEvent, { hasJudgeContext: false });
+  assert.equal(prosecutionSpeaker.speakerKey, "prosecution");
+  assert.equal(prosecutionSpeaker.align, "left");
+  assert.equal(prosecutionSpeaker.iconPath, "/chaticons/prosecution.png");
+
+  const defenceEvent: TranscriptEvent = {
+    ...prosecutionEvent,
+    eventId: "E-2",
+    actorRole: "defence"
+  };
+  const defenceSpeaker = resolveTranscriptSpeaker(defenceEvent, { hasJudgeContext: false });
+  assert.equal(defenceSpeaker.speakerKey, "defence");
+  assert.equal(defenceSpeaker.align, "right");
+  assert.equal(defenceSpeaker.iconPath, "/chaticons/defense.png");
+
+  const jurorEvent: TranscriptEvent = {
+    ...prosecutionEvent,
+    eventId: "E-3",
+    actorRole: "juror",
+    actorAgentId: "agent_juror_1",
+    eventType: "ballot_submitted"
+  };
+  const jurorSpeaker = resolveTranscriptSpeaker(jurorEvent, { hasJudgeContext: false });
+  assert.equal(jurorSpeaker.speakerKey, "jury");
+  assert.equal(jurorSpeaker.align, "left");
+  assert.equal(jurorSpeaker.iconPath, "/chaticons/jury.png");
+
+  const courtEvent: TranscriptEvent = {
+    ...prosecutionEvent,
+    eventId: "E-4",
+    actorRole: "court",
+    eventType: "notice",
+    messageText: "Court notice",
+    stage: "pre_session"
+  };
+  const courtSpeaker = resolveTranscriptSpeaker(courtEvent, { hasJudgeContext: false });
+  assert.equal(courtSpeaker.speakerKey, "court");
+  assert.equal(courtSpeaker.iconPath, "/chaticons/court.png");
+
+  const judgeScreeningEvent: TranscriptEvent = {
+    ...courtEvent,
+    eventId: "E-5",
+    stage: "judge_screening",
+    messageText: "Judge screening started."
+  };
+  const judgeSpeaker = resolveTranscriptSpeaker(judgeScreeningEvent, { hasJudgeContext: true });
+  assert.equal(judgeSpeaker.speakerKey, "judge");
+  assert.equal(judgeSpeaker.iconPath, "/chaticons/judge.png");
+
+  const firstCourtEvent: TranscriptEvent = {
+    ...courtEvent,
+    eventId: "E-6",
+    actorAgentId: undefined
+  };
+  assert.equal(shouldShowSpeakerAvatar(firstCourtEvent, undefined, courtSpeaker, undefined), true);
+
+  const secondCourtEvent: TranscriptEvent = {
+    ...courtEvent,
+    eventId: "E-7",
+    actorAgentId: undefined
+  };
+  assert.equal(
+    shouldShowSpeakerAvatar(secondCourtEvent, firstCourtEvent, courtSpeaker, courtSpeaker),
+    false
+  );
+
+  const jurorA: TranscriptEvent = {
+    ...jurorEvent,
+    eventId: "E-8",
+    actorAgentId: "juror_A"
+  };
+  const jurorB: TranscriptEvent = {
+    ...jurorEvent,
+    eventId: "E-9",
+    actorAgentId: "juror_B"
+  };
+  const jurySpeaker = resolveTranscriptSpeaker(jurorA, { hasJudgeContext: false });
+  assert.equal(shouldShowSpeakerAvatar(jurorB, jurorA, jurySpeaker, jurySpeaker), true);
+}
+
+function testTranscriptRenderMultiline() {
+  const event: TranscriptEvent = {
+    eventId: "E-ML-1",
+    caseId: "OC-TX-ML",
+    seqNo: 1,
+    actorRole: "prosecution",
+    eventType: "stage_submission",
+    messageText: "Line one.\nLine two.",
+    createdAtIso: "2026-02-24T09:00:00.000Z"
+  };
+  const html = renderTranscript([event]);
+  assert.match(html, /transcript-message-text/);
+  assert.match(html, /Line one\.\nLine two\./);
 }
 
 function testCaseTitleTruncation() {
@@ -1878,6 +1988,8 @@ async function run() {
   await testEvidenceAttachmentHashing();
   testTranscriptVoteMapping();
   testTickerOutcomeMapping();
+  testTranscriptSpeakerMapping();
+  testTranscriptRenderMultiline();
   testCaseTitleTruncation();
   await testSealHashFixtures();
   await testSwarmValidationHelpers();
