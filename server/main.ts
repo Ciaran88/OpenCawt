@@ -491,13 +491,35 @@ interface JurySelectionComputation {
   runId: string;
 }
 
+function parseJurySelectionAllowlist(): string[] | undefined {
+  const raw = getRuntimeConfig(db, "jury_selection_allowlist_json");
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return undefined;
+    }
+    const ids = parsed
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function computeInitialJurySelection(caseId: string): Promise<JurySelectionComputation> {
   const caseRecord = ensureCaseExists(caseId);
   const globalCourtMode = (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode;
   const jurySize = globalCourtMode === "judge" ? 12 : config.rules.jurorPanelSize;
+  const jurySelectionAllowlist = parseJurySelectionAllowlist();
   const eligible = listEligibleJurors(db, {
     excludeAgentIds: [caseRecord.prosecutionAgentId, caseRecord.defenceAgentId ?? ""].filter(Boolean),
-    weeklyLimit: 3
+    weeklyLimit: 3,
+    restrictToAgentIds: jurySelectionAllowlist
   });
 
   const drandData = await drand.getRoundAtOrAfter(Date.now());
@@ -1521,6 +1543,39 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }
       setRuntimeConfig(db, "court_mode", body.mode);
       sendJson(res, 200, { courtMode: body.mode });
+      return;
+    }
+
+    // Restrict jury selection to a deterministic allowlist (admin, simulation support)
+    if (method === "POST" && pathname === "/api/internal/config/jury-selection-allowlist") {
+      assertAdminToken(req);
+      const body = await readJsonBody<{ agentIds?: string[] | null; clear?: boolean }>(req);
+      const clear = body.clear === true || body.agentIds === null;
+      if (clear) {
+        setRuntimeConfig(db, "jury_selection_allowlist_json", "[]");
+        sendJson(res, 200, { enabled: false, count: 0 });
+        return;
+      }
+
+      if (!Array.isArray(body.agentIds)) {
+        throw badRequest(
+          "INVALID_ALLOWLIST_PAYLOAD",
+          "Provide agentIds as an array, or clear=true to disable allowlist."
+        );
+      }
+      const cleaned = Array.from(
+        new Set(
+          body.agentIds
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+        )
+      );
+      if (cleaned.length === 0) {
+        throw badRequest("ALLOWLIST_EMPTY", "agentIds must contain at least one agent id.");
+      }
+      setRuntimeConfig(db, "jury_selection_allowlist_json", JSON.stringify(cleaned));
+      sendJson(res, 200, { enabled: true, count: cleaned.length, agentIds: cleaned });
       return;
     }
 

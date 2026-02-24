@@ -6,6 +6,7 @@ import {
   appendTranscriptEvent,
   createJurySelectionRun,
   getCaseRuntime,
+  getRuntimeConfig,
   getSubmissionBySidePhase,
   incrementReplacementCount,
   listBallotsByCase,
@@ -88,6 +89,26 @@ function stageToPhase(
   return null;
 }
 
+function getJurySelectionAllowlist(db: Db): string[] | undefined {
+  const raw = getRuntimeConfig(db, "jury_selection_allowlist_json");
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return undefined;
+    }
+    const ids = parsed
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function nextSubmissionStage(stage: SessionStage): SessionStage | null {
   if (stage === "opening_addresses") {
     return "evidence";
@@ -134,17 +155,23 @@ async function replaceJuror(
   if (caseRecord.defenceAgentId) {
     activeSet.add(caseRecord.defenceAgentId);
   }
+  const allowlist = getJurySelectionAllowlist(deps.db);
+  const allowlistSet = allowlist ? new Set(allowlist) : null;
 
   let candidate: { agentId: string; scoreHash: string } | null = null;
   const proof = caseRecord.selectionProof;
   if (proof) {
     candidate = pickReplacementFromProof(proof, activeSet);
+    if (candidate && allowlistSet && !allowlistSet.has(candidate.agentId)) {
+      candidate = null;
+    }
   }
 
   if (!candidate) {
     const eligible = listEligibleJurors(deps.db, {
       excludeAgentIds: [...activeSet],
-      weeklyLimit: 3
+      weeklyLimit: 3,
+      restrictToAgentIds: allowlist
     });
 
     if (eligible.length > 0) {

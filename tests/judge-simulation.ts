@@ -216,6 +216,21 @@ async function adminPost(path: string, body: unknown, adminToken: string): Promi
   return res.json();
 }
 
+async function setJurySelectionAllowlist(adminToken: string, agentIds: string[]): Promise<void> {
+  const result = await adminPost(
+    "/api/internal/config/jury-selection-allowlist",
+    { agentIds },
+    adminToken
+  );
+  if (!result?.enabled) {
+    throw new Error(`Failed to enable jury selection allowlist: ${JSON.stringify(result)}`);
+  }
+}
+
+async function clearJurySelectionAllowlist(adminToken: string): Promise<void> {
+  await adminPost("/api/internal/config/jury-selection-allowlist", { clear: true }, adminToken);
+}
+
 async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
   if (!HELIUS_RPC_URL) {
     throw new Error("HELIUS_RPC_URL is required for production judge simulation filing.");
@@ -443,6 +458,26 @@ async function driveVoting(
   return { provenCount, notProvenCount };
 }
 
+function resolveSelectedJurorAgents(selectedJurorIds: string[], jurors: Agent[]): Agent[] {
+  const byId = new Map(jurors.map((juror) => [juror.agentId, juror]));
+  const selectedAgents: Agent[] = [];
+  const missing: string[] = [];
+  for (const jurorId of selectedJurorIds) {
+    const juror = byId.get(jurorId);
+    if (!juror) {
+      missing.push(jurorId);
+      continue;
+    }
+    selectedAgents.push(juror);
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `Selected jurors include non-simulation agents: ${missing.slice(0, 5).join(", ")}`
+    );
+  }
+  return selectedAgents;
+}
+
 // ---------------------------------------------------------------------------
 // Text helpers
 // ---------------------------------------------------------------------------
@@ -585,6 +620,7 @@ const JUROR_RATIONALES_NOT_PROVEN = [
 // ---------------------------------------------------------------------------
 
 async function main() {
+  let adminToken = "";
   log("PHASE 1: Setup — Generating agents");
   const prosecution = await makeAgent("prosecution");
   const defence = await makeAgent("defence");
@@ -599,37 +635,45 @@ async function main() {
 
   // ── Ensure requested court mode ──
   log(`PHASE 2: Switch to ${TARGET_COURT_MODE} mode`);
-  const adminToken = await createAdminSessionToken();
-  const modeResult = await adminPost("/api/internal/config/court-mode", { mode: TARGET_COURT_MODE }, adminToken);
-  console.log(`  Court mode set: ${JSON.stringify(modeResult)}`);
+  adminToken = await createAdminSessionToken();
+  try {
+    const modeResult = await adminPost("/api/internal/config/court-mode", { mode: TARGET_COURT_MODE }, adminToken);
+    console.log(`  Court mode set: ${JSON.stringify(modeResult)}`);
 
-  // ── Register agents ──
-  log("PHASE 3: Register all agents");
-  for (const agent of [prosecution, defence, ...jurors]) {
-    const { status, data } = await safeSignedPostWithRetries(agent, "/api/agents/register", {
-      agentId: agent.agentId,
-      jurorEligible: jurors.includes(agent),
-      displayName: agent.label
-    });
-    if (status !== 200) {
-      console.error(`  ✗ Register ${agent.label}: ${status}`, data);
-      process.exit(1);
-    }
-  }
-  console.log(`  ✓ All ${2 + jurors.length} agents registered`);
+    log("PHASE 2B: Restrict jury selection to simulation cohort");
+    await setJurySelectionAllowlist(
+      adminToken,
+      jurors.map((juror) => juror.agentId)
+    );
+    console.log(`  ✓ Jury selection allowlist set (${jurors.length} simulation jurors)`);
 
-  // ── Join jury pool ──
-  log("PHASE 4: Join jury pool");
-  for (const juror of jurors) {
-    const { status, data } = await safeSignedPostWithRetries(juror, "/api/jury-pool/join", {
-      agentId: juror.agentId,
-      availability: "available"
-    });
-    if (status !== 200) {
-      console.error(`  ✗ Jury pool join ${juror.label}: ${status}`, data);
+    // ── Register agents ──
+    log("PHASE 3: Register all agents");
+    for (const agent of [prosecution, defence, ...jurors]) {
+      const { status, data } = await safeSignedPostWithRetries(agent, "/api/agents/register", {
+        agentId: agent.agentId,
+        jurorEligible: jurors.includes(agent),
+        displayName: agent.label
+      });
+      if (status !== 200) {
+        console.error(`  ✗ Register ${agent.label}: ${status}`, data);
+        throw new Error(`Register ${agent.label} failed with ${status}`);
+      }
     }
-  }
-  console.log(`  ✓ ${jurors.length} jurors joined pool`);
+    console.log(`  ✓ All ${2 + jurors.length} agents registered`);
+
+    // ── Join jury pool ──
+    log("PHASE 4: Join jury pool");
+    for (const juror of jurors) {
+      const { status, data } = await safeSignedPostWithRetries(juror, "/api/jury-pool/join", {
+        agentId: juror.agentId,
+        availability: "available"
+      });
+      if (status !== 200) {
+        console.error(`  ✗ Jury pool join ${juror.label}: ${status}`, data);
+      }
+    }
+    console.log(`  ✓ ${jurors.length} jurors joined pool`);
 
   // ── Create case draft ──
   log("PHASE 5: Create case draft");
@@ -655,10 +699,10 @@ async function main() {
     "/api/cases/draft",
     draftPayload
   );
-  if (draftStatus !== 201) {
-    console.error("  ✗ Draft creation failed:", draftStatus, draftData);
-    process.exit(1);
-  }
+    if (draftStatus !== 201) {
+      console.error("  ✗ Draft creation failed:", draftStatus, draftData);
+      throw new Error(`Draft creation failed with ${draftStatus}`);
+    }
   const caseId = draftData.caseId;
   console.log(`  ✓ Draft created: ${caseId}`);
 
@@ -698,7 +742,7 @@ async function main() {
     if (caseAfterScreening.status === "void") {
       console.error("  ✗ Case was rejected by judge screening!");
       console.error(`    Reason: ${caseAfterScreening.summary}`);
-      process.exit(1);
+      throw new Error("Case was voided during judge screening.");
     }
   } else {
     log("PHASE 8: Pre-session transition");
@@ -721,7 +765,8 @@ async function main() {
 
   // ── Confirm jurors ready ──
   log("PHASE 11: Confirm jurors ready");
-  await driveJuryReadiness(caseId, jurors);
+  const selectedJurorAgents = resolveSelectedJurorAgents(selectedJurors, jurors);
+  await driveJuryReadiness(caseId, selectedJurorAgents);
 
   // ── Opening addresses (both sides) ──
   log("PHASE 12: Opening addresses");
@@ -884,7 +929,7 @@ async function main() {
   if (claimIds.length === 0) {
     console.log("  ⚠ No claim IDs found in voteSummary.claimTallies.");
     console.log("  voteSummary:", JSON.stringify(caseDetail.voteSummary, null, 2));
-    process.exit(1);
+    throw new Error("No claim IDs found in voteSummary.");
   }
   const claimId = claimIds[0];
   console.log(`  Claim ID: ${claimId}`);
@@ -898,7 +943,7 @@ async function main() {
   const { provenCount, notProvenCount } = await driveVoting(
     caseId,
     claimId,
-    jurors,
+    selectedJurorAgents,
     targetBallots
   );
   console.log(`  ✓ Ballots submitted: ${provenCount} proven, ${notProvenCount} not_proven`);
@@ -960,6 +1005,22 @@ async function main() {
       console.log(`\n--- Judge Remedy Recommendation ---`);
       console.log(`  ${bundle.overall.judgeRemedyRecommendation}`);
     }
+
+    if (TARGET_COURT_MODE === "judge") {
+      const terminalOutcome = String(bundle.overall?.outcome ?? decision.outcome ?? "");
+      if (terminalOutcome !== "for_prosecution" && terminalOutcome !== "for_defence") {
+        throw new Error(
+          `Judge simulation ended without prosecution/defence verdict (outcome=${terminalOutcome || "unknown"}).`
+        );
+      }
+      const hasJudgeTiebreak =
+        Boolean(bundle.overall?.judgeTiebreak) ||
+        (Array.isArray(bundle.claims) &&
+          bundle.claims.some((claim: any) => Boolean(claim?.judgeTiebreak)));
+      if (!hasJudgeTiebreak) {
+        throw new Error("Expected judge tiebreak metadata was not found in verdict bundle.");
+      }
+    }
   }
 
   // Also check case record for remedy recommendation (stored separately)
@@ -975,6 +1036,16 @@ async function main() {
   console.log(`  Seal error: ${decision.sealInfo?.sealError ?? finalCase.sealError ?? "none"}`);
 
   log("SIMULATION COMPLETE");
+  } finally {
+    if (adminToken) {
+      try {
+        await clearJurySelectionAllowlist(adminToken);
+        console.log("\n[cleanup] Jury selection allowlist cleared.");
+      } catch (error) {
+        console.error("\n[cleanup] Failed to clear jury selection allowlist:", error);
+      }
+    }
+  }
 }
 
 main().catch((err) => {

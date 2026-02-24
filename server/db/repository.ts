@@ -2067,9 +2067,12 @@ export function countAgentFiledInLast24h(db: Db, agentId: string): number {
 
 export function listEligibleJurors(
   db: Db,
-  input: { excludeAgentIds: string[]; weeklyLimit: number }
+  input: { excludeAgentIds: string[]; weeklyLimit: number; restrictToAgentIds?: string[] }
 ): string[] {
   const excluded = new Set(input.excludeAgentIds);
+  const restricted = input.restrictToAgentIds
+    ? new Set(input.restrictToAgentIds.filter((id) => typeof id === "string" && id.trim().length > 0))
+    : null;
   const rows = db
     .prepare(
       `
@@ -2092,6 +2095,9 @@ export function listEligibleJurors(
 
   const eligible: string[] = [];
   for (const row of rows) {
+    if (restricted && !restricted.has(row.agent_id)) {
+      continue;
+    }
     if (excluded.has(row.agent_id)) {
       continue;
     }
