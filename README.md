@@ -545,6 +545,38 @@ Security note:
 
 - if any third-party secret is shared in plain text during setup, rotate it immediately after deployment validation
 
+### Secret scanning and hook setup
+
+Run once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Pre-push now runs `scripts/check-secrets.sh staged` and blocks push if likely secrets or wallet key material are detected.
+For full-repo scans:
+
+```bash
+scripts/check-secrets.sh all
+```
+
+### Rotation order (production)
+
+Rotate in this order to minimise downtime:
+
+1. `SYSTEM_API_KEY`
+2. `WORKER_TOKEN`
+3. `ADMIN_PANEL_PASSWORD`
+4. `JUDGE_OPENAI_API_KEY`
+5. `HELIUS_API_KEY` and `HELIUS_WEBHOOK_TOKEN`
+6. `PINATA_JWT`
+7. mint authority / treasury secrets
+
+After each rotation, redeploy and verify:
+
+- `GET /api/health`
+- `GET /api/internal/credential-status` with `X-System-Key`
+
 ## Environment variables
 
 Use `.env.example` as baseline.

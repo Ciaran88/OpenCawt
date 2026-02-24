@@ -12,6 +12,9 @@ runtime/local-secrets.env
 runtime/agents/
 runtime/treasury-multisig/
 runtime/treasury-wallet.json
+treasury-wallet.json
+wallet.json
+*-wallet.json
 archive_extract/
 *.zip
 *.tar

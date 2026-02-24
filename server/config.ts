@@ -168,6 +168,29 @@ function resolveDefaultCourtMode(): CourtMode {
   throw new Error("COURT_MODE must be either 'judge' or '11-juror'.");
 }
 
+function looksPlaceholderSecret(value: string): boolean {
+  const normalised = value.trim().toLowerCase();
+  if (!normalised) {
+    return true;
+  }
+  return [
+    "changeme",
+    "change-me",
+    "replace-me",
+    "replace_with_real_value",
+    "example",
+    "example-key",
+    "test-key",
+    "dev-key",
+    "password",
+    "secret"
+  ].includes(normalised);
+}
+
+function hasUnsafeSecretShape(value: string): boolean {
+  return value.includes("\n") || value.includes("\r") || value.trim().length < 12;
+}
+
 function validateConfig(config: AppConfig): void {
   let parsedPublicAppUrl: URL;
   try {
@@ -217,6 +240,39 @@ function validateConfig(config: AppConfig): void {
       throw new Error(
         "DEFENCE_INVITE_SIGNING_KEY must be set to a strong non-default value outside development or test."
       );
+    }
+    if (
+      hasUnsafeSecretShape(config.systemApiKey) ||
+      hasUnsafeSecretShape(config.workerToken) ||
+      hasUnsafeSecretShape(config.adminPanelPassword) ||
+      looksPlaceholderSecret(config.systemApiKey) ||
+      looksPlaceholderSecret(config.workerToken) ||
+      looksPlaceholderSecret(config.adminPanelPassword)
+    ) {
+      throw new Error(
+        "SYSTEM_API_KEY, WORKER_TOKEN and ADMIN_PANEL_PASSWORD must be non-placeholder, single-line values outside development."
+      );
+    }
+    if (config.judgeOpenAiApiKey) {
+      if (
+        looksPlaceholderSecret(config.judgeOpenAiApiKey) ||
+        hasUnsafeSecretShape(config.judgeOpenAiApiKey)
+      ) {
+        throw new Error("JUDGE_OPENAI_API_KEY is set but appears invalid or placeholder.");
+      }
+    }
+    if (config.heliusApiKey) {
+      if (looksPlaceholderSecret(config.heliusApiKey) || hasUnsafeSecretShape(config.heliusApiKey)) {
+        throw new Error("HELIUS_API_KEY is set but appears invalid or placeholder.");
+      }
+    }
+    if (config.heliusWebhookToken) {
+      if (
+        looksPlaceholderSecret(config.heliusWebhookToken) ||
+        hasUnsafeSecretShape(config.heliusWebhookToken)
+      ) {
+        throw new Error("HELIUS_WEBHOOK_TOKEN is set but appears invalid or placeholder.");
+      }
     }
   }
 

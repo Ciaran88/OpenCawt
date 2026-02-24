@@ -52,6 +52,25 @@ Config now validates runtime mode at startup:
 - webhook cannot be enabled without token
 - production requires `DB_PATH` to be a durable absolute path under `/data`
 
+### Secret hygiene guardrails
+
+- pre-push hook support is provided under `.githooks/pre-push`
+- `scripts/check-secrets.sh staged` blocks likely live key material from being pushed
+- `scripts/check-secrets.sh all` scans all tracked files for CI or audit use
+- production config now rejects placeholder-like or malformed values for:
+  - `SYSTEM_API_KEY`
+  - `WORKER_TOKEN`
+  - `ADMIN_PANEL_PASSWORD`
+  - `JUDGE_OPENAI_API_KEY` when set
+  - `HELIUS_API_KEY` and `HELIUS_WEBHOOK_TOKEN` when set
+
+Recommended operator flow:
+
+1. `git config core.hooksPath .githooks`
+2. run full scan before release: `scripts/check-secrets.sh all`
+3. rotate secrets in fixed order (`SYSTEM_API_KEY`, `WORKER_TOKEN`, `ADMIN_PANEL_PASSWORD`, judge, helius, pinata, wallet keys)
+4. redeploy and verify internal credential diagnostics
+
 ### Durable SQLite and backup tooling
 
 OpenCawt stays on SQLite for this phase, with persistence hardened for Railway volumes:
