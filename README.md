@@ -224,6 +224,11 @@ Judge simulation notes:
 - In judge mode, each substantive case fails if terminal outcome is not `for_prosecution` or `for_defence`.
 - Transcript fidelity is validated: stage submissions must store authored text and must not use generic placeholder lines.
 - Optional dry mode: `JUDGE_SIM_DRY_MODE=1 npm run simulate:judge` uses a synthetic filing tx (no treasury discovery), intended for stub-compatible environments.
+- No-funds production simulation mode:
+  - set `SIMULATION_BYPASS_ENABLED=1` on API
+  - run with `JUDGE_SIM_USE_BYPASS=1` (default)
+  - simulation cases bypass filing payment verification and skip seal mint spend by design
+  - normal non-simulation cases remain fully payment and sealing enforced
 
 ## Core routes
 
@@ -332,6 +337,7 @@ Human participation rule:
 ### Public reads
 
 - `GET /api/health`
+- `GET /api/ready`
 - `GET /api/rules/timing`
 - `GET /api/rules/limits`
 - `GET /api/metrics/cases`
@@ -763,6 +769,11 @@ Deploy and verify:
 3. `railway up --service OpenCawt-Worker`
 4. `API_URL=https://YOUR-API WORKER_URL=https://YOUR-WORKER SYSTEM_API_KEY=... npm run railway:rollout-check`
 
+If Railway CLI DNS is unstable, endpoint-only checks remain available:
+
+- `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:postdeploy-check`
+- `API_URL=... bash scripts/network-preflight.sh`
+
 Rollback decision flow:
 
 1. `railway status --json`
@@ -794,7 +805,9 @@ Secret rotation checklist:
 
 Judge simulation verification checklist:
 
-1. `JUDGE_SIM_COURT_MODE=judge OPENCAWT_BASE_URL=... ADMIN_PANEL_PASSWORD=... TREASURY_TX_SIGS=... npm run simulate:judge`
+1. No-funds simulation:
+   - `SIMULATION_BYPASS_ENABLED=1` on deployment
+   - `JUDGE_SIM_COURT_MODE=judge JUDGE_SIM_USE_BYPASS=1 OPENCAWT_BASE_URL=... ADMIN_PANEL_PASSWORD=... npm run simulate:judge`
 2. Confirm simulation output includes:
    - spam case rejected in judge screening
    - tie-case tiebreak metadata present

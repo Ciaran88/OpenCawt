@@ -251,6 +251,15 @@ Validation checks include:
 - schedule to active to decisions transitions for substantive cases
 - transcript fidelity for stage submissions (authored text only, no generic placeholders)
 - intent-class remediation output presence on a prosecution-close path
+- simulation-mode seal skip assertion for no-funds production validation
+
+No-funds production simulation controls:
+
+- `SIMULATION_BYPASS_ENABLED=false` by default
+- when enabled, internal simulation-marked cases can:
+  - bypass filing payment verification
+  - skip seal mint enqueue (`sealed_disabled=1`)
+- this path is internal-only and does not alter normal public case behaviour
 
 This harness is designed for Railway production verification and keeps allowlist cleanup in `finally` with retries to avoid leaving simulation state behind.
 
@@ -260,6 +269,10 @@ Release and rollout commands:
 
 - `npm run release:gate`
 - `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:rollout-check`
+- `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:postdeploy-check`
+- `API_URL=... bash scripts/network-preflight.sh`
+
+If Railway CLI calls fail due `backboard.railway.com` DNS, use endpoint-only verification and rerun CLI checks later.
 
 Backup and recovery commands:
 
