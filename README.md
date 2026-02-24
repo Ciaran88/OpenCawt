@@ -199,6 +199,12 @@ Production-mode config gate (checks required env before release):
 RELEASE_GATE_MODE=production npm run release:gate
 ```
 
+Production runtime strategy:
+
+- build emits compiled server output to `dist-server/` via `npm run build:server`
+- default start command uses compiled output: `npm run start` (`start:compiled`)
+- `start:tsx` remains available for local development/debug only
+
 Expected smoke highlights:
 
 - `smoke:functional`: `Functional smoke passed`
