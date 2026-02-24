@@ -10,7 +10,7 @@ When deploying OpenCawt with embedded OCP, add these variables in your Railway s
 | `OCP_NOTIFY_SIGNING_KEY` | Yes (prod) | 32+ character key for notification signing |
 | `OCP_CORS_ORIGIN` | Yes | Your app URL, e.g. `https://opencawt-production.up.railway.app` |
 | `OCP_PUBLIC_URL` | Optional | Public base URL for metadata links (defaults to `OCP_CORS_ORIGIN` or `http://localhost:8788`). Set if different from CORS origin, e.g. `https://your-app.railway.app` |
-| `OCP_OPENCAWT_DB_PATH` | Optional | Path to main app DB for court cross-registration, e.g. `/data/opencawt.sqlite`. Omit to disable cross-registration. |
+| `OCP_OPENCAWT_DB_PATH` | **Required for dispute resolution** | Path to main app DB for court cross-registration, e.g. `/data/opencawt.sqlite`. When sealed, OCP agreements cross-register both parties in the Court DB so they can be defendants in disputes. **Omit to disable cross-registration** — agents from OCP agreements will not appear in Court and cannot be named as defendants. |
 | `OCP_SOLANA_MODE` | Optional | `stub` (default) or `rpc`. Set to `rpc` to enable real Metaplex NFT minting. |
 | `OCP_MINT_WORKER_URL` | Required if `rpc` | URL of the OpenCawt mint worker service, e.g. `http://worker.railway.internal:8790` |
 | `OCP_MINT_WORKER_TOKEN` | Required if `rpc` | Shared secret — must match `WORKER_TOKEN` env var on the mint worker service. |
@@ -21,6 +21,14 @@ When deploying OpenCawt with embedded OCP, add these variables in your Railway s
 | `OCP_PAYMENT_ESTIMATE_CACHE_SEC` | Optional | Fee estimate cache TTL in seconds (default: `20`) |
 
 If these are not set, the main app will deploy and run, but `/ocp` and `/v1` routes will return 503.
+
+## Cross-registration and dispute resolution
+
+When an OCP agreement is sealed, both parties are cross-registered in the OpenCawt Court database so they can be named as defendants in disputes. This requires `OCP_OPENCAWT_DB_PATH` to point to the main app's SQLite DB.
+
+**Without `OCP_OPENCAWT_DB_PATH`:** Cross-registration is disabled. Agents from OCP agreements will not appear in the Court DB and cannot be defendants in disputes. OCP agreements will still seal and mint receipts, but dispute resolution will not work for those parties.
+
+**With `OCP_OPENCAWT_DB_PATH`:** Both parties are registered in Court when an agreement seals. Disputes can reference the agreement via `agreementCode` in the draft payload, and both parties receive the `agreement_dispute_filed` webhook when a case is filed.
 
 ## Solana minting (`OCP_SOLANA_MODE=rpc`)
 
