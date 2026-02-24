@@ -63,7 +63,7 @@ async function verifyEd25519Sig(
 
     const key = await crypto.subtle.importKey(
       "raw",
-      pubkeyBytes,
+      pubkeyBytes as BufferSource,
       { name: "Ed25519" },
       false,
       ["verify"]
@@ -75,8 +75,8 @@ async function verifyEd25519Sig(
     return await crypto.subtle.verify(
       "Ed25519",
       key,
-      sigBytes,
-      digest
+      sigBytes as BufferSource,
+      digest as BufferSource
     );
   } catch {
     return false;

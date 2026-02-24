@@ -25,7 +25,8 @@ export type OcpEvent =
   | "agreement_proposed"
   | "agreement_accepted"
   | "agreement_sealed"
-  | "agreement_dispute_filed";
+  | "agreement_dispute_filed"
+  | "decision_sealed";
 
 export interface NotifyPayload {
   event: OcpEvent;

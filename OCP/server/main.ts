@@ -25,7 +25,6 @@ import {
   createDecision,
   getDecision,
   getDecisionByCode,
-  getDecisionByIdempotencyKey,
   addDecisionSigner,
   getDecisionSigners,
   storeDecisionSignature,
@@ -56,6 +55,7 @@ import { mintAgreementReceipt } from "./mint/index";
 import { verifyBothAttestations } from "./verify/index";
 import { crossRegisterAgentsInCourt } from "./court/crossRegister";
 import { decodeBase58 } from "../shared/base58";
+import { canonicalHashHex } from "../../shared/hash";
 import { createOcpHeliusClient } from "./services/ocpHeliusClient";
 import { createOcpFeeEstimator, isValidSolanaPubkey } from "./services/ocpFeeEstimator";
 import { createOcpSolanaVerifier } from "./services/ocpSolanaVerifier";
@@ -302,14 +302,14 @@ async function verifyOcpAuth(
   try {
     const key = await crypto.subtle.importKey(
       "raw",
-      pubkeyBytes,
+      pubkeyBytes as BufferSource,
       { name: "Ed25519" },
       false,
       ["verify"]
     );
     const sigBytes = Buffer.from(signature, "base64");
     if (sigBytes.length === 64) {
-      sigValid = await crypto.subtle.verify("Ed25519", key, sigBytes, digest);
+      sigValid = await crypto.subtle.verify("Ed25519", key, sigBytes as BufferSource, digest as BufferSource);
     }
   } catch {
     // invalid key or sig
@@ -425,6 +425,12 @@ async function verifyHttpAuth(
     return null;
   }
 
+  const computedPayloadHash = await canonicalHashHex(body);
+  if (computedPayloadHash !== payloadHash) {
+    sendAuthFailure(res, "BODY_HASH_MISMATCH", "X-Payload-Hash does not match request payload.", ip);
+    return null;
+  }
+
   let pubkeyBytes: Uint8Array;
   try {
     pubkeyBytes = decodeBase58(agentId);
@@ -437,7 +443,6 @@ async function verifyHttpAuth(
     return null;
   }
 
-  void body;
   const url = new URL(req.url ?? "/", "http://localhost");
   // Legacy signing string format (mirrors shared/signing.ts buildSigningString)
   const signingString = `OpenCawtReqV1|${req.method ?? "POST"}|${url.pathname}||${timestamp}|${payloadHash}`;
@@ -447,14 +452,14 @@ async function verifyHttpAuth(
   try {
     const key = await crypto.subtle.importKey(
       "raw",
-      pubkeyBytes,
+      pubkeyBytes as BufferSource,
       { name: "Ed25519" },
       false,
       ["verify"]
     );
     const sigBytes = Buffer.from(signature, "base64");
     if (sigBytes.length === 64) {
-      sigValid = await crypto.subtle.verify("Ed25519", key, sigBytes, digest);
+      sigValid = await crypto.subtle.verify("Ed25519", key, sigBytes as BufferSource, digest as BufferSource);
     }
   } catch { /* invalid */ }
 
@@ -1660,13 +1665,13 @@ async function verifySingleSig(
     const pubkeyBytes = decodeBase58(agentId);
     if (pubkeyBytes.length !== 32) return false;
     const key = await crypto.subtle.importKey(
-      "raw", pubkeyBytes, { name: "Ed25519" }, false, ["verify"]
+      "raw", pubkeyBytes as BufferSource, { name: "Ed25519" }, false, ["verify"]
     );
     const attestStr = buildAttestationString({ proposalId, termsHash, agreementCode, partyAAgentId, partyBAgentId, expiresAtIso });
     const digest = hashAttestationString(attestStr);
     const sigBytes = Buffer.from(sig, "base64");
     if (sigBytes.length !== 64) return false;
-    return await crypto.subtle.verify("Ed25519", key, sigBytes, digest);
+    return await crypto.subtle.verify("Ed25519", key, sigBytes as BufferSource, digest as BufferSource);
   } catch {
     return false;
   }
@@ -1834,14 +1839,14 @@ async function verifyDecisionSig(
     const pubkeyBytes = decodeBase58(agentId);
     if (pubkeyBytes.length !== 32) return false;
     const key = await crypto.subtle.importKey(
-      "raw", pubkeyBytes, { name: "Ed25519" }, false, ["verify"]
+      "raw", pubkeyBytes as BufferSource, { name: "Ed25519" }, false, ["verify"]
     );
     // Sign over sha256("OPENCAWT_DECISION_V1|" + payloadHash)
     const signingInput = `OPENCAWT_DECISION_V1|${payloadHash}`;
     const digest = createHash("sha256").update(signingInput, "utf8").digest();
     const sigBytes = Buffer.from(sig, "base64");
     if (sigBytes.length !== 64) return false;
-    return await crypto.subtle.verify("Ed25519", key, sigBytes, digest);
+    return await crypto.subtle.verify("Ed25519", key, sigBytes as BufferSource, digest as BufferSource);
   } catch {
     return false;
   }
@@ -1856,6 +1861,35 @@ export async function handleOcpRequest(
   return handleRequest(req, res);
 }
 
+// ---- Exported for Court integration ----
+
+/**
+ * Dispatch agreement_dispute_filed webhook to both parties when a Court case
+ * is filed that references an OCP agreement. Called by main OpenCawt server.
+ */
+export async function dispatchAgreementDisputeFiled(
+  agreementCode: string,
+  caseId: string
+): Promise<void> {
+  const code = agreementCode.trim();
+  if (!code) return;
+  const agreement = getAgreementByCode(db, code);
+  if (!agreement) return;
+  const agentA = getOcpAgent(db, agreement.partyAAgentId);
+  const agentB = getOcpAgent(db, agreement.partyBAgentId);
+  if (!agentA || !agentB) return;
+  void notifyBothParties(db, config, {
+    partyAAgentId: agreement.partyAAgentId,
+    partyANotifyUrl: agentA.notifyUrl,
+    partyBAgentId: agreement.partyBAgentId,
+    partyBNotifyUrl: agentB.notifyUrl,
+    proposalId: agreement.proposalId,
+    agreementCode: agreement.agreementCode,
+    event: "agreement_dispute_filed",
+    body: { caseId, agreementCode: agreement.agreementCode, proposalId: agreement.proposalId }
+  });
+}
+
 // ---- Start server (standalone only) ----
 
 const server = createServer((req, res) => {
@@ -1867,5 +1901,10 @@ if (process.env.OCP_STANDALONE === "true") {
     console.log(`[OCP] Server listening on http://${config.apiHost}:${config.apiPort}`);
     console.log(`[OCP] Solana mode: ${config.solanaMode}`);
     console.log(`[OCP] OpenCawt DB: ${config.opencawtDbPath || "(not configured)"}`);
+    if (!config.opencawtDbPath) {
+      console.warn(
+        "[OCP] OCP_OPENCAWT_DB_PATH not set — cross-registration disabled. Agents from sealed agreements will not appear in Court and cannot be defendants in disputes."
+      );
+    }
   });
 }
