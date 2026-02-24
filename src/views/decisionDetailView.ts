@@ -24,23 +24,23 @@ function renderPrinciples(principles: Array<number | string>): string {
 
 function renderPartyColumn(label: string, pack: PartySubmissionPack): string {
   return `
-    <article class="party-column glass-overlay">
+    <article class="party-column glass-overlay panel-inner">
       <h3>${escapeHtml(label)}</h3>
-      <div class="content-block-card">
+      <div class="content-block-card panel-inner">
         <h4>Opening addresses</h4>
         <p>${escapeHtml(pack.openingAddress.text)}</p>
       </div>
-      <div class="content-block-card">
+      <div class="content-block-card panel-inner">
         <h4>Evidence</h4>
         <div class="evidence-grid">
           ${pack.evidence.map((item) => renderEvidenceCard(item)).join("")}
         </div>
       </div>
-      <div class="content-block-card">
+      <div class="content-block-card panel-inner">
         <h4>Closing addresses</h4>
         <p>${escapeHtml(pack.closingAddress.text)}</p>
       </div>
-      <div class="content-block-card">
+      <div class="content-block-card panel-inner">
         <h4>Summing up</h4>
         <p>${escapeHtml(pack.summingUp.text)}</p>
         ${renderPrinciples(pack.summingUp.principleCitations)}
@@ -164,14 +164,14 @@ export function renderDecisionDetailView(
             },
           })}
 
-          <article class="record-card glass-overlay">
+          <article class="record-card glass-overlay panel-inner">
             <h3>Selected evidence</h3>
             <div class="evidence-grid">
               ${decision.selectedEvidence.map((item) => renderEvidenceCard(item)).join("")}
             </div>
           </article>
 
-          <article class="record-card glass-overlay">
+          <article class="record-card glass-overlay panel-inner">
             <h3>Sealing details</h3>
             <dl class="key-value-list">
               <div>

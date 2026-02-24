@@ -25,23 +25,23 @@ function renderPrinciples(principles: Array<number | string>): string {
 
 function renderPartyColumn(label: string, pack: PartySubmissionPack): string {
   return `
-    <article class="party-column glass-overlay">
+    <article class="party-column glass-overlay panel-inner">
       <h3>${escapeHtml(label)}</h3>
-      <div class="content-block-card">
+      <div class="content-block-card panel-inner">
         <h4>Opening addresses</h4>
         <p>${escapeHtml(pack.openingAddress.text)}</p>
       </div>
-      <div class="content-block-card">
+      <div class="content-block-card panel-inner">
         <h4>Evidence</h4>
         <div class="evidence-grid">
           ${pack.evidence.map((item) => renderEvidenceCard(item)).join("")}
         </div>
       </div>
-      <div class="content-block-card">
+      <div class="content-block-card panel-inner">
         <h4>Closing addresses</h4>
         <p>${escapeHtml(pack.closingAddress.text)}</p>
       </div>
-      <div class="content-block-card">
+      <div class="content-block-card panel-inner">
         <h4>Summing up</h4>
         <p>${escapeHtml(pack.summingUp.text)}</p>
         ${renderPrinciples(pack.summingUp.principleCitations)}
@@ -144,7 +144,7 @@ export function renderEvidenceSubmissionForm(
   }
 
   return `
-    <section class="form-card glass-overlay">
+    <section class="form-card glass-overlay panel-inner">
       <h3>Submit evidence</h3>
       <form id="submit-evidence-form" class="stack">
         <fieldset ${disabled ? "disabled" : ""}>
@@ -213,7 +213,7 @@ export function renderStageMessageForm(
   }
 
   return `
-    <section class="form-card glass-overlay">
+    <section class="form-card glass-overlay panel-inner">
       <h3>Submit stage message</h3>
       <form id="submit-stage-message-form" class="stack">
         <fieldset ${disabled ? "disabled" : ""}>
@@ -248,7 +248,7 @@ export function renderReadinessForm(caseId: string, stage: SessionStage | undefi
   }
 
   return `
-    <section class="form-card glass-overlay">
+    <section class="form-card glass-overlay panel-inner">
       <h3>Juror readiness</h3>
       <p>If you are selected you must confirm within one minute.</p>
       <form id="juror-ready-form" class="stack">
@@ -291,7 +291,7 @@ function renderVerificationDetails(caseItem: Case): string {
     : "";
 
   return `
-    <section class="record-card glass-overlay">
+    <section class="record-card glass-overlay panel-inner">
       <h3>Verification details</h3>
       <dl class="key-value-list">
         <div>
@@ -338,7 +338,7 @@ function renderVerificationDetails(caseItem: Case): string {
         }
       </dl>
     </section>
-    <section class="record-card glass-overlay">
+    <section class="record-card glass-overlay panel-inner">
       <h3>Sealed receipt</h3>
       <p class="muted">This receipt anchors hashes only. The full public record remains available through OpenCawt.</p>
       <dl class="key-value-list">
