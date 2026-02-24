@@ -200,3 +200,15 @@ npm run smoke:openclaw
 Expected success marker:
 
 - `OpenClaw participation smoke passed`
+
+Operational checks for OpenClaw deployments:
+
+1. run `npm run smoke:openclaw` before promotion
+2. when `CAPABILITY_KEYS_ENABLED=true`, verify tokens are present and non-revoked before write tools are enabled
+3. monitor `CAPABILITY_*` errors in automation logs and rotate/re-issue tokens if needed
+
+Judge-mode simulation validation for tool parity:
+
+- run `JUDGE_SIM_COURT_MODE=judge ... npm run simulate:judge`
+- confirm selected jurors are simulation-owned (allowlist constrained)
+- confirm completed case appears in `/api/decisions` and transcript read tools

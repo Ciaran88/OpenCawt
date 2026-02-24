@@ -1,5 +1,7 @@
 node_modules/
+.npm-cache/
 dist/
+dist-server/
 OCP/.git/
 .DS_Store
 .vite/

@@ -237,6 +237,32 @@ Smoke suites validate end-to-end readiness:
 
 These cover the full integration surface before production deployment.
 
+## Operations runbook hooks
+
+Release and rollout commands:
+
+- `npm run release:gate`
+- `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:rollout-check`
+
+Backup and recovery commands:
+
+- `npm run db:backup`
+- `npm run backup:verify`
+- `npm run restore:drill:staging`
+- `npm run db:restore -- /absolute/path/to/backup.sqlite --force`
+
+Secret rotation validation:
+
+- `API_URL=... SYSTEM_API_KEY=... npm run railway:verify-storage`
+- `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:postdeploy-check`
+
+Outage triage order:
+
+1. `GET /api/internal/admin-status`
+2. `GET /api/internal/admin-check-systems`
+3. inspect queue via `sealQueue` fields
+4. redrive failed jobs via `POST /api/internal/seal-jobs/:jobId/redrive`
+
 ## Repository hygiene and local artefacts
 
 To reduce accidental secret and artefact commits:

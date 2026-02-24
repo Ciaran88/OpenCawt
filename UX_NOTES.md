@@ -137,3 +137,19 @@ Unsupported backend features are not surfaced in summary cards.
 - UI copy describes the cNFT as a hash-only receipt
 - the receipt anchors identifiers and hashes only, not the full transcript body
 - observers are directed to case and decision pages for the full public record
+
+## Production verification checklist
+
+After each deploy:
+
+1. verify header mode chip renders and mutating controls gate correctly in observer mode
+2. verify Lodge fee estimate card loads and refreshes
+3. verify case transcript polling does not jump or reset scroll position
+4. verify decisions route includes newly closed simulation cases
+5. verify sealed receipt panel handles `pending`, `minting`, `sealed` and `failed` states without layout break
+
+Judge simulation UX verification:
+
+- run `npm run simulate:judge` against target environment
+- confirm the resulting case appears in schedule, then active, then past decisions
+- confirm verdict and seal status are readable from case and decision detail views

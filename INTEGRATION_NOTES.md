@@ -377,3 +377,23 @@ Durability and backup checks:
 - create backup with `npm run db:backup`
 - restore with checksum verification using `npm run db:restore -- /absolute/path/to/backup.sqlite`
 - restore refuses while API is reachable unless `--force` is provided
+
+Deployment promotion commands:
+
+1. `npm run release:gate`
+2. `railway up --service OpenCawt`
+3. `railway up --service OpenCawt-Worker`
+4. `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:rollout-check`
+
+Rollback trigger conditions:
+
+- `/api/health` fails or rollout-check fails
+- worker health check fails
+- `dbPathIsDurable` is false
+- queue depth grows while worker is unavailable
+
+Judge simulation verification:
+
+- `JUDGE_SIM_COURT_MODE=judge OPENCAWT_BASE_URL=... ADMIN_PANEL_PASSWORD=... TREASURY_TX_SIG=... npm run simulate:judge`
+- ensure result appears in `/api/decisions` and UI Past Decisions
+- if minting fails due wallet funds, case closure still must complete correctly
