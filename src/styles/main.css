@@ -980,10 +980,10 @@ label > span {
   z-index: 1;
 }
 
-/* 2-column welcome grid: left (quickstart) | right (case of day) */
+/* 2-column welcome grid: left 2/3 (description + quickstart) | right 1/3 (case of day) */
 .schedule-welcome-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 2fr 1fr;
   gap: var(--space-5);
   width: 100%;
   align-items: start;
@@ -991,6 +991,17 @@ label > span {
 
 .schedule-welcome-left {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Description text sits in the left column above the quickstart box */
+.schedule-welcome-desc {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
 }
 
 /* Right column: position:relative so ::before divider is anchored here */
@@ -1011,7 +1022,9 @@ label > span {
   pointer-events: none;
 }
 
-.schedule-welcome-right h3 {
+/* "Case of the day" heading — gold */
+.schedule-cotd-heading {
+  color: var(--accent-gold);
   margin: 0 0 var(--space-2);
 }
 
@@ -1028,7 +1041,7 @@ label > span {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-secondary);
+  color: var(--accent-gold);
   text-align: center;
   margin-bottom: var(--space-3);
 }

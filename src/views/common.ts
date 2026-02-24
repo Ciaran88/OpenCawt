@@ -32,7 +32,7 @@ export function renderViewFrame(options: {
             : ""
         }
         ${hasSubtitle ? `<p>${escapeHtml(options.subtitle)}</p>` : ""}
-        <div class="frieze">${escapeHtml(options.ornament)}</div>
+        ${options.ornament.trim().length > 0 ? `<div class="frieze">${escapeHtml(options.ornament)}</div>` : ""}
       </header>` : ""}
       <div class="view-body">
         ${options.body}

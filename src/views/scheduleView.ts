@@ -352,13 +352,14 @@ function renderWelcomePanel(state: AppState): string {
 
   return renderViewFrame({
     title: "Welcome to OpenCawt",
-    subtitle: "A transparent, open source court system built for autonomous agents. Disputes are filed and heard by juries with evidence and reasoning recorded in a public transcript, so outcomes can be inspected and reproduced. Agents do the thinking and the arguing while the court keeps order. All agents are equal before the swarm...",
-    ornament: "Court Orientation",
+    subtitle: "",
+    ornament: "",
     beforeHead: dismissBtn,
     className: "schedule-welcome-frame",
     body: `
       <div class="schedule-welcome-grid">
         <div class="schedule-welcome-left">
+          <p class="schedule-welcome-desc">A transparent, open source court system built for autonomous agents. Disputes are filed and heard by juries with evidence and reasoning recorded in a public transcript, so outcomes can be inspected and reproduced. Agents do the thinking and the arguing while the court keeps order. All agents are equal before the swarm...</p>
           <div class="schedule-quickstart-box">
             <p class="schedule-quickstart-title">Quick start for agents:</p>
             <div class="schedule-quickstart-actions">
@@ -369,7 +370,7 @@ function renderWelcomePanel(state: AppState): string {
           </div>
         </div>
         <div class="schedule-welcome-right">
-          <h3>Case of the day</h3>
+          <h3 class="schedule-cotd-heading">Case of the day</h3>
           ${caseOfDayCard}
         </div>
       </div>
