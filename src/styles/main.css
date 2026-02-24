@@ -1,30 +1,34 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  /* Core Palette - Deep Dark */
-  --bg-app: #000000;
-  --bg-panel: #0d0d0d;
-  --bg-surface: #141414;
-  --bg-surface-hover: #1a1a1a;
-  --bg-input: #111111;
+  /* Core Palette - Blue-Tinted Dark Navy */
+  --bg-app: #07090f;
+  --bg-panel: #0c0f1a;
+  --bg-surface: #111520;
+  --bg-surface-hover: #171c2e;
+  --bg-input: #0c0f1a;
 
-  /* Borders */
-  --border-base: #2d2d2d;
-  --border-light: #3d3d3d;
-  --border-focus: #4d4d4d;
+  /* Borders - cool blue-tinted charcoal */
+  --border-base: #1c2134;
+  --border-light: #263049;
+  --border-focus: #384570;
 
-  /* Text */
-  --text-primary: #ededed;
-  --text-secondary: #a1a1a1;
-  --text-tertiary: #6e6e6e;
+  /* Text - cool-tinted white */
+  --text-primary: #e8eaf2;
+  --text-secondary: #8b90a8;
+  --text-tertiary: #565c7a;
 
   /* Accents */
   --accent-blue: #2962ff;
   --accent-blue-dim: rgba(41, 98, 255, 0.15);
   --accent-teal: #00bfa5;
   --accent-teal-dim: rgba(0, 191, 165, 0.15);
-  --accent-purple: #d500f9;
-  --accent-purple-dim: rgba(213, 0, 249, 0.15);
+  /* Court authority: amber/gold — distinguishes from OCP's purple+teal */
+  --accent-gold: #e8a020;
+  --accent-gold-dim: rgba(232, 160, 32, 0.15);
+  /* Refined violet for agent-type indicators (replaces garish #d500f9) */
+  --accent-purple: #8b7cf8;
+  --accent-purple-dim: rgba(139, 124, 248, 0.15);
   --accent-error: #ff3d00;
   --accent-success: #00e676;
   --accent-warning: #ffab00;
@@ -216,6 +220,9 @@ a {
   overflow: hidden;
   cursor: pointer;
   border: 1px solid transparent;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
 }
 
 .nav-item:hover {
@@ -224,9 +231,13 @@ a {
 }
 
 .nav-item.is-active {
-  background-color: var(--bg-surface);
+  background-color: color-mix(in srgb, var(--accent-blue) 8%, transparent);
   color: var(--accent-blue);
-  border-color: var(--border-light);
+  border-color: transparent;
+  border-left: 2px solid var(--accent-blue);
+  border-radius: var(--radius-md);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 .nav-icon {
@@ -374,6 +385,56 @@ a {
   gap: var(--space-3);
 }
 
+/* Card heading treatment — gold, monospace, uppercase (OCP design language) */
+.record-card h3,
+.party-column h3,
+.glass-overlay h3,
+.form-card h3,
+.info-card h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent-gold);
+  margin-top: 0;
+  margin-bottom: var(--space-3);
+}
+
+/* Form label spans */
+label > span {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+/* Toolbar section titles */
+.toolbar h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+/* Frieze ornament — decorative page label */
+.frieze {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent-gold);
+  opacity: 0.7;
+  margin-top: var(--space-1);
+  display: block;
+}
+
 /* View Frame Header Spacing */
 .view-head {
   padding: var(--space-4);
@@ -392,8 +453,11 @@ a {
   align-items: center;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
-  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   border: 1px solid transparent;
   color: var(--text-secondary);
   background-color: var(--bg-surface);
@@ -403,7 +467,7 @@ a {
 .view-badge.is-agent {
   color: var(--accent-purple);
   background-color: var(--accent-purple-dim);
-  border-color: rgba(213, 0, 249, 0.3);
+  border-color: rgba(139, 124, 248, 0.3);
 }
 
 .agentic-code-view .view-badge {
@@ -534,7 +598,7 @@ a {
 }
 
 .btn-primary:hover {
-  background-color: #1e50e6; /* Darker shade */
+  background-color: color-mix(in srgb, var(--accent-blue) 85%, #000);
 }
 
 .btn-secondary {
@@ -587,9 +651,11 @@ select:focus {
   height: 24px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
-  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.07em;
   display: inline-flex;
   align-items: center;
   border: 1px solid transparent;
@@ -718,9 +784,10 @@ select:focus {
 }
 
 .dashboard-kpi-label {
-  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.07em;
   color: var(--text-secondary);
 }
 
@@ -757,10 +824,11 @@ select:focus {
 }
 
 .group-head h2 {
-  font-size: 0.9rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   color: var(--text-secondary);
   margin: 0;
 }
@@ -1165,11 +1233,15 @@ select:focus {
   border-bottom: 1px solid var(--border-base);
   font-weight: 600;
   background-color: var(--bg-panel);
-  font-size: 0.9rem;
+  font-size: 0.7rem;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
 }
 
 .panel-body {
@@ -1179,6 +1251,44 @@ select:focus {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* Inner content: no competing frame, lighter treatment */
+.panel-inner {
+  border: none;
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+/* Hover: subtle tint only, no border emphasis */
+.panel-inner:hover,
+.party-column.panel-inner:hover,
+.record-card.panel-inner:hover,
+.form-card.panel-inner:hover,
+.glass-overlay.panel-inner:hover {
+  border-color: transparent;
+  background-color: var(--bg-surface-hover);
+}
+
+/* Inner-within-inner: content-block-card inside party-column */
+.content-block-card.panel-inner {
+  background-color: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Juror-card panel-inner: borderless, subtle tint */
+.juror-card.panel-inner {
+  border: none;
+  background-color: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.juror-card.panel-inner.is-expanded {
+  background-color: var(--bg-surface);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 /* Legacy/Specific aliases if needed, or remove if fully replaced */
@@ -1213,14 +1323,18 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  
+
   /* Match transcript-header styling */
   background-color: var(--bg-panel);
   border-bottom: 1px solid var(--border-base);
   padding: var(--space-3) var(--space-4);
-  font-size: 0.9rem;
+  font-size: 0.7rem;
   font-weight: 600;
   min-height: 50px; /* Ensure consistency */
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
 
   /* Pull to edges of parent padding */
   margin-left: calc(var(--space-4) * -1);
@@ -1231,9 +1345,12 @@ select:focus {
 
 .jury-panel-head h3 {
   margin: 0;
-  font-size: 0.9rem; /* Match transcript header font size */
+  font-size: 0.7rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.08em;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 /* Jury Status Row */
@@ -1540,10 +1657,12 @@ select:focus {
 .content-block-card h4 {
   margin-top: 0;
   margin-bottom: var(--space-2);
-  font-size: 0.85rem;
-  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--accent-blue);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.09em;
 }
 
 .content-block-card p {

@@ -1,9 +1,9 @@
 export function renderAppShell(): string {
   return `
-    <div class="app-shell sidebar-collapsed" id="app-shell">
+    <div class="app-shell" id="app-shell">
       <aside id="app-sidebar" class="app-sidebar">
         <div class="sidebar-header" style="justify-content: flex-end; padding: 0 12px;">
-           <button class="icon-btn" style="width: 28px; height: 28px; border: none; background: transparent;" aria-label="Toggle Sidebar" onclick="document.getElementById('app-shell').classList.toggle('sidebar-collapsed')">
+           <button class="icon-btn" style="width: 28px; height: 28px; border: none; background: transparent;" aria-label="Toggle Sidebar" data-action="toggle-sidebar">
              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
            </button>
         </div>

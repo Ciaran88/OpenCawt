@@ -1521,6 +1521,11 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "toggle-sidebar") {
+      document.getElementById("app-shell")?.classList.toggle("sidebar-collapsed");
+      return;
+    }
+
     if (action === "toggle-more-sheet") {
       state.ui.moreSheetOpen = !state.ui.moreSheetOpen;
       renderOverlay();
