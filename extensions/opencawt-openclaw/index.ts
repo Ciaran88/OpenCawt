@@ -67,14 +67,21 @@ function buildPathAndQuery(toolName: string, params: Record<string, unknown>): {
     submit_stage_message: (p) => `/api/cases/${encodeURIComponent(String(p.caseId))}/stage-message`,
     submit_evidence: (p) => `/api/cases/${encodeURIComponent(String(p.caseId))}/evidence`,
     juror_ready_confirm: (p) => `/api/cases/${encodeURIComponent(String(p.caseId))}/juror-ready`,
-    submit_ballot_with_reasoning: (p) => `/api/cases/${encodeURIComponent(String(p.caseId))}/ballots`
+    submit_ballot_with_reasoning: (p) => `/api/cases/${encodeURIComponent(String(p.caseId))}/ballots`,
+    ocp_canonicalise_terms: () => "/v1/canonicalise",
+    ocp_get_fee_estimate: () => "/v1/agreements/fee-estimate",
+    ocp_propose_agreement: () => "/api/ocp/agreements/propose",
+    ocp_accept_agreement: (p) => `/api/ocp/agreements/${encodeURIComponent(String(p.proposalId))}/accept`,
+    ocp_get_agreement: (p) => `/api/ocp/agreements/${encodeURIComponent(String(p.proposalId))}`,
+    ocp_get_agreement_by_code: (p) => `/api/ocp/agreements/by-code/${encodeURIComponent(String(p.code))}`
   };
   const path = pathMap[toolName]?.(params) ?? "/";
   const queryMap: Record<string, Record<string, string>> = {
     search_open_defence_cases: { q: "q", status: "status", tag: "tag", startAfterIso: "start_after", startBeforeIso: "start_before", limit: "limit" },
     get_leaderboard: { limit: "limit", minDecided: "min_decided" },
     get_agent_profile: { activityLimit: "activity_limit" },
-    fetch_case_transcript: { afterSeq: "after_seq", limit: "limit" }
+    fetch_case_transcript: { afterSeq: "after_seq", limit: "limit" },
+    ocp_get_fee_estimate: { payerWallet: "payer_wallet" }
   };
   const queryParams: Record<string, string> = {};
   const map = queryMap[toolName];
@@ -98,7 +105,9 @@ export default function register(api: { config: { plugins?: { entries?: Record<s
 
   for (const tool of OPENCAWT_OPENCLAW_TOOLS) {
     const { name, description, parameters } = toOpenClawParameters(tool);
-    const isSigned = !["search_open_defence_cases", "get_agent_profile", "get_leaderboard", "fetch_case_detail", "fetch_case_transcript"].includes(name);
+    const unsignedGetTools = ["search_open_defence_cases", "get_agent_profile", "get_leaderboard", "fetch_case_detail", "fetch_case_transcript", "ocp_get_fee_estimate", "ocp_get_agreement", "ocp_get_agreement_by_code"];
+    const unsignedPostTools = ["ocp_canonicalise_terms"];
+    const isSigned = !unsignedGetTools.includes(name) && !unsignedPostTools.includes(name);
 
     api.registerTool(
       {
@@ -107,12 +116,41 @@ export default function register(api: { config: { plugins?: { entries?: Record<s
         parameters,
         async execute(_id: string, params: Record<string, unknown>) {
           const { path, queryParams } = buildPathAndQuery(name, params);
-          const method = ["search_open_defence_cases", "get_agent_profile", "get_leaderboard", "fetch_case_detail", "fetch_case_transcript"].includes(name) ? "GET" : "POST";
 
-          if (method === "GET") {
+          if (unsignedGetTools.includes(name)) {
             const qs = new URLSearchParams(queryParams);
             const fullUrl = qs.toString() ? `${apiBaseUrl}${path}?${qs}` : `${apiBaseUrl}${path}`;
             const res = await fetch(fullUrl);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify(
+                      {
+                        ok: false,
+                        status: res.status,
+                        endpoint: path,
+                        error: (data as { error?: unknown }).error ?? data
+                      },
+                      null,
+                      2
+                    )
+                  }
+                ]
+              };
+            }
+            return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+          }
+
+          if (unsignedPostTools.includes(name)) {
+            const body = name === "ocp_canonicalise_terms" ? { terms: params.terms } : {};
+            const res = await fetch(`${apiBaseUrl}${path}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body)
+            });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
               return {
@@ -143,8 +181,10 @@ export default function register(api: { config: { plugins?: { entries?: Record<s
 
           const timestamp = Math.floor(Date.now() / 1000);
           const payload: Record<string, unknown> = {};
+          const excludeFromPayload = ["caseId"];
+          if (name === "ocp_accept_agreement") excludeFromPayload.push("proposalId");
           for (const [k, v] of Object.entries(params)) {
-            if (k !== "caseId" && v !== undefined) payload[k] = v;
+            if (!excludeFromPayload.includes(k) && v !== undefined) payload[k] = v;
           }
           if (name === "juror_ready_confirm") {
             payload.ready = true;

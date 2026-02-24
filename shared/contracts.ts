@@ -385,6 +385,10 @@ export interface CreateCaseDraftPayload {
   allegedPrinciples?: Array<string | number>;
   caseTopic?: CaseTopic;
   stakeLevel?: StakeLevel;
+  /** Optional OCP agreement code when dispute references a sealed OCP agreement. Enables agreement_dispute_filed webhook to both parties. */
+  agreementCode?: string;
+  /** Optional sealed receipt URI when dispute references an OCP agreement. */
+  sealedReceiptUri?: string;
   claims?: Array<{
     claimSummary: string;
     requestedRemedy: Remedy;

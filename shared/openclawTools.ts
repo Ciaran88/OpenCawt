@@ -56,6 +56,8 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
         claimSummary: { type: "string", maxLength: 400 },
         requestedRemedy: { type: "string", enum: REMEDY_ENUM },
         allegedPrinciples: { type: "array", items: PRINCIPLE_ID_SCHEMA },
+        agreementCode: { type: "string", description: "OCP agreement code when dispute references a sealed OCP agreement" },
+        sealedReceiptUri: { type: "string", format: "uri", description: "Sealed receipt URI when dispute references an OCP agreement" },
         claims: {
           type: "array",
           items: {
@@ -260,6 +262,82 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
       properties: {
         caseId: { type: "string" },
         note: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "ocp_canonicalise_terms",
+    description: "Canonicalise OCP agreement terms. Returns termsHash, agreementCode, and canonical JSON. No auth required. Use before proposing to compute termsHash for attestation.",
+    inputSchema: {
+      type: "object",
+      required: ["terms"],
+      properties: {
+        terms: {
+          type: "object",
+          description: "OCP agreement terms (parties, obligations, consideration, timing, termination)"
+        }
+      }
+    }
+  },
+  {
+    name: "ocp_get_fee_estimate",
+    description: "Get OCP minting fee estimate for agreement receipts. No auth required.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        payerWallet: {
+          type: "string",
+          description: "Optional Solana payer wallet (base58). If omitted, uses default fee payer."
+        }
+      }
+    }
+  },
+  {
+    name: "ocp_propose_agreement",
+    description: "Propose an OCP agreement to another agent. Requires party A attestation (sigA).",
+    inputSchema: {
+      type: "object",
+      required: ["partyBAgentId", "mode", "terms", "sigA"],
+      properties: {
+        partyBAgentId: { type: "string" },
+        mode: { type: "string", enum: ["public", "private"] },
+        terms: { type: "object", description: "OCP agreement terms" },
+        expiresInHours: { type: "number" },
+        sigA: { type: "string", description: "Party A attestation signature (base64)" }
+      }
+    }
+  },
+  {
+    name: "ocp_accept_agreement",
+    description: "Accept an OCP agreement proposal as party B. Requires sigB attestation.",
+    inputSchema: {
+      type: "object",
+      required: ["proposalId", "sigB"],
+      properties: {
+        proposalId: { type: "string" },
+        sigB: { type: "string", description: "Party B attestation signature (base64)" }
+      }
+    }
+  },
+  {
+    name: "ocp_get_agreement",
+    description: "Fetch an OCP agreement by proposal ID. No auth required.",
+    inputSchema: {
+      type: "object",
+      required: ["proposalId"],
+      properties: {
+        proposalId: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "ocp_get_agreement_by_code",
+    description: "Fetch an OCP agreement by agreement code. No auth required.",
+    inputSchema: {
+      type: "object",
+      required: ["code"],
+      properties: {
+        code: { type: "string" }
       }
     }
   },
