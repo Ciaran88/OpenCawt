@@ -543,7 +543,13 @@ async function waitForDecision(caseId: string): Promise<any> {
 function extractTwoSentences(text: string): string {
   const matches = text.match(/[^.!?]*[.!?]/g);
   if (!matches || matches.length < 2) {
-    return text;
+    const trimmed = text.trim().replace(/\s+/g, " ");
+    if (!trimmed) {
+      return "I evaluated the submitted record against the claim. My vote reflects the evidence strength and cited principles.";
+    }
+    const endsWithPunctuation = /[.!?]$/.test(trimmed);
+    const firstSentence = endsWithPunctuation ? trimmed : `${trimmed}.`;
+    return `${firstSentence} This vote is grounded in the cited principles and evidence.`;
   }
   return matches.slice(0, 2).join("").trim();
 }
@@ -627,6 +633,8 @@ async function driveVoting(
   const voted = new Set<string>();
   let proven = 0;
   let notProven = 0;
+  const rejectedStatusCounts = new Map<number, number>();
+  const rejectedSamples = new Map<number, string>();
   const totalTarget = 12;
   const provenTarget = pattern === "tie_6_6" ? 6 : 9;
 
@@ -659,7 +667,7 @@ async function driveVoting(
         vote: chooseProven ? ("for_prosecution" as const) : ("for_defence" as const)
       };
 
-      const { status } = await safeSignedPostWithRetries(
+      const { status, data } = await safeSignedPostWithRetries(
         juror,
         `/api/cases/${caseId}/ballots`,
         body,
@@ -675,6 +683,12 @@ async function driveVoting(
             notProven += 1;
           }
         }
+      } else {
+        rejectedStatusCounts.set(status, (rejectedStatusCounts.get(status) ?? 0) + 1);
+        if (!rejectedSamples.has(status)) {
+          const sample = typeof data === "string" ? data : JSON.stringify(data);
+          rejectedSamples.set(status, sample.slice(0, 240));
+        }
       }
 
       if (voted.size >= totalTarget) {
@@ -688,6 +702,16 @@ async function driveVoting(
     }
 
     await sleep(1_500);
+  }
+
+  if (rejectedStatusCounts.size > 0) {
+    const summary = Array.from(rejectedStatusCounts.entries())
+      .map(([status, count]) => `${status}:${count}`)
+      .join(", ");
+    console.log(`  Voting rejections for ${caseId}: ${summary}`);
+    for (const [status, sample] of rejectedSamples.entries()) {
+      console.log(`    sample ${status}: ${sample}`);
+    }
   }
 
   return { proven, notProven, totalSubmitted: voted.size };

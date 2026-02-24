@@ -75,6 +75,7 @@ export interface AppConfig {
   adminSessionTtlSec: number;
   judgeOpenAiApiKey: string;
   judgeOpenAiModel: string;
+  judgeCallTimeoutMs: number;
   defaultCourtMode: CourtMode;
   dependencyProbeOnBoot: boolean;
   simulationBypassEnabled: boolean;
@@ -403,6 +404,7 @@ export function getConfig(): AppConfig {
     adminSessionTtlSec: numberEnv("ADMIN_SESSION_TTL_SEC", 900),
     judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", stringEnv("OPENAI_API_KEY", "")),
     judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini"),
+    judgeCallTimeoutMs: numberEnv("JUDGE_CALL_TIMEOUT_MS", 60000),
     defaultCourtMode,
     dependencyProbeOnBoot: booleanEnv("DEPENDENCY_PROBE_ON_BOOT", false),
     simulationBypassEnabled: booleanEnv("SIMULATION_BYPASS_ENABLED", false),

@@ -123,7 +123,7 @@ import { createLogger, createRequestId } from "./services/observability";
 import { createPaymentEstimator, isValidSolanaPubkey } from "./services/paymentEstimator";
 import { enforceActionRateLimit, enforceFilingLimit } from "./services/rateLimit";
 import { applySealResult, enqueueSealJob, retrySealJob } from "./services/sealing";
-import { createJudgeService, JUDGE_CALL_TIMEOUT_MS, withJudgeTimeout } from "./services/judge";
+import { createJudgeService, withJudgeTimeout } from "./services/judge";
 import { createSessionEngine } from "./services/sessionEngine";
 import { createSolanaProvider } from "./services/solanaProvider";
 import { computeCaseSealHashes } from "./services/sealHashes";
@@ -697,7 +697,7 @@ async function closeCasePipeline(caseId: string): Promise<{
                 references: e.references
               }))
             }),
-            JUDGE_CALL_TIMEOUT_MS,
+            config.judgeCallTimeoutMs,
             "breakTiebreak"
           );
           if (tiebreakOutcome.ok) {
@@ -762,7 +762,7 @@ async function closeCasePipeline(caseId: string): Promise<{
             text: s.text
           }))
         }),
-        JUDGE_CALL_TIMEOUT_MS,
+        config.judgeCallTimeoutMs,
         "recommendRemedy"
       );
       if (remedyOutcome.ok && remedyOutcome.data) {
