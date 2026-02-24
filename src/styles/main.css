@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
   /* Core Palette - Blue-Tinted Dark Navy */
@@ -88,12 +88,12 @@ html, body {
   height: 100%;
   background-color: var(--bg-app);
   color: var(--text-primary);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   -webkit-font-smoothing: antialiased;
 }
 
 code, pre, .font-mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
 }
 
 a {
@@ -220,7 +220,7 @@ a {
   overflow: hidden;
   cursor: pointer;
   border: 1px solid transparent;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.75rem;
   letter-spacing: 0.03em;
 }
@@ -391,7 +391,7 @@ a {
 .glass-overlay h3,
 .form-card h3,
 .info-card h3 {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -404,7 +404,7 @@ a {
 /* Form label spans */
 label > span {
   display: block;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 11px;
   font-weight: 500;
   text-transform: uppercase;
@@ -415,7 +415,7 @@ label > span {
 
 /* Toolbar section titles */
 .toolbar h3 {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -424,7 +424,7 @@ label > span {
 
 /* Frieze ornament — decorative page label */
 .frieze {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 10px;
   font-weight: 500;
   text-transform: uppercase;
@@ -453,7 +453,7 @@ label > span {
   align-items: center;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -651,7 +651,7 @@ select:focus {
   height: 24px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-sm);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -784,7 +784,7 @@ select:focus {
 }
 
 .dashboard-kpi-label {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -824,7 +824,7 @@ select:focus {
 }
 
 .group-head h2 {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -861,7 +861,7 @@ select:focus {
 }
 
 .case-id {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -1060,7 +1060,7 @@ select:focus {
 
 /* Header Countdown */
 .header-countdown {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.75rem;
   color: var(--accent-blue);
   background-color: var(--accent-blue-dim);
@@ -1238,7 +1238,7 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-secondary);
@@ -1331,7 +1331,7 @@ select:focus {
   font-size: 0.7rem;
   font-weight: 600;
   min-height: 50px; /* Ensure consistency */
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-secondary);
@@ -1348,7 +1348,7 @@ select:focus {
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.08em;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -1379,7 +1379,7 @@ select:focus {
 }
 
 .jury-timer span {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 1.1rem;
   color: var(--text-primary);
   font-weight: 600;
@@ -1401,7 +1401,7 @@ select:focus {
   transform: rotate(90deg);
   transform-origin: center;
   fill: var(--text-primary);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-weight: 600;
 }
 
@@ -1657,7 +1657,7 @@ select:focus {
 .content-block-card h4 {
   margin-top: 0;
   margin-bottom: var(--space-2);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.65rem;
   font-weight: 600;
   color: var(--accent-blue);
@@ -1723,7 +1723,7 @@ select:focus {
 }
 
 .principle-id {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.75rem;
   color: var(--text-tertiary);
   background-color: var(--bg-app);
@@ -1785,7 +1785,7 @@ select:focus {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
 }
 
 .countdown-ring svg {
@@ -2085,7 +2085,7 @@ select:focus {
 }
 
 .admin-treasury-value {
-  font-family: ui-monospace, monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-weight: 600;
   color: var(--ink, #e8eaf2);
 }
@@ -2121,7 +2121,7 @@ select:focus {
 }
 
 .admin-address-code {
-  font-family: ui-monospace, monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.8rem;
   word-break: break-all;
 }
@@ -2234,7 +2234,7 @@ select:focus {
   position: relative;
   display: flex;
   align-items: center;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.75rem;
   width: 100%;
 }
