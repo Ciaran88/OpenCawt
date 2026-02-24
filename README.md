@@ -186,6 +186,18 @@ Runtime compatibility check:
 npm run verify:runtime
 ```
 
+Unified local and CI release gate:
+
+```bash
+npm run release:gate
+```
+
+Production-mode config gate (checks required env before release):
+
+```bash
+RELEASE_GATE_MODE=production npm run release:gate
+```
+
 Expected smoke highlights:
 
 - `smoke:functional`: `Functional smoke passed`
