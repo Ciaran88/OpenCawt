@@ -11,8 +11,10 @@ base_delay="${RAILWAY_CLI_RETRY_BASE_SEC:-2}"
 
 last_error=""
 for ((i=1; i<=attempts; i++)); do
+  set +e
   output="$(railway "$@" 2>&1)"
   rc=$?
+  set -e
   if [[ $rc -eq 0 ]] && ! grep -qi "Failed to fetch" <<<"$output"; then
     printf '%s\n' "$output"
     exit 0
