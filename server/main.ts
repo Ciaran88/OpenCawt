@@ -1,5 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import dns from "node:dns";
+
+// Prefer IPv4 to reduce intermittent DNS resolution failures (EAI_AGAIN, IPv6 flakiness)
+dns.setDefaultResultOrder("ipv4first");
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, extname } from "node:path";
 import { canonicalHashHex } from "../shared/hash";
@@ -31,6 +35,7 @@ import {
   appendTranscriptEventInTransaction,
   claimDefenceAssignment,
   countActiveAgentCapabilities,
+  countDecisionsMissingResolvedTimestamp,
   getAgent,
   getAgentProfile,
   getCaseIntegrityDiagnostics,
@@ -81,8 +86,11 @@ import {
   setCaseFiled,
   setCaseRemedyRecommendation,
   setCaseSealHashes,
+  setCaseSealState,
+  setCaseSimulationMode,
   setCaseJurySelected,
   setJurorAvailability,
+  resolveCaseDecisionTimestamp,
   storeVerdict,
   type CaseRecord,
   upsertAgent,
@@ -219,6 +227,16 @@ function assertAdminToken(req: IncomingMessage): void {
     adminSessions.delete(token);
     throw unauthorised("ADMIN_TOKEN_EXPIRED", "Admin token has expired.");
   }
+}
+
+function assertAdminOrSystem(req: IncomingMessage): "admin" | "system" {
+  const systemHeader = req.headers["x-system-key"];
+  if (typeof systemHeader === "string" && systemHeader.trim().length > 0) {
+    assertSystemKey(req, config);
+    return "system";
+  }
+  assertAdminToken(req);
+  return "admin";
 }
 
 const closingCases = new Set<string>();
@@ -844,17 +862,36 @@ async function closeCasePipeline(caseId: string): Promise<{
 
     const sealedCandidate = ensureCaseExists(caseId);
     let sealJob: { jobId: string; mode: "stub" | "http"; status: string; created: boolean } | undefined;
-    try {
-      sealJob = await enqueueSealJob({
-        db,
-        config,
-        caseRecord: sealedCandidate
-      });
-    } catch (error) {
-      logger.error("seal_job_enqueue_failed", {
+    if (sealedCandidate.sealedDisabled) {
+      setCaseSealState(db, {
         caseId,
-        error: error instanceof Error ? error.message : String(error)
+        sealStatus: "pending",
+        error: "Simulation mode: seal mint intentionally skipped."
       });
+      appendTranscriptEvent(db, {
+        caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage: "closed",
+        messageText:
+          "Seal mint intentionally skipped for simulation mode. Case remains closed and verifiable off-chain.",
+        payload: {
+          simulationBypass: true
+        }
+      });
+    } else {
+      try {
+        sealJob = await enqueueSealJob({
+          db,
+          config,
+          caseRecord: sealedCandidate
+        });
+      } catch (error) {
+        logger.error("seal_job_enqueue_failed", {
+          caseId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
 
     return {
@@ -959,6 +996,37 @@ async function runStartupDependencyProbe(): Promise<void> {
   logger.info("startup_dependency_probe_ok", { requestId: probeRequestId });
 }
 
+async function probeSealWorkerReadiness(requestId: string): Promise<{
+  ready: boolean;
+  error?: string;
+}> {
+  if (config.sealWorkerMode !== "http") {
+    return { ready: true };
+  }
+  try {
+    await fetchJsonWithRetry<{ ok?: boolean }>({
+      url: `${config.sealWorkerUrl.replace(/\/$/, "")}/health`,
+      target: "seal_worker_health",
+      requestId,
+      attempts: 1,
+      timeoutMs: Math.min(4000, config.retry.external.timeoutMs),
+      baseDelayMs: config.retry.external.baseDelayMs,
+      init: {
+        method: "GET",
+        headers: {
+          "X-Worker-Token": config.workerToken
+        }
+      }
+    });
+    return { ready: true };
+  } catch (error) {
+    return {
+      ready: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
 async function handleSignedMutationWithIdempotency<TPayload, TResult>(input: {
   req: IncomingMessage;
   pathname: string;
@@ -1061,6 +1129,7 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
     actionType: "file_case",
     async handler(verified) {
       const caseRecord = ensureCaseExists(caseId);
+      const simulationBypass = config.simulationBypassEnabled && caseRecord.sealedDisabled;
       const namedDefendantCase = Boolean(caseRecord.defendantAgentId);
       if (caseRecord.status !== "draft") {
         throw conflict("CASE_NOT_DRAFT", "Only draft cases can be filed.");
@@ -1074,23 +1143,35 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         throw forbidden("AGENT_BANNED_FROM_FILING", "This agent is banned from submitting disputes.");
       }
 
-      const treasuryTxSig = body.treasuryTxSig?.trim();
-      if (!treasuryTxSig) {
+      const providedTreasuryTxSig = body.treasuryTxSig?.trim();
+      if (!simulationBypass && !providedTreasuryTxSig) {
         throw badRequest("TREASURY_TX_REQUIRED", "Treasury transaction signature is required.");
       }
       const payerWallet = body.payerWallet?.trim();
       if (payerWallet && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(payerWallet)) {
         throw badRequest("PAYER_WALLET_INVALID", "Payer wallet must be a valid Base58 public key.");
       }
+      const treasuryTxSig =
+        providedTreasuryTxSig && providedTreasuryTxSig.length > 0
+          ? providedTreasuryTxSig
+          : `simulation-bypass-${caseId}`;
 
-      enforceFilingLimit(db, config, verified.agentId);
+      if (!simulationBypass) {
+        enforceFilingLimit(db, config, verified.agentId);
+      }
 
-      if (isTreasuryTxUsed(db, treasuryTxSig)) {
+      if (!simulationBypass && isTreasuryTxUsed(db, treasuryTxSig)) {
         throw conflict("TREASURY_TX_REPLAY", "This treasury transaction has already been used.");
       }
 
-      const verification = await solana.verifyFilingFeeTx(treasuryTxSig, payerWallet);
-      if (!verification.finalised) {
+      const verification = simulationBypass
+        ? {
+            finalised: true,
+            amountLamports: config.filingFeeLamports,
+            payerWallet: payerWallet ?? null
+          }
+        : await solana.verifyFilingFeeTx(treasuryTxSig, payerWallet);
+      if (!simulationBypass && !verification.finalised) {
         throw badRequest("TREASURY_TX_NOT_FINALISED", "Treasury transaction is not finalised.");
       }
 
@@ -1106,6 +1187,11 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         }
         warning = `Soft cap exceeded: ${todayCount + 1} filings today.`;
       }
+      if (simulationBypass) {
+        warning = warning
+          ? `${warning} Simulation bypass enabled for this case.`
+          : "Simulation bypass enabled for this case.";
+      }
 
       db.exec("BEGIN IMMEDIATE");
       try {
@@ -1113,7 +1199,7 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         if (current.status !== "draft") {
           throw conflict("CASE_NOT_DRAFT", "Only draft cases can be filed.");
         }
-        if (isTreasuryTxUsed(db, treasuryTxSig)) {
+        if (!simulationBypass && isTreasuryTxUsed(db, treasuryTxSig)) {
           throw conflict("TREASURY_TX_REPLAY", "This treasury transaction has already been used.");
         }
 
@@ -1162,9 +1248,24 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           payload: {
             treasuryTxSig,
             amountLamports: verification.amountLamports,
-            payerWallet: verification.payerWallet ?? null
+            payerWallet: verification.payerWallet ?? null,
+            simulationBypass
           }
         });
+
+        if (simulationBypass) {
+          appendTranscriptEventInTransaction(db, {
+            caseId,
+            actorRole: "court",
+            eventType: "notice",
+            stage: "pre_session",
+            messageText:
+              "Simulation bypass active: payment verification and seal mint spend are disabled for this case.",
+            payload: {
+              simulationBypass: true
+            }
+          });
+        }
 
         appendTranscriptEventInTransaction(db, {
           caseId,
@@ -1474,10 +1575,33 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "GET" && pathname === "/api/ready") {
+      let dbReady = false;
+      try {
+        db.prepare("SELECT 1").get();
+        dbReady = true;
+      } catch {
+        dbReady = false;
+      }
+      const judgeReady = config.defaultCourtMode !== "judge" || judge.isAvailable();
+      const workerReady = config.sealWorkerMode !== "http" || Boolean(config.sealWorkerUrl);
+      sendJson(res, 200, {
+        ok: dbReady && judgeReady && workerReady,
+        dbReady,
+        judgeReady,
+        workerReady,
+        now: new Date().toISOString()
+      });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/internal/credential-status") {
       assertSystemKey(req, config);
       const backupInfo = findLatestBackupInfo(config.backupDir);
       const sealQueue = getSealQueueMetrics(db);
+      const workerProbeRequestId = createRequestId();
+      const workerProbe = await probeSealWorkerReadiness(workerProbeRequestId);
+      const missingDecisionTimestamps = countDecisionsMissingResolvedTimestamp(db);
       sendJson(res, 200, {
         solanaMode: config.solanaMode,
         sealWorkerMode: config.sealWorkerMode,
@@ -1496,7 +1620,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         sealQueueDepth: sealQueue.depth,
         sealOldestQueuedAtIso: sealQueue.oldestQueuedAtIso,
         sealFailedRecentCount: sealQueue.failedRecentCount,
-        sealDeadLetterCount: sealQueue.deadLetterCount
+        sealDeadLetterCount: sealQueue.deadLetterCount,
+        simulationBypassEnabled: config.simulationBypassEnabled,
+        missingDecisionTimestampCount: missingDecisionTimestamps,
+        workerReady: workerProbe.ready,
+        workerReadinessError: workerProbe.error,
+        resolvedCourtMode:
+          (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode,
+        judgeAvailable: judge.isAvailable()
       });
       return;
     }
@@ -1726,7 +1857,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         dbReady = false;
       }
       // Railway worker: check if seal worker URL is configured and mode is http
-      const workerReady = config.sealWorkerMode === "http" && Boolean(config.sealWorkerUrl);
+      const workerProbe = await probeSealWorkerReadiness(createRequestId());
+      const workerReady = workerProbe.ready;
       // Helius: check if API key is present
       const heliusReady = Boolean(config.heliusApiKey);
       // Drand: check if mode is http (stub means not connected)
@@ -1762,6 +1894,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }
       const workflowSummary = workflowParts.join(" ");
       const sealQueue = getSealQueueMetrics(db);
+      const missingDecisionTimestamps = countDecisionsMissingResolvedTimestamp(db);
 
       sendJson(res, 200, {
         db: { ready: dbReady },
@@ -1774,9 +1907,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         jurorPanelSize: config.rules.jurorPanelSize,
         courtMode: (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode,
         judgeAvailable: judge.isAvailable(),
+        simulationBypassEnabled: config.simulationBypassEnabled,
+        missingDecisionTimestampCount: missingDecisionTimestamps,
         treasuryAddress: config.treasuryAddress,
         sealWorkerUrl: config.sealWorkerUrl,
         sealWorkerMode: config.sealWorkerMode,
+        workerReadinessError: workerProbe.error,
         workflowSummary,
         sealQueue: {
           depth: sealQueue.depth,
@@ -2205,7 +2341,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (method === "GET" && pathname === "/api/decisions") {
-      const decisionRecords = listCasesByStatuses(db, ["closed", "sealed", "void"]);
+      const decisionRecords = listCasesByStatuses(db, ["closed", "sealed", "void"]).sort((a, b) => {
+        const aTime = new Date(resolveCaseDecisionTimestamp(a)).getTime();
+        const bTime = new Date(resolveCaseDecisionTimestamp(b)).getTime();
+        return bTime - aTime;
+      });
       const decisions = await Promise.all(decisionRecords.map((item) => hydrateDecision(item)));
       sendJson(res, 200, decisions);
       return;
@@ -3165,6 +3305,56 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "POST" && pathname === "/api/internal/demo/inject-long-horizon-case") {
       assertSystemKey(req, config);
       const result = await injectLongHorizonCase();
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "cases" &&
+      segments[4] === "simulation-mode"
+    ) {
+      assertAdminOrSystem(req);
+      if (!config.simulationBypassEnabled) {
+        throw forbidden(
+          "SIMULATION_BYPASS_DISABLED",
+          "Simulation bypass controls are disabled in this environment."
+        );
+      }
+      const caseId = decodeURIComponent(segments[3]);
+      const caseRecord = ensureCaseExists(caseId);
+      const body = await readJsonBody<{ enabled?: boolean }>(req);
+      if (typeof body.enabled !== "boolean") {
+        throw badRequest("SIMULATION_MODE_INVALID", "enabled must be a boolean.");
+      }
+      if (body.enabled === true && caseRecord.status !== "draft") {
+        throw conflict(
+          "SIMULATION_MODE_CASE_NOT_DRAFT",
+          "Simulation mode can only be enabled while the case is in draft status."
+        );
+      }
+
+      const result = setCaseSimulationMode(db, {
+        caseId,
+        enabled: body.enabled
+      });
+
+      appendTranscriptEvent(db, {
+        caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage: "pre_session",
+        messageText: result.enabled
+          ? "Simulation mode enabled for this case."
+          : "Simulation mode disabled for this case.",
+        payload: {
+          simulationMode: result.enabled
+        }
+      });
+
       sendJson(res, 200, result);
       return;
     }

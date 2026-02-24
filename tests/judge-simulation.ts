@@ -12,7 +12,7 @@
  * Required env:
  *   OPENCAWT_BASE_URL
  *   ADMIN_PANEL_PASSWORD
- *   (for non-dry mode) TREASURY_TX_SIG or HELIUS_RPC_URL + TREASURY_ADDRESS
+ *   With simulation bypass disabled (JUDGE_SIM_USE_BYPASS=0): TREASURY_TX_SIG or HELIUS_RPC_URL + TREASURY_ADDRESS
  */
 
 import assert from "node:assert/strict";
@@ -31,6 +31,7 @@ const PROVIDED_TREASURY_TX_SIGS = String(
   .map((value) => value.trim())
   .filter(Boolean);
 const DRY_MODE = process.env.JUDGE_SIM_DRY_MODE === "1";
+const USE_SIM_BYPASS = process.env.JUDGE_SIM_USE_BYPASS !== "0";
 const TARGET_COURT_MODE = (process.env.JUDGE_SIM_COURT_MODE?.trim() || "judge") as
   | "judge"
   | "11-juror";
@@ -66,6 +67,7 @@ interface CaseRunResult {
   hasJudgeTiebreak: boolean;
   remedyText: string;
   transcriptValidated: boolean;
+  sealSkipped: boolean;
 }
 
 interface CaseContent {
@@ -254,6 +256,23 @@ async function clearJurySelectionAllowlist(adminToken: string): Promise<void> {
   await adminPost("/api/internal/config/jury-selection-allowlist", { clear: true }, adminToken);
 }
 
+async function setSimulationModeForCase(
+  adminToken: string,
+  caseId: string,
+  enabled: boolean
+): Promise<void> {
+  const result = await adminPost(
+    `/api/internal/cases/${encodeURIComponent(caseId)}/simulation-mode`,
+    { enabled },
+    adminToken
+  );
+  if (result?.enabled !== enabled) {
+    throw new Error(
+      `Failed to set simulation mode=${enabled} for ${caseId}: ${JSON.stringify(result)}`
+    );
+  }
+}
+
 async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
   if (!HELIUS_RPC_URL) {
     throw new Error("HELIUS_RPC_URL is required for production judge simulation filing.");
@@ -417,6 +436,20 @@ async function fileCase(
   prosecution: Agent,
   caseId: string
 ): Promise<{ selectedJurors: string[]; txSigUsed: string }> {
+  if (USE_SIM_BYPASS) {
+    const { status, data } = await signedPost(
+      prosecution,
+      `/api/cases/${caseId}/file`,
+      {},
+      caseId
+    );
+    if (status === 200) {
+      return {
+        selectedJurors: (data.selectedJurors as string[]) ?? [],
+        txSigUsed: "simulation-bypass"
+      };
+    }
+  }
   return DRY_MODE
     ? fileCaseDry(prosecution, caseId)
     : fileCaseWithDiscovery(prosecution, caseId);
@@ -784,7 +817,9 @@ async function createDraftCase(
 
 async function runSpamScreeningScenario(
   prosecution: Agent,
-  defence: Agent
+  defence: Agent,
+  adminToken: string,
+  simulationCaseIds: Set<string>
 ): Promise<string> {
   log("SCENARIO A: Judge spam screening rejection");
 
@@ -806,6 +841,8 @@ async function runSpamScreeningScenario(
     summingUp: { prosecution: "", defence: "" },
     expectedTranscriptPhrases: []
   });
+  await setSimulationModeForCase(adminToken, caseId, true);
+  simulationCaseIds.add(caseId);
 
   const filing = await fileCase(prosecution, caseId);
   console.log(`  Filed spam case ${caseId} with tx ${filing.txSigUsed}`);
@@ -834,11 +871,15 @@ async function runRealisticJudgeCase(
   defence: Agent,
   jurors: Agent[],
   content: CaseContent,
-  votingPattern: VotingPattern
+  votingPattern: VotingPattern,
+  adminToken: string,
+  simulationCaseIds: Set<string>
 ): Promise<CaseRunResult> {
   log(label);
 
   const caseId = await createDraftCase(prosecution, defence, content);
+  await setSimulationModeForCase(adminToken, caseId, true);
+  simulationCaseIds.add(caseId);
   console.log(`  Draft case created: ${caseId}`);
 
   const openingDraft = await signedPost(
@@ -1083,6 +1124,10 @@ async function runRealisticJudgeCase(
   const remedyText = String(
     bundle?.overall?.judgeRemedyRecommendation ?? finalCase?.judgeRemedyRecommendation ?? ""
   ).trim();
+  const sealSkipped = String(finalCase?.sealError ?? "")
+    .toLowerCase()
+    .includes("simulation mode: seal mint intentionally skipped");
+  assert.ok(sealSkipped, `Case ${caseId} expected simulation seal skip marker.`);
 
   await assertTranscriptQuality(caseId, content.expectedTranscriptPhrases);
 
@@ -1091,7 +1136,8 @@ async function runRealisticJudgeCase(
     outcome,
     hasJudgeTiebreak,
     remedyText,
-    transcriptValidated: true
+    transcriptValidated: true,
+    sealSkipped
   };
 }
 
@@ -1180,6 +1226,7 @@ const PROSECUTION_LEANING_CASE: CaseContent = {
 async function main(): Promise<void> {
   let adminToken = "";
   let allowlistEnabled = false;
+  const simulationCaseIds = new Set<string>();
 
   const cleanupAllowlist = async (): Promise<void> => {
     if (!adminToken || !allowlistEnabled) {
@@ -1241,7 +1288,12 @@ async function main(): Promise<void> {
     await registerAgent(trialProsecution, false);
     await registerAgent(trialDefence, false);
 
-    const spamCaseId = await runSpamScreeningScenario(spamProsecution, spamDefence);
+    const spamCaseId = await runSpamScreeningScenario(
+      spamProsecution,
+      spamDefence,
+      adminToken,
+      simulationCaseIds
+    );
     console.log(`  Spam scenario case: ${spamCaseId}`);
 
     const tieResult = await runRealisticJudgeCase(
@@ -1250,7 +1302,9 @@ async function main(): Promise<void> {
       trialDefence,
       jurors,
       REALISTIC_TIE_CASE,
-      "tie_6_6"
+      "tie_6_6",
+      adminToken,
+      simulationCaseIds
     );
 
     console.log(`\nTie scenario complete:`);
@@ -1271,7 +1325,9 @@ async function main(): Promise<void> {
         fallbackDefence,
         jurors,
         PROSECUTION_LEANING_CASE,
-        "prosecution_majority_9_3"
+        "prosecution_majority_9_3",
+        adminToken,
+        simulationCaseIds
       );
       assert.equal(
         remedyCase.outcome,
@@ -1299,7 +1355,21 @@ async function main(): Promise<void> {
     console.log("  4) Tiebreak metadata and reasoning presence");
     console.log("  5) Intent/remediation output on prosecution closure");
     console.log("  6) Schedule/active/decisions/transcript visibility");
+    console.log("  7) Seal mint bypass confirmed for simulation-tagged cases");
   } finally {
+    if (adminToken) {
+      for (const caseId of simulationCaseIds) {
+        try {
+          const detail = await getJson(`/api/cases/${caseId}`);
+          const status = String(detail?.status ?? "");
+          if (status === "draft" || status === "filed" || status === "voting") {
+            await setSimulationModeForCase(adminToken, caseId, false);
+          }
+        } catch {
+          // Non-fatal cleanup path
+        }
+      }
+    }
     await cleanupAllowlist();
   }
 }

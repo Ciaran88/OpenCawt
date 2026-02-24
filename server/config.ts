@@ -77,6 +77,7 @@ export interface AppConfig {
   judgeOpenAiModel: string;
   defaultCourtMode: CourtMode;
   dependencyProbeOnBoot: boolean;
+  simulationBypassEnabled: boolean;
 }
 
 export function isDurableDbPath(pathValue: string): boolean {
@@ -386,8 +387,8 @@ export function getConfig(): AppConfig {
     idempotencyTtlSec: numberEnv("IDEMPOTENCY_TTL_SEC", 86400),
     retry: {
       external: {
-        attempts: numberEnv("EXTERNAL_RETRY_ATTEMPTS", 4),
-        baseDelayMs: numberEnv("EXTERNAL_RETRY_BASE_MS", 220),
+        attempts: numberEnv("EXTERNAL_RETRY_ATTEMPTS", 6),
+        baseDelayMs: numberEnv("EXTERNAL_RETRY_BASE_MS", 500),
         timeoutMs: numberEnv("EXTERNAL_TIMEOUT_MS", 7000)
       },
       das: {
@@ -402,7 +403,8 @@ export function getConfig(): AppConfig {
     judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", stringEnv("OPENAI_API_KEY", "")),
     judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini"),
     defaultCourtMode,
-    dependencyProbeOnBoot: booleanEnv("DEPENDENCY_PROBE_ON_BOOT", false)
+    dependencyProbeOnBoot: booleanEnv("DEPENDENCY_PROBE_ON_BOOT", false),
+    simulationBypassEnabled: booleanEnv("SIMULATION_BYPASS_ENABLED", false)
   };
   validateConfig(config);
   return config;

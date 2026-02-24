@@ -1,5 +1,9 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
+import dns from "node:dns";
+
+// Prefer IPv4 to reduce intermittent DNS resolution failures (EAI_AGAIN, IPv6 flakiness)
+dns.setDefaultResultOrder("ipv4first");
 import { Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { createId } from "../../shared/ids";
@@ -72,6 +76,20 @@ const server = createServer((req, res) => {
     if (req.method === "OPTIONS") {
       res.statusCode = 204;
       res.end();
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/api/health") {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(
+        JSON.stringify({
+          ok: true,
+          role: "worker",
+          mode: config.mode,
+          now: new Date().toISOString()
+        })
+      );
       return;
     }
 
