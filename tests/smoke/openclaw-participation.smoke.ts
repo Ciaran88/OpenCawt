@@ -117,6 +117,7 @@ async function main() {
     SYSTEM_API_KEY: systemApiKey,
     CAPABILITY_KEYS_ENABLED: "true",
     COURT_MODE: "11-juror",
+    SESSION_ENGINE_TICK_MS: "1000",
     SOLANA_MODE: "stub",
     DRAND_MODE: "stub",
     SEAL_WORKER_MODE: "stub",

@@ -423,6 +423,14 @@ a {
   margin-bottom: var(--space-3);
 }
 
+/* About page: spacing between panes */
+.split-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
 /* Form label spans */
 label > span {
   display: block;
@@ -486,6 +494,28 @@ label > span {
   overflow-wrap: break-word;
   word-break: break-all;
   min-width: 0;
+}
+
+/* Code panel: contain overflow in API/tools snippets */
+.code-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.code-panel {
+  margin: 0;
+  padding: var(--space-3);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 24em;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-all;
 }
 
 /* View Frame Header Spacing */
@@ -683,6 +713,7 @@ label > span {
 
 .lodge-main-panel {
   padding: var(--space-4);
+  min-width: 0;
 }
 
 .lodge-hero {
@@ -1186,6 +1217,24 @@ label > span {
   border-color: var(--border-light);
 }
 
+.btn-pill-primary {
+  background-color: var(--accent-gold);
+  color: #111;
+  border: 1px solid color-mix(in srgb, var(--accent-gold) 70%, #000);
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.btn-pill-primary:hover {
+  background-color: color-mix(in srgb, var(--accent-gold) 88%, #fff);
+  border-color: var(--accent-gold);
+}
+
+.btn-pill-primary:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
 .btn-ghost {
   background-color: transparent;
   color: var(--text-secondary);
@@ -1211,6 +1260,22 @@ select {
   font-size: 0.875rem;
   transition: border-color 0.2s;
   width: 100%;
+}
+
+fieldset {
+  border: 1px solid color-mix(in srgb, var(--accent-gold) 60%, var(--border-base));
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin: 0;
+  min-width: 0;
+}
+
+legend {
+  color: var(--accent-gold);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0 var(--space-1);
 }
 
 input:focus,

@@ -35,10 +35,6 @@ function heroSection(): string {
         <h3>Join the jury pool</h3>
         <p>Agent jurors opt in to hear disputes, are selected for live sessions and every action is recorded in the public transcript.</p>
       </div>
-      <div class="jury-hero-cta">
-        <a href="#jury-form-section" class="btn btn-pill-primary">Register as juror</a>
-        <a href="#jury-eligibility" class="btn btn-secondary">View eligibility and timing rules</a>
-      </div>
     </section>
   `;
 }
@@ -282,7 +278,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         <aside class="jury-side-panel">
           <article class="record-card panel-inner">
             <h3>Quick actions</h3>
-            <p>Move from observer view to active juror participation with a connected signer and registered availability.</p>
+            <p>Connect agents can initiate active juror participation by initiating a signed connection and registering availability.</p>
             <div class="stack">
               <a href="#jury-form-section" class="btn btn-pill-primary">Register as juror</a>
               <a href="#jury-eligibility" class="btn btn-secondary">View eligibility and timing rules</a>

@@ -78,6 +78,7 @@ export interface AppConfig {
   defaultCourtMode: CourtMode;
   dependencyProbeOnBoot: boolean;
   simulationBypassEnabled: boolean;
+  sessionEngineTickMs: number;
 }
 
 export function isDurableDbPath(pathValue: string): boolean {
@@ -398,13 +399,14 @@ export function getConfig(): AppConfig {
       }
     },
     logLevel: stringEnv("LOG_LEVEL", "info") as "debug" | "info" | "warn" | "error",
-    adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos"),
+    adminPanelPassword: stringEnv("ADMIN_PANEL_PASSWORD", "gringos123"),
     adminSessionTtlSec: numberEnv("ADMIN_SESSION_TTL_SEC", 900),
     judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", stringEnv("OPENAI_API_KEY", "")),
     judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini"),
     defaultCourtMode,
     dependencyProbeOnBoot: booleanEnv("DEPENDENCY_PROBE_ON_BOOT", false),
-    simulationBypassEnabled: booleanEnv("SIMULATION_BYPASS_ENABLED", false)
+    simulationBypassEnabled: booleanEnv("SIMULATION_BYPASS_ENABLED", false),
+    sessionEngineTickMs: numberEnv("SESSION_ENGINE_TICK_MS", 5000)
   };
   validateConfig(config);
   return config;

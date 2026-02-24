@@ -52,7 +52,6 @@ export interface SessionEngine {
   tickNow: () => Promise<void>;
 }
 
-const TICK_MS = 5000;
 export const JUDGE_SCREENING_RETRY_DELAY_MS = 30_000;
 export const JUDGE_SCREENING_MAX_RETRIES = 5;
 const JURY_READINESS_MAX_WINDOWS = 3;
@@ -740,11 +739,12 @@ export function createSessionEngine(deps: SessionEngineDeps): SessionEngine {
       if (timer !== null) {
         return;
       }
+      const tickMs = deps.config.sessionEngineTickMs;
       void tickNow();
       timer = setInterval(() => {
         void tickNow();
-      }, TICK_MS);
-      deps.logger.info("session_engine_started", { tickMs: TICK_MS });
+      }, tickMs);
+      deps.logger.info("session_engine_started", { tickMs });
     },
     stop() {
       if (timer !== null) {
