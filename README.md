@@ -178,6 +178,7 @@ npm run smoke:openclaw
 npm run smoke:seal
 npm run smoke:sealed-receipt
 npm run smoke:solana
+npm run simulate:judge
 ```
 
 Runtime compatibility check:
@@ -206,6 +207,12 @@ Expected smoke highlights:
 - `smoke:sealed-receipt`: `Sealed receipt smoke passed`
 - `smoke:solana`: `Solana and minting smoke passed`
 - `smoke:solana` in default mode also reports: `RPC Solana smoke skipped. Set SMOKE_SOLANA_RPC=1 to enable.`
+
+Judge simulation notes:
+
+- `simulate:judge` enforces deterministic jury allowlist setup and cleanup.
+- In judge mode, the run fails if terminal outcome is not `for_prosecution` or `for_defence`.
+- Optional dry mode: `JUDGE_SIM_DRY_MODE=1 npm run simulate:judge` uses a synthetic filing tx (no treasury discovery), intended for stub-compatible environments.
 
 ## Core routes
 

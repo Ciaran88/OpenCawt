@@ -24,6 +24,7 @@ const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL?.trim() || "";
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY?.trim() || "";
 const TREASURY_ADDRESS = process.env.TREASURY_ADDRESS?.trim() || "";
 const PROVIDED_TREASURY_TX_SIG = process.env.TREASURY_TX_SIG?.trim() || "";
+const DRY_MODE = process.env.JUDGE_SIM_DRY_MODE === "1";
 const TARGET_COURT_MODE = (process.env.JUDGE_SIM_COURT_MODE?.trim() || "judge") as
   | "judge"
   | "11-juror";
@@ -359,6 +360,28 @@ async function fileCaseWithDiscovery(
   );
 }
 
+async function fileCaseDry(
+  prosecution: Agent,
+  caseId: string
+): Promise<{ selectedJurors: string[]; txSigUsed: string }> {
+  const txSig = `judge-sim-dry-${Date.now()}`;
+  const { status, data } = await signedPost(
+    prosecution,
+    `/api/cases/${caseId}/file`,
+    { treasuryTxSig: txSig },
+    caseId
+  );
+  if (status !== 200) {
+    throw new Error(
+      `Dry filing failed (${status}). Dry mode requires stub-compatible filing or an explicit TREASURY_TX_SIG. Response: ${JSON.stringify(data)}`
+    );
+  }
+  return {
+    selectedJurors: (data.selectedJurors as string[]) ?? [],
+    txSigUsed: txSig
+  };
+}
+
 async function driveJuryReadiness(caseId: string, jurors: Agent[]): Promise<void> {
   const readyAgents = new Set<string>();
   const start = Date.now();
@@ -537,6 +560,49 @@ async function waitForDecision(caseId: string, label: string): Promise<any> {
   throw new Error(`Timeout waiting for ${label}`);
 }
 
+function listContainsCase(items: unknown, caseId: string): boolean {
+  if (!Array.isArray(items)) {
+    return false;
+  }
+  return items.some((item) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const row = item as Record<string, unknown>;
+    return row.caseId === caseId || row.case_id === caseId || row.id === caseId;
+  });
+}
+
+async function waitForScheduleBucket(
+  caseId: string,
+  bucket: "scheduled" | "active",
+  label: string
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < MAX_WAIT_MS) {
+    const schedule = await getJson("/api/schedule");
+    if (listContainsCase(schedule?.[bucket], caseId)) {
+      console.log(`  ✓ ${label}`);
+      return;
+    }
+    await sleep(POLL_MS);
+  }
+  throw new Error(`Timeout waiting for case in ${bucket} schedule bucket.`);
+}
+
+async function waitForDecisionFeed(caseId: string): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < MAX_WAIT_MS) {
+    const decisions = await getJson("/api/decisions");
+    if (listContainsCase(decisions, caseId)) {
+      console.log("  ✓ Case appears in decisions feed");
+      return;
+    }
+    await sleep(POLL_MS);
+  }
+  throw new Error("Timeout waiting for case in decisions feed.");
+}
+
 function log(msg: string) {
   console.log(`\n${"=".repeat(60)}\n${msg}\n${"=".repeat(60)}`);
 }
@@ -621,6 +687,27 @@ const JUROR_RATIONALES_NOT_PROVEN = [
 
 async function main() {
   let adminToken = "";
+  let allowlistEnabled = false;
+
+  const cleanupAllowlist = async (): Promise<void> => {
+    if (!adminToken || !allowlistEnabled) {
+      return;
+    }
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await clearJurySelectionAllowlist(adminToken);
+        console.log("\n[cleanup] Jury selection allowlist cleared.");
+        allowlistEnabled = false;
+        return;
+      } catch (error) {
+        lastError = error;
+        await sleep(400 * attempt);
+      }
+    }
+    console.error("\n[cleanup] Failed to clear jury selection allowlist:", lastError);
+  };
+
   log("PHASE 1: Setup — Generating agents");
   const prosecution = await makeAgent("prosecution");
   const defence = await makeAgent("defence");
@@ -632,6 +719,9 @@ async function main() {
   console.log(`  Prosecution: ${prosecution.agentId.slice(0, 12)}...`);
   console.log(`  Defence:     ${defence.agentId.slice(0, 12)}...`);
   console.log(`  Jurors:      ${jurors.length} generated`);
+  if (DRY_MODE) {
+    console.log("  Dry mode: enabled (filing uses synthetic tx and skips treasury discovery)");
+  }
 
   // ── Ensure requested court mode ──
   log(`PHASE 2: Switch to ${TARGET_COURT_MODE} mode`);
@@ -645,6 +735,7 @@ async function main() {
       adminToken,
       jurors.map((juror) => juror.agentId)
     );
+    allowlistEnabled = true;
     console.log(`  ✓ Jury selection allowlist set (${jurors.length} simulation jurors)`);
 
     // ── Register agents ──
@@ -724,11 +815,14 @@ async function main() {
 
   // ── File the case (RPC-compatible tx discovery) ──
   log("PHASE 7: File case (discover valid treasury TX)");
-  const filingResult = await fileCaseWithDiscovery(prosecution, caseId);
+  const filingResult = DRY_MODE
+    ? await fileCaseDry(prosecution, caseId)
+    : await fileCaseWithDiscovery(prosecution, caseId);
   const selectedJurors = filingResult.selectedJurors;
   console.log(`  ✓ Case filed. Jury selected: ${selectedJurors.length} jurors`);
   console.log(`  Filing tx used: ${filingResult.txSigUsed}`);
   console.log(`  Selected juror IDs: ${selectedJurors.map((j: string) => j.slice(0, 8) + "...").join(", ")}`);
+  await waitForScheduleBucket(caseId, "scheduled", "Case appears in schedule.scheduled");
 
   if (TARGET_COURT_MODE === "judge") {
     // ── Wait for judge screening ──
@@ -762,6 +856,7 @@ async function main() {
   // ── Wait for jury_readiness ──
   log("PHASE 10: Wait for jury readiness");
   await waitForStage(caseId, ["jury_readiness"], "Reached jury_readiness");
+  await waitForScheduleBucket(caseId, "active", "Case appears in schedule.active");
 
   // ── Confirm jurors ready ──
   log("PHASE 11: Confirm jurors ready");
@@ -960,6 +1055,7 @@ async function main() {
   }
 
   const decision = await waitForDecision(caseId, "Case closed");
+  await waitForDecisionFeed(caseId);
 
   // ── Report results ──
   log("RESULTS");
@@ -1023,6 +1119,16 @@ async function main() {
     }
   }
 
+  if (TARGET_COURT_MODE === "judge") {
+    const outcome = String(decision.outcome ?? "");
+    if (decision.status === "void" || outcome === "void") {
+      throw new Error("Judge simulation ended in void outcome. Expected prosecution or defence result.");
+    }
+    if (outcome !== "for_prosecution" && outcome !== "for_defence") {
+      throw new Error(`Judge simulation ended without terminal verdict outcome (outcome=${outcome || "unknown"}).`);
+    }
+  }
+
   // Also check case record for remedy recommendation (stored separately)
   const finalCase = await getJson(`/api/cases/${caseId}`);
   if (finalCase.judgeRemedyRecommendation) {
@@ -1037,14 +1143,7 @@ async function main() {
 
   log("SIMULATION COMPLETE");
   } finally {
-    if (adminToken) {
-      try {
-        await clearJurySelectionAllowlist(adminToken);
-        console.log("\n[cleanup] Jury selection allowlist cleared.");
-      } catch (error) {
-        console.error("\n[cleanup] Failed to clear jury selection allowlist:", error);
-      }
-    }
+    await cleanupAllowlist();
   }
 }
 

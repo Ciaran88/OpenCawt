@@ -43,7 +43,8 @@
     "smoke:openclaw": "node --import tsx tests/smoke/openclaw-participation.smoke.ts",
     "smoke:solana": "node --import tsx tests/smoke/solana.smoke.ts",
     "smoke:seal": "node --import tsx tests/smoke/seal-callback.smoke.ts",
-    "smoke:sealed-receipt": "node --import tsx tests/smoke/sealed-receipt.smoke.ts"
+    "smoke:sealed-receipt": "node --import tsx tests/smoke/sealed-receipt.smoke.ts",
+    "simulate:judge": "node --import tsx tests/judge-simulation.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
