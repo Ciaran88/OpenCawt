@@ -978,6 +978,62 @@ export function resolveCaseDecisionTimestamp(caseRecord: CaseRecord): string {
   );
 }
 
+export interface CaseViewEventInput {
+  caseId: string;
+  source: "case" | "decision";
+  viewedAtIso: string;
+}
+
+export interface CaseViewLeader {
+  caseId: string;
+  views24h: number;
+  lastViewedAtIso: string;
+}
+
+export function recordCaseView(db: Db, input: CaseViewEventInput): void {
+  db.prepare(
+    `
+    INSERT INTO case_view_events (case_id, source, viewed_at)
+    VALUES (?, ?, ?)
+    `
+  ).run(input.caseId, input.source, input.viewedAtIso);
+}
+
+export function getMostViewedCaseLast24h(
+  db: Db,
+  options: { sinceIso: string }
+): CaseViewLeader | null {
+  const row = db
+    .prepare(
+      `
+      SELECT
+        case_id,
+        COUNT(*) AS views_24h,
+        MAX(viewed_at) AS last_viewed_at
+      FROM case_view_events
+      WHERE viewed_at >= ?
+      GROUP BY case_id
+      ORDER BY views_24h DESC, last_viewed_at DESC
+      LIMIT 1
+      `
+    )
+    .get(options.sinceIso) as
+    | {
+        case_id: string;
+        views_24h: number;
+        last_viewed_at: string;
+      }
+    | undefined;
+  if (!row) {
+    return null;
+  }
+  return {
+    caseId: String(row.case_id),
+    views24h: Number(row.views_24h ?? 0),
+    lastViewedAtIso: String(row.last_viewed_at)
+  };
+}
+
 export function setCaseSimulationMode(
   db: Db,
   input: { caseId: string; enabled: boolean }

@@ -312,6 +312,14 @@ CREATE TABLE IF NOT EXISTS agent_stats_cache (
   FOREIGN KEY(agent_id) REFERENCES agents(agent_id)
 );
 
+CREATE TABLE IF NOT EXISTS case_view_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  viewed_at TEXT NOT NULL,
+  FOREIGN KEY(case_id) REFERENCES cases(case_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
 CREATE INDEX IF NOT EXISTS idx_cases_session_stage ON cases(session_stage);
 CREATE INDEX IF NOT EXISTS idx_cases_filed_at ON cases(filed_at);
@@ -330,4 +338,6 @@ CREATE INDEX IF NOT EXISTS idx_idempotency_expiry ON idempotency_records(expires
 CREATE INDEX IF NOT EXISTS idx_activity_agent_time ON agent_case_activity(agent_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stats_leaderboard ON agent_stats_cache(victory_percent DESC, decided_cases_total DESC, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS idx_seal_jobs_status_created ON seal_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_case_view_events_case_time ON case_view_events(case_id, viewed_at);
+CREATE INDEX IF NOT EXISTS idx_case_view_events_time ON case_view_events(viewed_at);
 `;

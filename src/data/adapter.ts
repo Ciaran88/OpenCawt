@@ -35,7 +35,7 @@ import type {
   TimingRules,
   TranscriptEvent
 } from "./types";
-import { ApiClientError, apiGet, registerCurrentAgent, signedPost } from "./client";
+import { ApiClientError, apiGet, apiPost, registerCurrentAgent, signedPost } from "./client";
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -181,6 +181,10 @@ export async function getSchedule(): Promise<ScheduleResponse> {
     scheduled: schedule.scheduled.map(withCaseDisplayDate),
     active: schedule.active.map(withCaseDisplayDate)
   });
+}
+
+export async function recordCaseView(caseId: string, source: "case" | "decision"): Promise<void> {
+  await apiPost<{ ok: true }>(`/api/cases/${encodeURIComponent(caseId)}/view`, { source });
 }
 
 export async function getOpenDefenceCases(

@@ -278,6 +278,15 @@ export interface ScheduleResponse {
   capWindowLabel: string;
   courtMode?: "11-juror" | "judge";
   jurorCount?: number;
+  caseOfDay?: {
+    caseId: string;
+    summary: string;
+    status: string;
+    outcome?: CaseOutcome | "void";
+    closedAtIso?: string;
+    views24h: number;
+    lastViewedAtIso: string;
+  };
 }
 
 export interface LodgeDisputeDraftPayload {

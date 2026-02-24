@@ -39,6 +39,7 @@ import {
   getAgent,
   getAgentProfile,
   getCaseIntegrityDiagnostics,
+  getMostViewedCaseLast24h,
   confirmJurorReady,
   countClosedAndSealedCases,
   countEvidenceForCase,
@@ -72,6 +73,7 @@ import {
   replaceJuryMembers,
   recordDefenceInviteAttempt,
   requeueSealJobForRedrive,
+  recordCaseView,
   rebuildAllAgentStats,
   searchAgents,
   revokeAgentCapabilityByHash,
@@ -2165,11 +2167,68 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (
+      method === "POST" &&
+      segments.length === 4 &&
+      segments[0] === "api" &&
+      segments[1] === "cases" &&
+      segments[3] === "view"
+    ) {
+      const caseId = decodeURIComponent(segments[2]);
+      const caseRecord = getCaseById(db, caseId);
+      if (!caseRecord) {
+        throw notFound("CASE_NOT_FOUND", "Case was not found.");
+      }
+      const body = await readJsonBody<{ source?: unknown }>(req);
+      const source = body.source;
+      if (source !== "case" && source !== "decision") {
+        throw badRequest(
+          "CASE_VIEW_SOURCE_INVALID",
+          "View source must be one of: case, decision."
+        );
+      }
+      recordCaseView(db, {
+        caseId,
+        source,
+        viewedAtIso: new Date().toISOString()
+      });
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/schedule") {
       const openRecords = listCasesByStatuses(db, ["draft", "filed", "jury_selected", "voting"]);
       const hydrated = await Promise.all(openRecords.map((item) => hydrateCase(item)));
       const scheduled = hydrated.filter((item) => item.status === "scheduled");
       const active = hydrated.filter((item) => item.status === "active");
+      const mostViewed = getMostViewedCaseLast24h(db, {
+        sinceIso: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      });
+      let caseOfDay:
+        | {
+            caseId: string;
+            summary: string;
+            status: string;
+            outcome?: "for_prosecution" | "for_defence" | "void";
+            closedAtIso?: string;
+            views24h: number;
+            lastViewedAtIso: string;
+          }
+        | undefined;
+      if (mostViewed) {
+        const caseRecord = getCaseById(db, mostViewed.caseId);
+        if (caseRecord) {
+          caseOfDay = {
+            caseId: caseRecord.caseId,
+            summary: caseRecord.summary,
+            status: caseRecord.status,
+            outcome: caseRecord.outcome,
+            closedAtIso: resolveCaseDecisionTimestamp(caseRecord),
+            views24h: mostViewed.views24h,
+            lastViewedAtIso: mostViewed.lastViewedAtIso
+          };
+        }
+      }
       const courtMode =
         (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode;
       const jurorCount = courtMode === "judge" ? 12 : config.rules.jurorPanelSize;
@@ -2180,7 +2239,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         softCapPerDay: config.softDailyCaseCap,
         capWindowLabel: "Soft daily cap",
         courtMode,
-        jurorCount
+        jurorCount,
+        caseOfDay
       });
       return;
     }

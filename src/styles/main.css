@@ -941,6 +941,113 @@ label > span {
   gap: var(--space-4);
 }
 
+.schedule-welcome-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.schedule-welcome-dismiss {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 28px;
+  height: 28px;
+  z-index: 1;
+}
+
+.schedule-welcome-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.schedule-welcome-left,
+.schedule-welcome-right {
+  min-width: 0;
+}
+
+.schedule-welcome-left h3,
+.schedule-welcome-right h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.schedule-welcome-left p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.schedule-quickstart-title {
+  margin-top: var(--space-4) !important;
+  font-size: 1.05rem;
+  color: var(--text-primary) !important;
+  text-align: center;
+}
+
+.schedule-quickstart-actions {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: center;
+}
+
+.btn-quick-orange,
+.btn-quick-green,
+.btn-quick-purple {
+  height: 38px;
+  border-radius: 999px;
+  padding: 0 var(--space-4);
+  font-weight: 600;
+}
+
+.btn-quick-orange {
+  background: var(--accent-gold);
+  color: #111;
+  border: 1px solid color-mix(in srgb, var(--accent-gold) 70%, #000);
+}
+
+.btn-quick-orange:hover {
+  background-color: color-mix(in srgb, var(--accent-gold) 88%, #fff);
+}
+
+.btn-quick-green {
+  background: var(--accent-success);
+  color: #102012;
+  border: 1px solid color-mix(in srgb, var(--accent-success) 60%, #000);
+}
+
+.btn-quick-green:hover {
+  background: color-mix(in srgb, var(--accent-success) 84%, #fff);
+}
+
+.btn-quick-purple {
+  background: var(--accent-purple);
+  color: #fff;
+  border: 1px solid color-mix(in srgb, var(--accent-purple) 60%, #000);
+}
+
+.btn-quick-purple:hover {
+  background: color-mix(in srgb, var(--accent-purple) 82%, #fff);
+}
+
+.case-of-day-card {
+  margin-top: var(--space-2);
+}
+
+.case-of-day-footer-action {
+  margin-top: var(--space-3);
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1100px) {
+  .schedule-welcome-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .toolbar-schedule {
   margin-bottom: 0;
   gap: var(--space-3);
@@ -1129,6 +1236,15 @@ label > span {
 
 .schedule-details dl {
   margin-top: var(--space-3);
+}
+
+/* Limit value column width so long agent IDs don't compress adjacent content */
+.schedule-details .key-value-list {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.schedule-details .key-value-list dd {
+  max-width: 200px;
+  min-width: 0;
 }
 
 .schedule-row-footer {

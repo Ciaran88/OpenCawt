@@ -72,6 +72,15 @@ export interface AppState {
     capWindowLabel: string;
     courtMode?: "11-juror" | "judge";
     jurorCount?: number;
+    caseOfDay?: {
+      caseId: string;
+      summary: string;
+      status: string;
+      outcome?: "for_prosecution" | "for_defence" | "void";
+      closedAtIso?: string;
+      views24h: number;
+      lastViewedAtIso: string;
+    };
   };
   decisions: Decision[];
   ticker: TickerEvent[];
@@ -97,6 +106,7 @@ export interface AppState {
     toast: ToastMessage | null;
     modal: ModalState | null;
     moreSheetOpen: boolean;
+    showScheduleWelcomePanel: boolean;
   };
 }
 
@@ -149,7 +159,8 @@ export function createInitialState(): AppState {
       softCapPerDay: 50,
       capWindowLabel: "Soft daily cap",
       courtMode: undefined,
-      jurorCount: undefined
+      jurorCount: undefined,
+      caseOfDay: undefined
     },
     decisions: [],
     ticker: [],
@@ -191,7 +202,8 @@ export function createInitialState(): AppState {
       loading: true,
       toast: null,
       modal: null,
-      moreSheetOpen: false
+      moreSheetOpen: false,
+      showScheduleWelcomePanel: true
     }
   };
 }

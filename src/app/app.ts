@@ -25,6 +25,7 @@ import {
   getLeaderboard,
   searchAgents,
   getOpenDefenceCases,
+  recordCaseView,
   getRuleLimits,
   getSchedule,
   getTickerEvents,
@@ -171,6 +172,7 @@ export function mountApp(root: HTMLElement): void {
   let caseLiveTimer: number | null = null;
   let liveCaseId: string | null = null;
   let filingEstimateTimer: number | null = null;
+  const recordedViews = new Set<string>();
 
   // Admin panel state — isolated from global app state
   const adminState: AdminDashboardState = {
@@ -797,6 +799,13 @@ export function mountApp(root: HTMLElement): void {
       if (!caseItem) {
         setMainContent(renderMissingCaseView(), contentOptions);
       } else {
+        const viewKey = `case:${route.id}`;
+        if (!recordedViews.has(viewKey)) {
+          recordedViews.add(viewKey);
+          void recordCaseView(route.id, "case").catch(() => {
+            recordedViews.delete(viewKey);
+          });
+        }
         activeRenderedCase = caseItem;
         if (
           state.caseSessions[route.id] === undefined ||
@@ -819,6 +828,13 @@ export function mountApp(root: HTMLElement): void {
         return;
       }
       if (decision) {
+        const viewKey = `decision:${decision.caseId}`;
+        if (!recordedViews.has(viewKey)) {
+          recordedViews.add(viewKey);
+          void recordCaseView(decision.caseId, "decision").catch(() => {
+            recordedViews.delete(viewKey);
+          });
+        }
         const [caseItem, transcript] = await Promise.all([
           getCase(decision.caseId),
           getCaseTranscript(decision.caseId)
@@ -1529,6 +1545,12 @@ export function mountApp(root: HTMLElement): void {
     if (action === "toggle-more-sheet") {
       state.ui.moreSheetOpen = !state.ui.moreSheetOpen;
       renderOverlay();
+      return;
+    }
+
+    if (action === "dismiss-schedule-welcome") {
+      state.ui.showScheduleWelcomePanel = false;
+      void renderRoute();
       return;
     }
 

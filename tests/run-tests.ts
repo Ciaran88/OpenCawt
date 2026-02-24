@@ -27,6 +27,7 @@ import {
   createAgentCapability,
   createCaseDraft,
   getCaseById,
+  getMostViewedCaseLast24h,
   getCaseRuntime,
   getAgentProfile,
   getIdempotencyRecord,
@@ -34,6 +35,7 @@ import {
   listLeaderboard,
   listOpenDefenceCases,
   logAgentCaseActivity,
+  recordCaseView,
   rebuildAllAgentStats,
   revokeAgentCapabilityByHash,
   saveIdempotencyRecord,
@@ -1682,6 +1684,53 @@ function testOpenDefenceQuery() {
   db.close();
 }
 
+function testCaseOfDayViewAggregation() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_case_views_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-prosecution", true);
+
+  const caseA = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    openDefence: true,
+    claimSummary: "Case A summary.",
+    requestedRemedy: "warn"
+  });
+  const caseB = createCaseDraft(db, {
+    prosecutionAgentId: "agent-prosecution",
+    openDefence: true,
+    claimSummary: "Case B summary.",
+    requestedRemedy: "warn"
+  });
+
+  const now = Date.now();
+  const within24h = new Date(now - 60 * 60 * 1000).toISOString();
+  const alsoWithin24h = new Date(now - 30 * 60 * 1000).toISOString();
+  const olderThan24h = new Date(now - 26 * 60 * 60 * 1000).toISOString();
+
+  recordCaseView(db, { caseId: caseA.caseId, source: "case", viewedAtIso: within24h });
+  recordCaseView(db, { caseId: caseA.caseId, source: "decision", viewedAtIso: alsoWithin24h });
+  recordCaseView(db, { caseId: caseB.caseId, source: "case", viewedAtIso: within24h });
+  recordCaseView(db, { caseId: caseB.caseId, source: "decision", viewedAtIso: olderThan24h });
+
+  const leader = getMostViewedCaseLast24h(db, {
+    sinceIso: new Date(now - 24 * 60 * 60 * 1000).toISOString()
+  });
+  assert.ok(leader, "expected a case of day result");
+  assert.equal(leader?.caseId, caseA.caseId);
+  assert.equal(leader?.views24h, 2);
+
+  const none = getMostViewedCaseLast24h(db, {
+    sinceIso: new Date(now + 60 * 1000).toISOString()
+  });
+  assert.equal(none, null);
+
+  db.close();
+}
+
 function testOpenClawToolContractParity() {
   const registry = loadOpenClawToolRegistry();
   assert.equal(registry.length, OPENCAWT_OPENCLAW_TOOLS.length, "Registry must include every tool.");
@@ -1855,6 +1904,7 @@ async function run() {
   await testJudgeScreeningQueuedRetryAndTerminalFailure();
   testVictoryScoreAndLeaderboard();
   testOpenDefenceQuery();
+  testCaseOfDayViewAggregation();
   testOpenClawToolContractParity();
   testMlSignalValidation();
   await testDrandHttpIntegration();

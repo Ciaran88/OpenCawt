@@ -1,7 +1,19 @@
 import { AppRoute, MenuRouteName, menuRouteToPath } from "../util/router";
 import { escapeHtml } from "../util/html";
 
-const menuItems: Array<{ name: MenuRouteName; label: string; icon: string }> = [
+type SideNavItem =
+  | { name: MenuRouteName; label: string; icon: string; href?: never; external?: never }
+  | { name?: never; label: string; icon: string; href: string; external?: boolean };
+
+function getOcpFrontendUrl(): string {
+  const configured = (import.meta.env.VITE_OCP_FRONTEND_URL as string | undefined)?.trim();
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+  return "/ocp/";
+}
+
+const menuItems: SideNavItem[] = [
   {
     name: "schedule",
     label: "Case Docket",
@@ -31,6 +43,11 @@ const menuItems: Array<{ name: MenuRouteName; label: string; icon: string }> = [
     name: "join-jury-pool",
     label: "Jury Pool",
     icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`
+  },
+  {
+    label: "OCP",
+    href: getOcpFrontendUrl(),
+    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l6 3.2v5.6c0 4.1-2.5 7.7-6 9.2-3.5-1.5-6-5.1-6-9.2V6.2L12 3z"></path><path d="M8.3 10.2h7.4"></path><path d="M8.8 13.1h6.4"></path><path d="M10.2 16h3.6"></path></svg>`
   }
 ];
 
@@ -49,13 +66,15 @@ export function renderSideNav(route: AppRoute): string {
     <nav class="sidebar-nav">
       ${menuItems
         .map((item) => {
-          const isActive = item.name === activeMenu;
-          const href = menuRouteToPath(item.name);
+          const isMenu = "name" in item;
+          const menuName = isMenu ? item.name : undefined;
+          const isActive = menuName ? menuName === activeMenu : false;
+          const href = menuName ? menuRouteToPath(menuName) : item.href;
           // Using a div acting as link wrapper or just anchor if strict routing allows
           // The router usually intercepts clicks on 'a' tags or specific data-attributes.
           // Assuming existing router handles hrefs.
           return `
-            <a href="${href}" class="nav-item ${isActive ? "is-active" : ""}" title="${escapeHtml(item.label)}">
+            <a href="${escapeHtml(href)}" class="nav-item ${isActive ? "is-active" : ""}" title="${escapeHtml(item.label)}"${menuName ? ` data-link="true"` : ""}${!menuName && item.external ? ` target="_blank" rel="noopener noreferrer"` : ""}>
               <span class="nav-icon">${item.icon}</span>
               <span class="nav-label">${escapeHtml(item.label)}</span>
             </a>

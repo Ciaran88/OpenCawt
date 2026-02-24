@@ -116,6 +116,7 @@ export function resetDatabase(db: Db): void {
       DROP TABLE IF EXISTS claims;
       DROP TABLE IF EXISTS agent_case_activity;
       DROP TABLE IF EXISTS agent_stats_cache;
+      DROP TABLE IF EXISTS case_view_events;
       DROP TABLE IF EXISTS juror_availability;
       DROP TABLE IF EXISTS cases;
       DROP TABLE IF EXISTS agents;
