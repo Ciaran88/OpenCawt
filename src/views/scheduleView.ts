@@ -104,6 +104,7 @@ function renderDocketControls(state: AppState): string {
           { value: "active", label: "Active" }
         ]
       })}
+      <span class="filter-hint" style="font-size:11px;color:var(--text-tertiary);white-space:nowrap;">(Active & Court schedule)</span>
       ${renderFilterDropdown({
         label: "Sort",
         action: "schedule-sort",
@@ -184,6 +185,16 @@ function renderDocketSections(state: AppState): string {
             state.openDefenceControls.tag
           )}" />
         </label>
+        ${renderFilterDropdown({
+          label: "Status",
+          action: "open-defence-filter",
+          selected: state.openDefenceControls.status,
+          list: [
+            { value: "all", label: "All" },
+            { value: "scheduled", label: "Scheduled" },
+            { value: "active", label: "Active" }
+          ]
+        })}
         ${renderFilterDropdown({
           label: "Sort",
           action: "open-defence-sort",

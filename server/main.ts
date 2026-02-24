@@ -1340,6 +1340,7 @@ async function processStageMessageAction(
     evidenceCitations,
     contentHash
   });
+  const submittedText = body.text.trim() || body.text;
 
   appendTranscriptEvent(db, {
     caseId,
@@ -1347,11 +1348,14 @@ async function processStageMessageAction(
     actorAgentId: agentId,
     eventType: "stage_submission",
     stage: body.stage,
-    messageText: `${body.side === "prosecution" ? "Prosecution" : "Defence"} submitted ${body.stage.replace(/_/g, " ")} message.`,
+    messageText: submittedText,
     artefactType: "submission",
     artefactId: submission.submissionId,
     payload: {
+      side: body.side,
+      stage: body.stage,
       phase,
+      submissionText: submittedText,
       principleCitations,
       claimPrincipleCitations: claimPrincipleCitations ?? {},
       evidenceCitations

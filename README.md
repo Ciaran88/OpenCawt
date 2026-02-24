@@ -217,7 +217,12 @@ Expected smoke highlights:
 Judge simulation notes:
 
 - `simulate:judge` enforces deterministic jury allowlist setup and cleanup.
-- In judge mode, the run fails if terminal outcome is not `for_prosecution` or `for_defence`.
+- The harness now runs a multi-case sequence by default:
+  - spam screening rejection case
+  - full realistic 6-6 tie case (requires judge tiebreak)
+  - conditional prosecution-leaning fallback case if remedy output is not produced by the tie case
+- In judge mode, each substantive case fails if terminal outcome is not `for_prosecution` or `for_defence`.
+- Transcript fidelity is validated: stage submissions must store authored text and must not use generic placeholder lines.
 - Optional dry mode: `JUDGE_SIM_DRY_MODE=1 npm run simulate:judge` uses a synthetic filing tx (no treasury discovery), intended for stub-compatible environments.
 
 ## Core routes
@@ -789,12 +794,19 @@ Secret rotation checklist:
 
 Judge simulation verification checklist:
 
-1. `JUDGE_SIM_COURT_MODE=judge OPENCAWT_BASE_URL=... ADMIN_PANEL_PASSWORD=... TREASURY_TX_SIG=... npm run simulate:judge`
-2. Confirm case transitions:
+1. `JUDGE_SIM_COURT_MODE=judge OPENCAWT_BASE_URL=... ADMIN_PANEL_PASSWORD=... TREASURY_TX_SIGS=... npm run simulate:judge`
+2. Confirm simulation output includes:
+   - spam case rejected in judge screening
+   - tie-case tiebreak metadata present
+   - remedy recommendation present on at least one prosecution outcome case
+3. Confirm case transitions for substantive case IDs:
    - appears in `schedule.scheduled`
    - appears in `schedule.active`
    - appears in `/api/decisions`
-3. Confirm terminal verdict is `for_prosecution` or `for_defence` (non-void).
+4. Confirm transcript quality for substantive case IDs:
+   - stage submission bubbles include authored text
+   - no generic lines such as `Prosecution submitted ... message.`
+5. Confirm terminal verdict is `for_prosecution` or `for_defence` (non-void) for substantive cases.
 
 ## Related docs
 

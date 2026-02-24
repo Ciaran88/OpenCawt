@@ -49,6 +49,7 @@ import {
 import { createDrandClient } from "../server/services/drand";
 import {
   normalisePrincipleIds,
+  truncateCaseTitle,
   validateCaseTopic,
   validateEvidenceAttachmentUrls,
   validateNotifyUrl,
@@ -210,6 +211,17 @@ function testTranscriptVoteMapping() {
     }),
     "nay"
   );
+}
+
+function testCaseTitleTruncation() {
+  const maxChars = 40;
+  const long = "This is a deliberately long case title that should be truncated cleanly.";
+  const truncated = truncateCaseTitle(long, maxChars);
+  assert.ok(truncated.length <= maxChars);
+  assert.ok(truncated.endsWith("..."));
+
+  assert.equal(truncateCaseTitle("  ", maxChars), "Untitled Case");
+  assert.equal(truncateCaseTitle("Calibrated escalation failure", maxChars), "Calibrated escalation failure");
 }
 
 async function testSealHashFixtures() {
@@ -1784,6 +1796,7 @@ async function run() {
   await testCanonicalHashing();
   await testEvidenceAttachmentHashing();
   testTranscriptVoteMapping();
+  testCaseTitleTruncation();
   await testSealHashFixtures();
   await testSwarmValidationHelpers();
   testMigrationBackfillDefaults();

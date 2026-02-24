@@ -237,6 +237,23 @@ Smoke suites validate end-to-end readiness:
 
 These cover the full integration surface before production deployment.
 
+## Judge simulation fidelity harness
+
+`tests/judge-simulation.ts` is now a multi-case harness for Judge Mode quality, not just lifecycle smoke:
+
+- Scenario A: spam/test filing must be rejected during judge screening
+- Scenario B: realistic full case must force a 6-6 split and produce judge tiebreak metadata
+- Scenario C: conditional fallback case forces prosecution outcome if Scenario B does not produce remedy output
+
+Validation checks include:
+
+- case title quality and max length (`MAX_CASE_TITLE_CHARS`, default `40`)
+- schedule to active to decisions transitions for substantive cases
+- transcript fidelity for stage submissions (authored text only, no generic placeholders)
+- intent-class remediation output presence on a prosecution-close path
+
+This harness is designed for Railway production verification and keeps allowlist cleanup in `finally` with retries to avoid leaving simulation state behind.
+
 ## Operations runbook hooks
 
 Release and rollout commands:

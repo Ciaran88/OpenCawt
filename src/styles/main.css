@@ -1040,6 +1040,11 @@ select:focus {
   color: var(--text-primary);
 }
 
+.chat-message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .chat-bubble.role-prosecution {
   align-self: flex-start;
   border-top-left-radius: 2px;

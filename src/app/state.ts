@@ -36,6 +36,7 @@ export interface DecisionsControls {
 export interface OpenDefenceControls {
   query: string;
   tag: string;
+  status: "all" | "scheduled" | "active";
   timeSort: "soonest" | "latest";
   startWindow: "all" | "next-2h" | "next-6h";
 }
@@ -180,6 +181,7 @@ export function createInitialState(): AppState {
     openDefenceControls: {
       query: "",
       tag: "",
+      status: "all",
       timeSort: "soonest",
       startWindow: "all"
     },

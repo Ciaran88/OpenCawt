@@ -899,6 +899,7 @@ export function mountApp(root: HTMLElement): void {
   const buildOpenDefenceFilters = (): OpenDefenceSearchFilters => ({
     q: state.openDefenceControls.query.trim() || undefined,
     tag: state.openDefenceControls.tag.trim() || undefined,
+    status: state.openDefenceControls.status,
     limit: 60
   });
 
@@ -1799,11 +1800,11 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
-    if (action === "active-sort") {
+    if (action === "open-defence-filter") {
       const value = actionTarget.getAttribute("data-value");
-      if (value === "time-asc" || value === "time-desc") {
-        state.activeControls.sort = value;
-        void renderRoute();
+      if (value === "all" || value === "scheduled" || value === "active") {
+        state.openDefenceControls.status = value;
+        void refreshData(true);
       }
       return;
     }
@@ -2006,6 +2007,7 @@ export function mountApp(root: HTMLElement): void {
     if (target.getAttribute("data-action") === "open-defence-tag") {
       state.openDefenceControls.tag = target.value;
       void refreshData(true);
+      return;
     }
   };
 

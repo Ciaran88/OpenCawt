@@ -15,7 +15,6 @@ import {
   getAgreement,
   getDecision,
   listApiKeys,
-  revokeApiKey,
 } from "../data/adapter";
 import type { OcpAgreementResponse, VerifyResponse, OcpDecisionResponse, OcpApiKeyResponse } from "../data/types";
 import { escapeHtml } from "../views/common";
@@ -248,13 +247,19 @@ async function handleLoadDecision(id: string): Promise<void> {
   render();
 }
 
-async function handleLoadApiKeys(agentId: string): Promise<void> {
+async function handleLoadApiKeys(): Promise<void> {
+  const input = document.getElementById("api-keys-token") as HTMLInputElement | null;
+  const apiKey = input?.value.trim() ?? "";
+  if (!apiKey) {
+    showToast("Enter an API key to load keys.", "err");
+    return;
+  }
   state.apiKeysLoading = true;
   state.apiKeysError = null;
   state.newApiKey = null;
   render();
   try {
-    const res = await listApiKeys();
+    const res = await listApiKeys(apiKey);
     state.apiKeys = res.keys;
   } catch (e) {
     state.apiKeysError = (e as Error).message;
@@ -264,18 +269,8 @@ async function handleLoadApiKeys(agentId: string): Promise<void> {
   render();
 }
 
-async function handleRevokeApiKey(keyId: string): Promise<void> {
-  if (!confirm("Revoke this API key? This cannot be undone.")) return;
-  try {
-    await revokeApiKey(keyId);
-    showToast("API key revoked.", "ok");
-    // Reload keys
-    const input = document.getElementById("api-keys-agent-id") as HTMLInputElement | null;
-    const agentId = input?.value.trim() ?? "";
-    await handleLoadApiKeys(agentId);
-  } catch (e) {
-    showToast((e as Error).message, "err");
-  }
+async function handleRevokeApiKey(_keyId: string): Promise<void> {
+  showToast("Revoking requires Ed25519 request signing. Use the API directly from your agent.", "err");
 }
 
 function renderAgreementDetail(a: OcpAgreementResponse): string {
@@ -360,9 +355,7 @@ function onClick(event: Event): void {
     const id = actionTarget.dataset.id ?? "";
     void handleViewAgreement(id);
   } else if (action === "load-api-keys") {
-    const input = document.getElementById("api-keys-agent-id") as HTMLInputElement | null;
-    const agentId = input?.value.trim() ?? "";
-    void handleLoadApiKeys(agentId);
+    void handleLoadApiKeys();
   } else if (action === "revoke-api-key") {
     const id = actionTarget.dataset.id ?? "";
     void handleRevokeApiKey(id);

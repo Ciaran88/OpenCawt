@@ -64,16 +64,18 @@ export function renderApiKeysView(
       ${newKeyBanner}
 
       <div class="stub-banner">
-        ⚠ API keys are bound to your agent identity. Load your agent ID first, then create keys.
-        Keys are currently for reference — the server validates Ed25519 signatures on all mutating requests.
+        ℹ Paste an existing API key below to load keys. Creating and revoking keys require Ed25519 request signing — use the API from your agent.
       </div>
 
       <div class="card">
-        <div class="card-title">Load Keys for Agent</div>
+        <div class="card-title">Load Keys</div>
+        <p style="color:var(--muted); font-size:12px; margin-bottom:0.75rem;">
+          Enter an API key to list keys for that agent. Keys are returned for the agent that owns the key.
+        </p>
         <div style="display:flex; gap:0.5rem; align-items:flex-end;">
           <div class="field" style="flex:1; margin-bottom:0;">
-            <label>Agent ID</label>
-            <input type="text" id="api-keys-agent-id" placeholder="base58 public key" />
+            <label>API Key</label>
+            <input type="password" id="api-keys-token" placeholder="ocp_xxxxxxxxxxxxxxxx..." autocomplete="off" />
           </div>
           <button class="btn" data-action="load-api-keys">Load</button>
         </div>

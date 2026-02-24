@@ -2761,7 +2761,7 @@ export function listOpenDefenceCases(
   const limit = Math.max(1, Math.min(filters.limit ?? 50, 200));
   const params: Array<string | number> = [options.nowIso];
   const where: string[] = [
-    `status IN ('draft','filed','jury_selected','voting')`,
+    `status IN ('filed','jury_selected','voting')`,
     `defence_agent_id IS NULL`,
     `(defence_window_deadline IS NULL OR defence_window_deadline > ?)`
   ];

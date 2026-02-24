@@ -119,8 +119,12 @@ export async function getDecision(id: string): Promise<OcpDecisionResponse> {
 
 // ---- API Keys ----
 
-export async function listApiKeys(): Promise<ListApiKeysResponse> {
-  return apiGet<ListApiKeysResponse>(`${V1}/api-keys`);
+export async function listApiKeys(apiKey?: string): Promise<ListApiKeysResponse> {
+  const headers: Record<string, string> = {};
+  if (apiKey?.trim()) {
+    headers.Authorization = `Bearer ${apiKey.trim()}`;
+  }
+  return apiGet<ListApiKeysResponse>(`${V1}/api-keys`, headers);
 }
 
 export async function createApiKey(label: string): Promise<CreateApiKeyResponse> {

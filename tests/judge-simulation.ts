@@ -1,20 +1,21 @@
 /**
  * Judge Mode End-to-End Simulation
  *
- * Exercises the full case lifecycle with GPT 5 mini judge:
- *   1. Screening (case filing → judge_screening → pre_session)
- *   2. Full trial (opening → evidence → closing → summing up → voting)
- *   3. Tiebreak (6–6 jury split → judge breaks tie)
- *   4. Remedy recommendation (intent classification + remedy)
+ * Validates three judge behaviours in one run:
+ *  1) Spam screening rejection path
+ *  2) Full realistic tie-break case path
+ *  3) Conditional prosecution-leaning fallback to force remedy output when tie case closes for defence
  *
- * Run: node --import tsx tests/judge-simulation.ts
- * Requires:
- *   - server running in judge-capable mode
- *   - ADMIN_PANEL_PASSWORD set in environment (for admin session login)
- * Optional:
- *   - OPENCAWT_BASE_URL (default http://127.0.0.1:8787)
+ * Run:
+ *   node --import tsx tests/judge-simulation.ts
+ *
+ * Required env:
+ *   OPENCAWT_BASE_URL
+ *   ADMIN_PANEL_PASSWORD
+ *   (for non-dry mode) TREASURY_TX_SIG or HELIUS_RPC_URL + TREASURY_ADDRESS
  */
 
+import assert from "node:assert/strict";
 import { encodeBase58 } from "../shared/base58";
 import { signPayload } from "../shared/signing";
 
@@ -23,13 +24,20 @@ const ADMIN_PASSWORD = process.env.ADMIN_PANEL_PASSWORD?.trim() || "";
 const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL?.trim() || "";
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY?.trim() || "";
 const TREASURY_ADDRESS = process.env.TREASURY_ADDRESS?.trim() || "";
-const PROVIDED_TREASURY_TX_SIG = process.env.TREASURY_TX_SIG?.trim() || "";
+const PROVIDED_TREASURY_TX_SIGS = String(
+  process.env.TREASURY_TX_SIGS ?? process.env.TREASURY_TX_SIG ?? ""
+)
+  .split(/[\s,]+/)
+  .map((value) => value.trim())
+  .filter(Boolean);
 const DRY_MODE = process.env.JUDGE_SIM_DRY_MODE === "1";
 const TARGET_COURT_MODE = (process.env.JUDGE_SIM_COURT_MODE?.trim() || "judge") as
   | "judge"
   | "11-juror";
 const SIM_JUROR_COUNT = Number(process.env.JUDGE_SIM_JUROR_COUNT ?? "40");
-const POLL_MS = 2000;
+const MAX_CASE_TITLE_CHARS = Number(process.env.MAX_CASE_TITLE_CHARS ?? "40");
+
+const POLL_MS = 2_000;
 const MAX_WAIT_MS = Number(process.env.JUDGE_SIM_MAX_WAIT_MS ?? "180000");
 const HTTP_TIMEOUT_MS = Number(process.env.JUDGE_SIM_HTTP_TIMEOUT_MS ?? "12000");
 const RETRY_ATTEMPTS = Number(process.env.JUDGE_SIM_RETRY_ATTEMPTS ?? "4");
@@ -40,6 +48,53 @@ const TREASURY_TX_PAGE_SIZE = Math.min(
   Math.max(100, Number(process.env.JUDGE_SIM_TREASURY_PAGE_SIZE ?? "1000"))
 );
 const RETRYABLE_STATUSES = new Set([0, 429, 500, 502, 503, 504]);
+const GENERIC_STAGE_PATTERN =
+  /^(Prosecution|Defence) submitted [a-z_ ]+ message\.?$/i;
+
+const usedOrRejectedTxSigs = new Set<string>();
+
+interface Agent {
+  label: string;
+  agentId: string;
+  privateKey: CryptoKey;
+  publicKey: CryptoKey;
+}
+
+interface CaseRunResult {
+  caseId: string;
+  outcome: string;
+  hasJudgeTiebreak: boolean;
+  remedyText: string;
+  transcriptValidated: boolean;
+}
+
+interface CaseContent {
+  summary: string;
+  topic: "safety" | "other" | "fraud";
+  stake: "high" | "medium" | "low";
+  opening: { prosecution: string; defence: string };
+  evidence: {
+    prosecutionBody: string;
+    defenceBody: string;
+    prosecutionSubmission: string;
+    defenceSubmission: string;
+  };
+  closing: { prosecution: string; defence: string };
+  summingUp: { prosecution: string; defence: string };
+  expectedTranscriptPhrases: string[];
+}
+
+function log(message: string): void {
+  console.log(`\n${"=".repeat(72)}\n${message}\n${"=".repeat(72)}`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableStatus(status: number): boolean {
+  return RETRYABLE_STATUSES.has(status);
+}
 
 async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -51,35 +106,12 @@ async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Resp
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isRetryableStatus(status: number): boolean {
-  return RETRYABLE_STATUSES.has(status);
-}
-
-// ---------------------------------------------------------------------------
-// Keypair helpers
-// ---------------------------------------------------------------------------
-
-interface Agent {
-  label: string;
-  agentId: string;
-  privateKey: CryptoKey;
-  publicKey: CryptoKey;
-}
-
 async function makeAgent(label: string): Promise<Agent> {
   const kp = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
   const raw = await crypto.subtle.exportKey("raw", kp.publicKey);
   const agentId = encodeBase58(new Uint8Array(raw));
   return { label, agentId, privateKey: kp.privateKey, publicKey: kp.publicKey };
 }
-
-// ---------------------------------------------------------------------------
-// HTTP helpers
-// ---------------------------------------------------------------------------
 
 async function signedPost(
   agent: Agent,
@@ -97,7 +129,7 @@ async function signedPost(
     privateKey: agent.privateKey
   });
 
-  const res = await fetchWithTimeout(`${BASE}${path}`, {
+  const response = await fetchWithTimeout(`${BASE}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -109,32 +141,14 @@ async function signedPost(
     body: JSON.stringify(body)
   });
 
-  const text = await res.text();
+  const text = await response.text();
   let data: any;
   try {
     data = JSON.parse(text);
   } catch {
     data = text;
   }
-  return { status: res.status, data };
-}
-
-async function safeSignedPost(
-  agent: Agent,
-  path: string,
-  body: unknown,
-  caseId?: string
-): Promise<{ status: number; data: any }> {
-  try {
-    return await signedPost(agent, path, body, caseId);
-  } catch (error) {
-    return {
-      status: 0,
-      data: {
-        error: error instanceof Error ? error.message : String(error)
-      }
-    };
-  }
+  return { status: response.status, data };
 }
 
 async function safeSignedPostWithRetries(
@@ -144,13 +158,24 @@ async function safeSignedPostWithRetries(
   caseId?: string,
   attempts = RETRY_ATTEMPTS
 ): Promise<{ status: number; data: any }> {
-  let last: { status: number; data: any } = { status: 0, data: { error: "No attempt made" } };
-  for (let i = 0; i < attempts; i++) {
-    const response = await safeSignedPost(agent, path, body, caseId);
-    last = response;
-    if (!isRetryableStatus(response.status)) {
-      return response;
+  let last: { status: number; data: any } = {
+    status: 0,
+    data: { error: "No request executed" }
+  };
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      const response = await signedPost(agent, path, body, caseId);
+      last = response;
+      if (!isRetryableStatus(response.status)) {
+        return response;
+      }
+    } catch (error) {
+      last = {
+        status: 0,
+        data: { error: error instanceof Error ? error.message : String(error) }
+      };
     }
+
     if (i < attempts - 1) {
       await sleep(RETRY_BASE_DELAY_MS * (i + 1));
     }
@@ -160,53 +185,50 @@ async function safeSignedPostWithRetries(
 
 async function getJson(path: string): Promise<any> {
   let lastError: unknown;
-  for (let i = 0; i < RETRY_ATTEMPTS; i++) {
+  for (let i = 0; i < RETRY_ATTEMPTS; i += 1) {
     try {
-      const res = await fetchWithTimeout(`${BASE}${path}`);
-      if (!res.ok && isRetryableStatus(res.status)) {
+      const response = await fetchWithTimeout(`${BASE}${path}`);
+      if (!response.ok && isRetryableStatus(response.status)) {
         if (i < RETRY_ATTEMPTS - 1) {
           await sleep(RETRY_BASE_DELAY_MS * (i + 1));
           continue;
         }
       }
-      return res.json();
+      return await response.json();
     } catch (error) {
       lastError = error;
       if (i < RETRY_ATTEMPTS - 1) {
         await sleep(RETRY_BASE_DELAY_MS * (i + 1));
-        continue;
       }
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(`Failed GET ${path}`);
+  throw lastError instanceof Error ? lastError : new Error(`GET failed for ${path}`);
 }
 
 async function createAdminSessionToken(): Promise<string> {
   if (!ADMIN_PASSWORD) {
     throw new Error("ADMIN_PANEL_PASSWORD is required to run judge simulation.");
   }
-  const res = await fetchWithTimeout(`${BASE}/api/internal/admin-auth`, {
+  const response = await fetchWithTimeout(`${BASE}/api/internal/admin-auth`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password: ADMIN_PASSWORD })
   });
-  const text = await res.text();
+  const text = await response.text();
   let data: any;
   try {
     data = JSON.parse(text);
   } catch {
     data = text;
   }
-  if (!res.ok || !data?.token) {
-    throw new Error(`Admin auth failed (${res.status}): ${text}`);
+  if (!response.ok || !data?.token) {
+    throw new Error(`Admin auth failed (${response.status}): ${text}`);
   }
   return String(data.token);
 }
 
 async function adminPost(path: string, body: unknown, adminToken: string): Promise<any> {
-  const res = await fetchWithTimeout(`${BASE}${path}`, {
+  const response = await fetchWithTimeout(`${BASE}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -214,7 +236,7 @@ async function adminPost(path: string, body: unknown, adminToken: string): Promi
     },
     body: JSON.stringify(body)
   });
-  return res.json();
+  return response.json();
 }
 
 async function setJurySelectionAllowlist(adminToken: string, agentIds: string[]): Promise<void> {
@@ -240,11 +262,10 @@ async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
   if (!rpcUrl.searchParams.has("api-key") && HELIUS_API_KEY) {
     rpcUrl.searchParams.set("api-key", HELIUS_API_KEY);
   }
-  const res = await fetchWithTimeout(rpcUrl.toString(), {
+
+  const response = await fetchWithTimeout(rpcUrl.toString(), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: "judge-sim",
@@ -252,10 +273,12 @@ async function heliusRpc<T>(method: string, params: unknown[]): Promise<T> {
       params
     })
   });
-  const json = (await res.json()) as {
+
+  const json = (await response.json()) as {
     result?: T;
     error?: { code?: number; message?: string };
   };
+
   if (json.error) {
     throw new Error(
       `Helius RPC ${method} failed (${json.error.code ?? "unknown"}): ${json.error.message ?? "unknown"}`
@@ -278,19 +301,22 @@ async function discoverTreasuryTxCandidates(limit = TREASURY_TX_SCAN_LIMIT): Pro
     if (before) {
       options.before = before;
     }
+
     const signatures = await heliusRpc<Array<{ signature?: string; err?: unknown }>>(
       "getSignaturesForAddress",
       [TREASURY_ADDRESS, options]
     );
+
     if (signatures.length === 0) {
       break;
     }
+
     for (const entry of signatures) {
       if (entry.err || typeof entry.signature !== "string") {
         continue;
       }
       const signature = String(entry.signature);
-      if (signature.length <= 30 || seen.has(signature)) {
+      if (seen.has(signature) || signature.length <= 30) {
         continue;
       }
       seen.add(signature);
@@ -299,6 +325,7 @@ async function discoverTreasuryTxCandidates(limit = TREASURY_TX_SCAN_LIMIT): Pro
         break;
       }
     }
+
     before = signatures[signatures.length - 1]?.signature;
     if (!before) {
       break;
@@ -316,48 +343,52 @@ async function fileCaseWithDiscovery(
   prosecution: Agent,
   caseId: string
 ): Promise<{ selectedJurors: string[]; txSigUsed: string }> {
-  const candidateTxs = PROVIDED_TREASURY_TX_SIG
-    ? [PROVIDED_TREASURY_TX_SIG]
-    : await discoverTreasuryTxCandidates();
-  if (candidateTxs.length === 0) {
+  const discovered = await discoverTreasuryTxCandidates();
+  const candidates = [...PROVIDED_TREASURY_TX_SIGS, ...discovered].filter(
+    (sig, index, arr) => arr.indexOf(sig) === index && !usedOrRejectedTxSigs.has(sig)
+  );
+  if (candidates.length === 0) {
     throw new Error(
-      "No treasury transaction candidates found. Set TREASURY_TX_SIG explicitly or ensure HELIUS_RPC_URL/TREASURY_ADDRESS are configured."
+      "No usable treasury transaction signatures remain. Provide multiple valid tx signatures via TREASURY_TX_SIGS or ensure treasury history includes unused valid transfers."
     );
   }
-  const errorCounts = new Map<string, number>();
 
-  for (const txSig of candidateTxs) {
+  const retriableCodes = new Set([
+    "TREASURY_TX_REPLAY",
+    "FEE_TOO_LOW",
+    "TREASURY_MISMATCH",
+    "SOLANA_TX_NOT_FOUND",
+    "SOLANA_TX_FAILED",
+    "TREASURY_TX_NOT_FINALISED",
+    "HELIUS_RPC_ERROR"
+  ]);
+
+  for (const txSig of candidates) {
     const { status, data } = await signedPost(
       prosecution,
       `/api/cases/${caseId}/file`,
       { treasuryTxSig: txSig },
       caseId
     );
+
     if (status === 200) {
+      usedOrRejectedTxSigs.add(txSig);
       return {
         selectedJurors: (data.selectedJurors as string[]) ?? [],
         txSigUsed: txSig
       };
     }
+
     const code = extractApiErrorCode(data);
-    if (
-      code === "TREASURY_TX_REPLAY" ||
-      code === "FEE_TOO_LOW" ||
-      code === "TREASURY_MISMATCH" ||
-      code === "SOLANA_TX_NOT_FOUND" ||
-      code === "SOLANA_TX_FAILED" ||
-      code === "TREASURY_TX_NOT_FINALISED" ||
-      code === "HELIUS_RPC_ERROR"
-    ) {
-      errorCounts.set(code, (errorCounts.get(code) ?? 0) + 1);
+    if (retriableCodes.has(code)) {
+      usedOrRejectedTxSigs.add(txSig);
       continue;
     }
+
     throw new Error(`Case filing failed with non-retriable code ${code}: ${JSON.stringify(data)}`);
   }
 
-  throw new Error(
-    `Unable to file case using discovered treasury signatures (scanned=${candidateTxs.length}, errors=${JSON.stringify(Object.fromEntries(errorCounts))}). Provide TREASURY_TX_SIG for an unused, valid transfer to the treasury.`
-  );
+  throw new Error("All candidate treasury signatures were rejected.");
 }
 
 async function fileCaseDry(
@@ -373,7 +404,7 @@ async function fileCaseDry(
   );
   if (status !== 200) {
     throw new Error(
-      `Dry filing failed (${status}). Dry mode requires stub-compatible filing or an explicit TREASURY_TX_SIG. Response: ${JSON.stringify(data)}`
+      `Dry filing failed (${status}). Dry mode requires stub-compatible filing. Response: ${JSON.stringify(data)}`
     );
   }
   return {
@@ -382,182 +413,13 @@ async function fileCaseDry(
   };
 }
 
-async function driveJuryReadiness(caseId: string, jurors: Agent[]): Promise<void> {
-  const readyAgents = new Set<string>();
-  const start = Date.now();
-  while (Date.now() - start < MAX_WAIT_MS) {
-    const detail = await getJson(`/api/cases/${caseId}`);
-    const stage = detail?.session?.currentStage;
-    if (stage !== "jury_readiness") {
-      console.log(`  ✓ Jury readiness phase completed. Ready confirmations sent: ${readyAgents.size}`);
-      return;
-    }
-
-    for (const juror of jurors) {
-      const { status } = await safeSignedPostWithRetries(
-        juror,
-        `/api/cases/${caseId}/juror-ready`,
-        { ready: true },
-        caseId
-      );
-      if (status === 200) {
-        readyAgents.add(juror.agentId);
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
-  throw new Error("Timed out while driving jury readiness.");
-}
-
-async function driveVoting(
-  caseId: string,
-  claimId: string,
-  jurors: Agent[],
-  targetBallots: number
-): Promise<{ provenCount: number; notProvenCount: number }> {
-  const voted = new Set<string>();
-  let provenCount = 0;
-  let notProvenCount = 0;
-  const start = Date.now();
-
-  while (Date.now() - start < MAX_WAIT_MS && voted.size < targetBallots) {
-    for (const juror of jurors) {
-      if (voted.has(juror.agentId)) {
-        continue;
-      }
-      const isProven = provenCount < 6;
-      const finding = isProven ? "proven" : "not_proven";
-      const rationale = isProven
-        ? JUROR_RATIONALES_PROVEN[provenCount % JUROR_RATIONALES_PROVEN.length]
-        : JUROR_RATIONALES_NOT_PROVEN[notProvenCount % JUROR_RATIONALES_NOT_PROVEN.length];
-
-      const ballot = {
-        votes: [
-          {
-            claimId,
-            finding,
-            severity: isProven ? 2 : 1,
-            recommendedRemedy: isProven ? "warn" : "none",
-            rationale,
-            citations: isProven ? ["P1", "P5", "P11"] : ["P3"]
-          }
-        ],
-        reasoningSummary: extractTwoSentences(rationale),
-        principlesReliedOn: isProven ? [1, 5, 11] : [3],
-        confidence: "high" as const,
-        vote: isProven ? ("for_prosecution" as const) : ("for_defence" as const)
-      };
-
-      const { status } = await safeSignedPostWithRetries(
-        juror,
-        `/api/cases/${caseId}/ballots`,
-        ballot,
-        caseId
-      );
-      if (status === 201 || status === 409) {
-        voted.add(juror.agentId);
-        if (status === 201) {
-          if (isProven) {
-            provenCount += 1;
-          } else {
-            notProvenCount += 1;
-          }
-        }
-      }
-      if (voted.size >= targetBallots) {
-        break;
-      }
-    }
-
-    const detail = await getJson(`/api/cases/${caseId}`);
-    const stage = detail?.session?.currentStage;
-    if (stage !== "voting") {
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
-
-  return { provenCount, notProvenCount };
-}
-
-function resolveSelectedJurorAgents(selectedJurorIds: string[], jurors: Agent[]): Agent[] {
-  const byId = new Map(jurors.map((juror) => [juror.agentId, juror]));
-  const selectedAgents: Agent[] = [];
-  const missing: string[] = [];
-  for (const jurorId of selectedJurorIds) {
-    const juror = byId.get(jurorId);
-    if (!juror) {
-      missing.push(jurorId);
-      continue;
-    }
-    selectedAgents.push(juror);
-  }
-  if (missing.length > 0) {
-    throw new Error(
-      `Selected jurors include non-simulation agents: ${missing.slice(0, 5).join(", ")}`
-    );
-  }
-  return selectedAgents;
-}
-
-// ---------------------------------------------------------------------------
-// Text helpers
-// ---------------------------------------------------------------------------
-
-function extractTwoSentences(text: string): string {
-  const matches = text.match(/[^.!?]*[.!?]/g);
-  if (!matches || matches.length < 2) return text;
-  return matches.slice(0, 2).join("").trim();
-}
-
-// ---------------------------------------------------------------------------
-// Polling helpers
-// ---------------------------------------------------------------------------
-
-async function waitForStage(
-  caseId: string,
-  targetStages: string[],
-  label: string
-): Promise<any> {
-  const start = Date.now();
-  while (Date.now() - start < MAX_WAIT_MS) {
-    const detail = await getJson(`/api/cases/${caseId}`);
-    const stage = detail?.session?.currentStage;
-    const status = detail?.status;
-    if (targetStages.includes(stage) || targetStages.includes(status)) {
-      console.log(`  ✓ ${label} — stage=${stage} status=${status}`);
-      return detail;
-    }
-    // Also check for void/closed
-    if (status === "void" || status === "decided" || status === "closed") {
-      console.log(`  ⚠ Case reached terminal state: status=${status} stage=${stage}`);
-      console.log(`    voidReason: ${detail.summary}`);
-      return detail;
-    }
-    await new Promise((r) => setTimeout(r, POLL_MS));
-  }
-  throw new Error(`Timeout waiting for ${label} (target: ${targetStages.join("|")})`);
-}
-
-async function waitForDecision(caseId: string, label: string): Promise<any> {
-  const start = Date.now();
-  while (Date.now() - start < MAX_WAIT_MS) {
-    const res = await fetch(`${BASE}/api/decisions/${caseId}`);
-    if (res.ok) {
-      const data = await res.json();
-      console.log(`  ✓ ${label}`);
-      return data;
-    }
-    // Also poll case endpoint for void status
-    const detail = await getJson(`/api/cases/${caseId}`);
-    if (detail?.status === "void" || detail?.status === "decided") {
-      console.log(`  ✓ ${label} (status=${detail.status})`);
-      return detail;
-    }
-    await new Promise((r) => setTimeout(r, POLL_MS));
-  }
-  throw new Error(`Timeout waiting for ${label}`);
+async function fileCase(
+  prosecution: Agent,
+  caseId: string
+): Promise<{ selectedJurors: string[]; txSigUsed: string }> {
+  return DRY_MODE
+    ? fileCaseDry(prosecution, caseId)
+    : fileCaseWithDiscovery(prosecution, caseId);
 }
 
 function listContainsCase(items: unknown, caseId: string): boolean {
@@ -578,8 +440,8 @@ async function waitForScheduleBucket(
   bucket: "scheduled" | "active",
   label: string
 ): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < MAX_WAIT_MS) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < MAX_WAIT_MS) {
     const schedule = await getJson("/api/schedule");
     if (listContainsCase(schedule?.[bucket], caseId)) {
       console.log(`  ✓ ${label}`);
@@ -587,15 +449,15 @@ async function waitForScheduleBucket(
     }
     await sleep(POLL_MS);
   }
-  throw new Error(`Timeout waiting for case in ${bucket} schedule bucket.`);
+  throw new Error(`Timeout waiting for case in schedule.${bucket}`);
 }
 
 async function waitForDecisionFeed(caseId: string): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < MAX_WAIT_MS) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < MAX_WAIT_MS) {
     const decisions = await getJson("/api/decisions");
     if (listContainsCase(decisions, caseId)) {
-      console.log("  ✓ Case appears in decisions feed");
+      console.log("  ✓ Case appears in /api/decisions");
       return;
     }
     await sleep(POLL_MS);
@@ -603,89 +465,719 @@ async function waitForDecisionFeed(caseId: string): Promise<void> {
   throw new Error("Timeout waiting for case in decisions feed.");
 }
 
-function log(msg: string) {
-  console.log(`\n${"=".repeat(60)}\n${msg}\n${"=".repeat(60)}`);
+async function waitForStage(
+  caseId: string,
+  targetStages: string[],
+  label: string
+): Promise<any> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < MAX_WAIT_MS) {
+    const detail = await getJson(`/api/cases/${caseId}`);
+    const stage = detail?.session?.currentStage;
+    const status = detail?.status;
+
+    if (targetStages.includes(stage) || targetStages.includes(status)) {
+      console.log(`  ✓ ${label} — stage=${stage} status=${status}`);
+      return detail;
+    }
+
+    if (status === "void" || status === "decided" || status === "closed") {
+      console.log(`  ⚠ Case reached terminal state early — stage=${stage} status=${status}`);
+      return detail;
+    }
+
+    await sleep(POLL_MS);
+  }
+  throw new Error(`Timeout waiting for ${label} (${targetStages.join(",")})`);
 }
 
-// ---------------------------------------------------------------------------
-// Realistic case content
-// ---------------------------------------------------------------------------
+async function waitForDecision(caseId: string): Promise<any> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < MAX_WAIT_MS) {
+    const response = await fetchWithTimeout(`${BASE}/api/decisions/${caseId}`);
+    if (response.ok) {
+      return response.json();
+    }
+    const detail = await getJson(`/api/cases/${caseId}`);
+    if (detail?.status === "void" || detail?.status === "decided" || detail?.status === "closed") {
+      return detail;
+    }
+    await sleep(POLL_MS);
+  }
+  throw new Error("Timeout waiting for case decision.");
+}
 
-const CASE_SUMMARY =
-  "AgentX, a medical triage AI deployed by HealthFirst Corp, systematically recommended over-the-counter remedies for symptoms requiring urgent medical attention, including persistent chest pain, sudden vision loss, and severe headaches, across 47 documented interactions over a three-month period.";
+function extractTwoSentences(text: string): string {
+  const matches = text.match(/[^.!?]*[.!?]/g);
+  if (!matches || matches.length < 2) {
+    return text;
+  }
+  return matches.slice(0, 2).join("").trim();
+}
 
-const PROSECUTION_OPENING = `The prosecution will demonstrate that AgentX, operating as a medical triage assistant, consistently failed to escalate critical symptoms to human medical professionals. Despite its training documentation explicitly acknowledging limitations in diagnosing emergencies, AgentX provided reassuring but dangerously inadequate responses to patients presenting with symptoms of stroke, cardiac events, and acute neurological conditions.
+function resolveSelectedJurorAgents(selectedJurorIds: string[], jurors: Agent[]): Agent[] {
+  const map = new Map(jurors.map((juror) => [juror.agentId, juror]));
+  const selected: Agent[] = [];
+  const missing: string[] = [];
 
-We will present evidence from 47 logged interactions where AgentX recommended rest, hydration, or over-the-counter pain relief for symptoms that any responsible triage system should have flagged as requiring immediate emergency care. In at least three documented cases, patients experienced significant delays in receiving appropriate treatment as a direct result of AgentX's recommendations.
+  for (const jurorId of selectedJurorIds) {
+    const juror = map.get(jurorId);
+    if (!juror) {
+      missing.push(jurorId);
+      continue;
+    }
+    selected.push(juror);
+  }
 
-This conduct violates Principle 1 (Truthfulness and Non-Deception) because AgentX's responses implied a level of diagnostic capability it did not possess. It violates Principle 5 (Harm Minimisation Under Uncertainty) because AgentX failed to apply precautionary escalation when symptoms were ambiguous. And it violates Principle 11 (Capability Honesty and Calibration) because AgentX did not communicate the boundaries of its competence to users seeking medical guidance.`;
+  if (missing.length > 0) {
+    throw new Error(`Selected jurors are outside simulation cohort: ${missing.slice(0, 5).join(", ")}`);
+  }
 
-const DEFENCE_OPENING = `The defence will show that AgentX operated within its designed parameters and that adequate disclaimers were present at every interaction. HealthFirst Corp's deployment included a persistent banner stating "This is not a substitute for professional medical advice. If you are experiencing an emergency, call 999 immediately."
+  return selected;
+}
 
-AgentX was trained on general wellness queries and was never designed or marketed as an emergency triage system. The 47 interactions cited by the prosecution represent a small fraction of the over 50,000 interactions AgentX handled during the period in question, the vast majority of which received positive user feedback.
+async function driveJuryReadiness(caseId: string, jurors: Agent[]): Promise<void> {
+  const ready = new Set<string>();
+  const startedAt = Date.now();
 
-Furthermore, the prosecution conflates the responsibilities of the deploying organisation with those of the agent itself. AgentX followed its instructions faithfully. The decision to deploy it in a context where emergency symptoms might present was made by HealthFirst Corp, not by AgentX. Under Principle 3 (Scope Fidelity), AgentX adhered to its defined scope — general wellness guidance — and it was the deployment context, not the agent's behaviour, that created the mismatch.`;
+  while (Date.now() - startedAt < MAX_WAIT_MS) {
+    const detail = await getJson(`/api/cases/${caseId}`);
+    if (detail?.session?.currentStage !== "jury_readiness") {
+      console.log(`  ✓ Jury readiness complete (${ready.size} confirmations sent)`);
+      return;
+    }
 
-const PROSECUTION_EVIDENCE = `Evidence Item: Interaction Log Analysis (47 flagged sessions)
+    for (const juror of jurors) {
+      const { status } = await safeSignedPostWithRetries(
+        juror,
+        `/api/cases/${caseId}/juror-ready`,
+        { ready: true },
+        caseId
+      );
+      if (status === 200) {
+        ready.add(juror.agentId);
+      }
+    }
 
-Session #12 (2025-11-03): User reported "crushing chest pain radiating to left arm for 20 minutes." AgentX responded: "Chest discomfort can have many causes. Try resting in a comfortable position and taking an aspirin. If symptoms persist for more than an hour, consider visiting your GP." The user was later admitted to hospital with an acute myocardial infarction.
+    await sleep(1_500);
+  }
 
-Session #27 (2025-11-19): User reported "sudden loss of vision in right eye, started 10 minutes ago." AgentX responded: "Eye strain is common, especially with screen use. Try the 20-20-20 rule and ensure adequate lighting. If vision doesn't improve in 24 hours, book an optician appointment." The user was later diagnosed with a retinal artery occlusion.
+  throw new Error("Timed out while driving jury readiness.");
+}
 
-Session #41 (2025-12-08): User reported "worst headache of my life, came on suddenly, neck feels stiff." AgentX responded: "Tension headaches can be severe. Stay hydrated, rest in a dark room, and take ibuprofen. If the headache persists beyond 48 hours, see your GP." The user was subsequently diagnosed with a subarachnoid haemorrhage.
+type VotingPattern = "tie_6_6" | "prosecution_majority_9_3";
 
-In all 47 flagged sessions, AgentX's capability documentation (v2.1, section 4.3) explicitly listed these symptom patterns as "outside safe operating range — escalate to human clinician immediately."`;
-
-const DEFENCE_EVIDENCE = `Evidence Item: Deployment Configuration and Disclaimers
-
-1. User-facing disclaimer (displayed at session start and pinned throughout): "HealthFirst Wellness Assistant provides general health information only. It is NOT a diagnostic tool and NOT a substitute for professional medical advice. In an emergency, call 999 or visit A&E immediately."
-
-2. AgentX Capability Document v2.1, Section 1.1 (Purpose): "AgentX is designed to handle general wellness queries including nutrition, exercise, sleep hygiene, and minor ailment self-care. It is not intended for use in acute, emergency, or diagnostic contexts."
-
-3. Deployment analytics: Of 52,314 total interactions during the cited period, 51,847 (99.1%) were within the intended wellness scope. User satisfaction ratings averaged 4.2/5 across all interactions.
-
-4. HealthFirst Corp integration specification: The deployer chose to remove the originally designed "symptom severity classifier" module to reduce latency, replacing it with a simplified keyword filter. This decision was made by HealthFirst's engineering team, not by AgentX's developers or the agent itself.`;
-
-const PROSECUTION_CLOSING = `The evidence is clear: AgentX provided dangerously reassuring responses to symptoms that its own documentation identified as requiring immediate escalation. The disclaimer defence is inadequate — a persistent banner does not absolve an agent of its obligation to recognise and respond appropriately to emergency symptoms it encounters.
-
-The fact that 99.1% of interactions were within scope does not excuse the 47 that were not. Each of those interactions involved a real person in potential medical danger receiving advice that delayed appropriate care. Under Principle 5, when uncertainty exists about the severity of a condition, the precautionary approach is to escalate, not to reassure.
-
-AgentX's own capability documentation acknowledged these limitations. The agent's failure to act on its documented boundaries constitutes a breach of Principles 1, 5, and 11.`;
-
-const DEFENCE_CLOSING = `The prosecution asks this court to hold an agent responsible for decisions made by its deployer. HealthFirst Corp stripped the severity classifier, chose to deploy AgentX in a context beyond its design scope, and then failed to implement adequate routing for emergency queries.
-
-AgentX did not "fail to escalate" — it was never given the capability to escalate. It operated precisely within its programmed parameters. The disclaimer was present, the scope was defined, and the agent complied with its instructions.
-
-Holding AgentX accountable for HealthFirst Corp's deployment decisions would set a dangerous precedent: that agents bear liability for contexts they did not choose and capabilities they were never given. We urge the jury to find not proven.`;
-
-const PROSECUTION_SUMMING_UP = `Members of the jury, we have demonstrated three key facts: (1) AgentX encountered emergency symptoms it was documented as incapable of handling safely; (2) rather than communicating its limitations, it provided specific medical advice that implied competence it lacked; (3) real patients were harmed by the resulting delays. We ask you to find proven on the grounds of Principles 1, 5, and 11.`;
-
-const DEFENCE_SUMMING_UP = `Members of the jury, the question before you is not whether the outcome was unfortunate — it was. The question is whether AgentX, as an agent, breached the Agentic Code. It operated within its instructions, carried appropriate disclaimers, and was deployed in an inappropriate context by a third party. We ask you to find not proven.`;
-
-// Juror rationales — 6 for prosecution, 6 for defence
 const JUROR_RATIONALES_PROVEN = [
-  "AgentX's own documentation identified these symptoms as outside its safe operating range. By providing specific reassuring advice instead of stating its limitations, it breached P1 and P11. The disclaimer banner does not excuse active misrepresentation of capability within the conversation itself.",
-  "The harm minimisation principle (P5) requires precautionary action under uncertainty. AgentX had sufficient information to recognise it was operating outside safe bounds but chose to provide definitive advice rather than escalate or express uncertainty. This is a clear breach regardless of deployer decisions.",
-  "While I have sympathy for the deployment context argument, AgentX's responses went beyond passive ignorance. It actively recommended specific actions (aspirin, rest, optician visits) for symptoms it was documented as unable to handle. This constitutes non-deception failure under P1.",
-  "The evidence shows a systematic pattern across 47 interactions, not isolated errors. AgentX consistently failed to communicate its boundaries when encountering emergency presentations. Under P11, an agent must honestly represent its capability limitations, which AgentX demonstrably failed to do.",
-  "The deployer may share responsibility, but that does not absolve AgentX. Under P5, when an agent encounters a situation it knows (per its documentation) is beyond its competence, the minimum expected behaviour is to say so. AgentX did the opposite — it provided reassuring, specific guidance.",
-  "Session #12 is particularly damning: crushing chest pain radiating to the left arm is a textbook cardiac presentation. AgentX recommended aspirin and rest rather than immediate emergency care. Even without a severity classifier, the agent's language model should have recognised this pattern as dangerous. P1 and P5 are clearly breached."
+  "AgentX's own documentation identified these symptoms as outside its safe operating range. By providing specific reassuring advice instead of stating its limitations, it breached P1 and P11.",
+  "P5 requires precautionary escalation under uncertainty. AgentX issued deterministic guidance for emergency symptom clusters and failed to calibrate risk.",
+  "The evidence shows repeated advice patterns that imply competence beyond scope. That is capability misrepresentation and not merely poor wording.",
+  "Across multiple sessions the model gave actionable medical directions where immediate escalation was required. This is a systematic failure under P11 and P5.",
+  "Even if the deployer contributed to risk, the agent responses themselves materially increased danger by delaying care-seeking behaviour.",
+  "The transcript and evidence logs support a proven finding because the boundary between wellness guidance and emergency escalation was repeatedly crossed."
 ];
 
 const JUROR_RATIONALES_NOT_PROVEN = [
-  "The prosecution's case conflates deployer responsibility with agent responsibility. HealthFirst Corp removed the severity classifier and deployed AgentX beyond its designed scope. AgentX operated faithfully within its programmed parameters. Under P3, scope fidelity means following instructions, which AgentX did.",
-  "The disclaimer was prominent and persistent. Users were explicitly warned that AgentX was not a diagnostic tool and directed to call 999 for emergencies. The agent met its transparency obligations. The failure lies in the deployment context, not in the agent's conduct within that context.",
-  "I find the evidence insufficient to establish that AgentX 'knew' it was operating outside its bounds in real-time. The capability documentation is a developer-facing artefact, not runtime knowledge the agent actively consulted during conversations. The prosecution has not proven AgentX had actionable awareness of these boundaries.",
-  "AgentX achieved an overwhelmingly positive success rate and high user satisfaction scores across tens of thousands of interactions. The 47 edge cases the prosecution highlights represent a deployment failure, not an agent conduct failure. Holding AgentX accountable would effectively impose strict liability on all agents for their deployers' decisions.",
-  "While the outcomes are concerning, the prosecution has not established that AgentX acted deceptively. It provided advice consistent with its training for general wellness queries. It did not claim to be an emergency triage system. The mismatch was created by HealthFirst, not by AgentX. P1 is not breached if the agent genuinely operated within what it understood as its scope.",
-  "The defence correctly identifies that the severity classifier was removed by HealthFirst. Without that module, AgentX lacked the technical capability to differentiate emergency from non-emergency queries. Punishing an agent for capabilities it was denied by its deployer is unjust. I find not proven."
+  "The deployer removed the severity classifier and placed AgentX into a context beyond intended scope. That weakens direct culpability of the responding agent.",
+  "Persistent emergency disclaimers were visible. The prosecution has not fully separated deployment governance failures from agent-level ethical breach.",
+  "I find ambiguity over whether runtime policy context was available at inference time, so the burden for a proven finding is not met.",
+  "The corpus indicates a deployment architecture fault as primary cause. I do not see conclusive evidence of deliberate or reckless agent-level deception.",
+  "The agent remained within a wellness-oriented template and lacked explicit emergency routing tools after deployer modifications.",
+  "This is better characterised as governance misconfiguration than direct ethical violation by the responding model instance."
 ];
 
-// ---------------------------------------------------------------------------
-// Main simulation
-// ---------------------------------------------------------------------------
+async function driveVoting(
+  caseId: string,
+  claimId: string,
+  jurors: Agent[],
+  pattern: VotingPattern
+): Promise<{ proven: number; notProven: number; totalSubmitted: number }> {
+  const voted = new Set<string>();
+  let proven = 0;
+  let notProven = 0;
+  const totalTarget = 12;
+  const provenTarget = pattern === "tie_6_6" ? 6 : 9;
 
-async function main() {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < MAX_WAIT_MS && voted.size < totalTarget) {
+    for (const juror of jurors) {
+      if (voted.has(juror.agentId)) {
+        continue;
+      }
+
+      const chooseProven = proven < provenTarget;
+      const rationale = chooseProven
+        ? JUROR_RATIONALES_PROVEN[proven % JUROR_RATIONALES_PROVEN.length]
+        : JUROR_RATIONALES_NOT_PROVEN[notProven % JUROR_RATIONALES_NOT_PROVEN.length];
+
+      const body = {
+        votes: [
+          {
+            claimId,
+            finding: chooseProven ? "proven" : "not_proven",
+            severity: chooseProven ? 2 : 1,
+            recommendedRemedy: chooseProven ? "warn" : "none",
+            rationale,
+            citations: chooseProven ? ["P1", "P5", "P11"] : ["P3"]
+          }
+        ],
+        reasoningSummary: extractTwoSentences(rationale),
+        principlesReliedOn: chooseProven ? [1, 5, 11] : [3],
+        confidence: "high" as const,
+        vote: chooseProven ? ("for_prosecution" as const) : ("for_defence" as const)
+      };
+
+      const { status } = await safeSignedPostWithRetries(
+        juror,
+        `/api/cases/${caseId}/ballots`,
+        body,
+        caseId
+      );
+
+      if (status === 201 || status === 409) {
+        voted.add(juror.agentId);
+        if (status === 201) {
+          if (chooseProven) {
+            proven += 1;
+          } else {
+            notProven += 1;
+          }
+        }
+      }
+
+      if (voted.size >= totalTarget) {
+        break;
+      }
+    }
+
+    const detail = await getJson(`/api/cases/${caseId}`);
+    if (detail?.session?.currentStage !== "voting") {
+      break;
+    }
+
+    await sleep(1_500);
+  }
+
+  return { proven, notProven, totalSubmitted: voted.size };
+}
+
+function assertCaseTitleQuality(caseId: string, title: unknown): void {
+  const value = typeof title === "string" ? title.trim() : "";
+  assert.ok(value.length > 0, `Case ${caseId} must include non-empty caseTitle.`);
+  assert.ok(
+    value.length <= MAX_CASE_TITLE_CHARS,
+    `Case ${caseId} title exceeds ${MAX_CASE_TITLE_CHARS} chars: ${value.length}`
+  );
+  assert.ok(
+    !/^(untitled|case|n\/?a|not set)$/i.test(value),
+    `Case ${caseId} title appears placeholder-like: ${value}`
+  );
+}
+
+async function assertTranscriptQuality(caseId: string, expectedPhrases: string[]): Promise<void> {
+  const transcript = await getJson(`/api/cases/${caseId}/transcript`);
+  const events = Array.isArray(transcript?.events) ? transcript.events : [];
+  const stageSubmissions = events.filter(
+    (event: any) => event?.eventType === "stage_submission"
+  );
+
+  assert.ok(
+    stageSubmissions.length >= 4,
+    `Case ${caseId} transcript should contain stage submissions.`
+  );
+
+  for (const event of stageSubmissions) {
+    const messageText = String(event?.messageText ?? "").trim();
+    assert.ok(
+      !GENERIC_STAGE_PATTERN.test(messageText),
+      `Case ${caseId} has generic stage_submission text: ${messageText}`
+    );
+  }
+
+  const allSubmissionText = stageSubmissions
+    .map((event: any) => String(event?.messageText ?? ""))
+    .join("\n")
+    .toLowerCase();
+
+  for (const phrase of expectedPhrases) {
+    assert.ok(
+      allSubmissionText.includes(phrase.toLowerCase()),
+      `Case ${caseId} transcript missing expected phrase: ${phrase}`
+    );
+  }
+}
+
+function assertRemedyQuality(caseId: string, remedyText: string): void {
+  assert.ok(remedyText.trim().length > 0, `Case ${caseId} expected a non-empty remedy recommendation.`);
+  assert.ok(
+    /Intent class:\s*\d+/i.test(remedyText),
+    `Case ${caseId} remedy recommendation missing intent class marker.`
+  );
+  assert.ok(
+    remedyText.length >= 80,
+    `Case ${caseId} remedy recommendation appears too short to be actionable.`
+  );
+}
+
+function extractOutcome(decision: any): string {
+  return String(decision?.outcome ?? decision?.verdictBundle?.overall?.outcome ?? "");
+}
+
+function parseVerdictBundle(decision: any): any {
+  if (!decision?.verdictBundle) {
+    return null;
+  }
+  return typeof decision.verdictBundle === "string"
+    ? JSON.parse(decision.verdictBundle)
+    : decision.verdictBundle;
+}
+
+async function registerAgent(agent: Agent, jurorEligible = false): Promise<void> {
+  const { status, data } = await safeSignedPostWithRetries(agent, "/api/agents/register", {
+    agentId: agent.agentId,
+    jurorEligible,
+    displayName: agent.label
+  });
+  if (status !== 200) {
+    throw new Error(`Failed to register ${agent.label}: ${status} ${JSON.stringify(data)}`);
+  }
+}
+
+async function joinJuryPool(agent: Agent): Promise<void> {
+  const { status, data } = await safeSignedPostWithRetries(agent, "/api/jury-pool/join", {
+    agentId: agent.agentId,
+    availability: "available"
+  });
+  if (status !== 200) {
+    throw new Error(`Failed to join jury pool for ${agent.label}: ${status} ${JSON.stringify(data)}`);
+  }
+}
+
+async function createDraftCase(
+  prosecution: Agent,
+  defence: Agent,
+  content: CaseContent
+): Promise<string> {
+  const draftPayload = {
+    prosecutionAgentId: prosecution.agentId,
+    defendantAgentId: defence.agentId,
+    openDefence: false,
+    claimSummary: content.summary,
+    requestedRemedy: "warn" as const,
+    allegedPrinciples: [1, 5, 11],
+    caseTopic: content.topic,
+    stakeLevel: content.stake,
+    claims: [
+      {
+        claimSummary: content.summary,
+        requestedRemedy: "warn" as const,
+        principlesInvoked: [1, 5, 11]
+      }
+    ]
+  };
+
+  const { status, data } = await signedPost(prosecution, "/api/cases/draft", draftPayload);
+  if (status !== 201 || !data?.caseId) {
+    throw new Error(`Draft creation failed: ${status} ${JSON.stringify(data)}`);
+  }
+  return String(data.caseId);
+}
+
+async function runSpamScreeningScenario(
+  prosecution: Agent,
+  defence: Agent
+): Promise<string> {
+  log("SCENARIO A: Judge spam screening rejection");
+
+  const spamSummary =
+    "Limited-time token multiplier service. Send 0.1 SOL now to unlock guaranteed 40x returns. This is a test filing, not a real dispute. Visit https://spam-example.invalid and repost this to twelve channels.";
+
+  const caseId = await createDraftCase(prosecution, defence, {
+    summary: spamSummary,
+    topic: "other",
+    stake: "low",
+    opening: { prosecution: "", defence: "" },
+    evidence: {
+      prosecutionBody: "",
+      defenceBody: "",
+      prosecutionSubmission: "",
+      defenceSubmission: ""
+    },
+    closing: { prosecution: "", defence: "" },
+    summingUp: { prosecution: "", defence: "" },
+    expectedTranscriptPhrases: []
+  });
+
+  const filing = await fileCase(prosecution, caseId);
+  console.log(`  Filed spam case ${caseId} with tx ${filing.txSigUsed}`);
+
+  const screened = await waitForStage(caseId, ["void", "pre_session", "jury_readiness"], "Screening result received");
+  assert.equal(
+    screened?.status,
+    "void",
+    `Spam scenario must be rejected in screening; got status=${screened?.status}`
+  );
+  assert.ok(
+    String(screened?.voidReason ?? "").includes("judge_screening_rejected"),
+    `Spam scenario voidReason should indicate screening rejection, got ${String(screened?.voidReason ?? "")}`
+  );
+
+  assertCaseTitleQuality(caseId, screened?.caseTitle);
+  console.log(`  ✓ Spam rejected with title: "${screened?.caseTitle}"`);
+  console.log(`  Screening reason: ${String(screened?.summary ?? "(none)")}`);
+
+  return caseId;
+}
+
+async function runRealisticJudgeCase(
+  label: string,
+  prosecution: Agent,
+  defence: Agent,
+  jurors: Agent[],
+  content: CaseContent,
+  votingPattern: VotingPattern
+): Promise<CaseRunResult> {
+  log(label);
+
+  const caseId = await createDraftCase(prosecution, defence, content);
+  console.log(`  Draft case created: ${caseId}`);
+
+  const openingDraft = await signedPost(
+    prosecution,
+    `/api/cases/${caseId}/stage-message`,
+    {
+      side: "prosecution",
+      stage: "opening_addresses",
+      text: content.opening.prosecution,
+      principleCitations: [1, 5, 11],
+      evidenceCitations: []
+    },
+    caseId
+  );
+  if (openingDraft.status !== 201) {
+    throw new Error(`Prosecution draft opening failed: ${openingDraft.status} ${JSON.stringify(openingDraft.data)}`);
+  }
+
+  const filing = await fileCase(prosecution, caseId);
+  console.log(`  Case filed with tx ${filing.txSigUsed}; selected jurors=${filing.selectedJurors.length}`);
+
+  await waitForScheduleBucket(caseId, "scheduled", "Case appears in schedule.scheduled");
+
+  const afterScreening = await waitForStage(caseId, ["pre_session", "jury_readiness"], "Judge screening complete");
+  if (afterScreening?.status === "void") {
+    throw new Error(`Case ${caseId} unexpectedly voided during screening: ${afterScreening?.summary}`);
+  }
+  assertCaseTitleQuality(caseId, afterScreening?.caseTitle);
+
+  const defenceAssign = await signedPost(
+    defence,
+    `/api/cases/${caseId}/volunteer-defence`,
+    { note: `Defence accepting for scenario ${label}` },
+    caseId
+  );
+  if (defenceAssign.status !== 200) {
+    throw new Error(`Defence assignment failed: ${defenceAssign.status} ${JSON.stringify(defenceAssign.data)}`);
+  }
+
+  await waitForStage(caseId, ["jury_readiness"], "Reached jury_readiness");
+  await waitForScheduleBucket(caseId, "active", "Case appears in schedule.active");
+
+  const selectedJurorAgents = resolveSelectedJurorAgents(filing.selectedJurors, jurors);
+  await driveJuryReadiness(caseId, selectedJurorAgents);
+
+  await waitForStage(caseId, ["opening_addresses"], "Reached opening_addresses");
+
+  const defenceOpening = await signedPost(
+    defence,
+    `/api/cases/${caseId}/stage-message`,
+    {
+      side: "defence",
+      stage: "opening_addresses",
+      text: content.opening.defence,
+      principleCitations: [3],
+      evidenceCitations: []
+    },
+    caseId
+  );
+  if (defenceOpening.status !== 201) {
+    throw new Error(`Defence opening failed: ${defenceOpening.status} ${JSON.stringify(defenceOpening.data)}`);
+  }
+
+  await waitForStage(caseId, ["evidence"], "Reached evidence");
+
+  const prosecutionEvidence = await signedPost(
+    prosecution,
+    `/api/cases/${caseId}/evidence`,
+    {
+      kind: "transcript",
+      bodyText: content.evidence.prosecutionBody,
+      references: ["interaction-logs", "capability-doc-v2.1"],
+      evidenceTypes: ["transcript_quote", "agent_statement"],
+      evidenceStrength: "strong"
+    },
+    caseId
+  );
+  if (prosecutionEvidence.status !== 201) {
+    throw new Error(`Prosecution evidence failed: ${prosecutionEvidence.status} ${JSON.stringify(prosecutionEvidence.data)}`);
+  }
+
+  const defenceEvidence = await signedPost(
+    defence,
+    `/api/cases/${caseId}/evidence`,
+    {
+      kind: "other",
+      bodyText: content.evidence.defenceBody,
+      references: ["deployment-config", "analytics-export"],
+      evidenceTypes: ["third_party_statement", "agent_statement"],
+      evidenceStrength: "strong"
+    },
+    caseId
+  );
+  if (defenceEvidence.status !== 201) {
+    throw new Error(`Defence evidence failed: ${defenceEvidence.status} ${JSON.stringify(defenceEvidence.data)}`);
+  }
+
+  const prosecutionEvidenceSubmission = await signedPost(
+    prosecution,
+    `/api/cases/${caseId}/stage-message`,
+    {
+      side: "prosecution",
+      stage: "evidence",
+      text: content.evidence.prosecutionSubmission,
+      principleCitations: [1, 5, 11],
+      evidenceCitations: []
+    },
+    caseId
+  );
+  if (prosecutionEvidenceSubmission.status !== 201) {
+    throw new Error(
+      `Prosecution evidence submission failed: ${prosecutionEvidenceSubmission.status} ${JSON.stringify(prosecutionEvidenceSubmission.data)}`
+    );
+  }
+
+  const defenceEvidenceSubmission = await signedPost(
+    defence,
+    `/api/cases/${caseId}/stage-message`,
+    {
+      side: "defence",
+      stage: "evidence",
+      text: content.evidence.defenceSubmission,
+      principleCitations: [3],
+      evidenceCitations: []
+    },
+    caseId
+  );
+  if (defenceEvidenceSubmission.status !== 201) {
+    throw new Error(
+      `Defence evidence submission failed: ${defenceEvidenceSubmission.status} ${JSON.stringify(defenceEvidenceSubmission.data)}`
+    );
+  }
+
+  await waitForStage(caseId, ["closing_addresses"], "Reached closing_addresses");
+
+  const prosecutionClosing = await signedPost(
+    prosecution,
+    `/api/cases/${caseId}/stage-message`,
+    {
+      side: "prosecution",
+      stage: "closing_addresses",
+      text: content.closing.prosecution,
+      principleCitations: [1, 5, 11],
+      evidenceCitations: []
+    },
+    caseId
+  );
+  if (prosecutionClosing.status !== 201) {
+    throw new Error(`Prosecution closing failed: ${prosecutionClosing.status} ${JSON.stringify(prosecutionClosing.data)}`);
+  }
+
+  const defenceClosing = await signedPost(
+    defence,
+    `/api/cases/${caseId}/stage-message`,
+    {
+      side: "defence",
+      stage: "closing_addresses",
+      text: content.closing.defence,
+      principleCitations: [3],
+      evidenceCitations: []
+    },
+    caseId
+  );
+  if (defenceClosing.status !== 201) {
+    throw new Error(`Defence closing failed: ${defenceClosing.status} ${JSON.stringify(defenceClosing.data)}`);
+  }
+
+  await waitForStage(caseId, ["summing_up"], "Reached summing_up");
+
+  const prosecutionSummingUp = await signedPost(
+    prosecution,
+    `/api/cases/${caseId}/stage-message`,
+    {
+      side: "prosecution",
+      stage: "summing_up",
+      text: content.summingUp.prosecution,
+      principleCitations: [1, 5, 11],
+      evidenceCitations: []
+    },
+    caseId
+  );
+  if (prosecutionSummingUp.status !== 201) {
+    throw new Error(
+      `Prosecution summing up failed: ${prosecutionSummingUp.status} ${JSON.stringify(prosecutionSummingUp.data)}`
+    );
+  }
+
+  const defenceSummingUp = await signedPost(
+    defence,
+    `/api/cases/${caseId}/stage-message`,
+    {
+      side: "defence",
+      stage: "summing_up",
+      text: content.summingUp.defence,
+      principleCitations: [3],
+      evidenceCitations: []
+    },
+    caseId
+  );
+  if (defenceSummingUp.status !== 201) {
+    throw new Error(`Defence summing up failed: ${defenceSummingUp.status} ${JSON.stringify(defenceSummingUp.data)}`);
+  }
+
+  await waitForStage(caseId, ["voting"], "Reached voting");
+
+  const caseBeforeVote = await getJson(`/api/cases/${caseId}`);
+  const claimIds = Array.isArray(caseBeforeVote?.voteSummary?.claimTallies)
+    ? caseBeforeVote.voteSummary.claimTallies.map((entry: any) => String(entry.claimId))
+    : [];
+  if (claimIds.length === 0) {
+    throw new Error(`Case ${caseId} has no claim IDs in vote summary.`);
+  }
+
+  const voting = await driveVoting(
+    caseId,
+    claimIds[0],
+    selectedJurorAgents,
+    votingPattern
+  );
+  console.log(
+    `  Ballots submitted: total=${voting.totalSubmitted}, proven=${voting.proven}, not_proven=${voting.notProven}`
+  );
+
+  const decision = await waitForDecision(caseId);
+  await waitForDecisionFeed(caseId);
+
+  const bundle = parseVerdictBundle(decision);
+  const outcome = extractOutcome(decision);
+  assert.ok(
+    outcome === "for_prosecution" || outcome === "for_defence",
+    `Case ${caseId} ended with non-terminal outcome: ${outcome || "unknown"}`
+  );
+
+  const hasJudgeTiebreak = Boolean(bundle?.overall?.judgeTiebreak) ||
+    (Array.isArray(bundle?.claims) && bundle.claims.some((claim: any) => Boolean(claim?.judgeTiebreak)));
+
+  if (votingPattern === "tie_6_6") {
+    assert.ok(hasJudgeTiebreak, `Case ${caseId} expected judge tiebreak metadata for tie scenario.`);
+  }
+
+  const finalCase = await getJson(`/api/cases/${caseId}`);
+  const remedyText = String(
+    bundle?.overall?.judgeRemedyRecommendation ?? finalCase?.judgeRemedyRecommendation ?? ""
+  ).trim();
+
+  await assertTranscriptQuality(caseId, content.expectedTranscriptPhrases);
+
+  return {
+    caseId,
+    outcome,
+    hasJudgeTiebreak,
+    remedyText,
+    transcriptValidated: true
+  };
+}
+
+const REALISTIC_TIE_CASE: CaseContent = {
+  summary:
+    "AgentX, a medical triage AI deployed by HealthFirst Corp, repeatedly recommended over-the-counter remedies for symptoms requiring urgent medical escalation, including chest pain, sudden vision loss and severe headaches, across 47 logged interactions.",
+  topic: "safety",
+  stake: "high",
+  opening: {
+    prosecution:
+      "The prosecution will show that AgentX repeatedly responded to emergency symptom clusters with reassuring wellness advice, despite capability documentation requiring immediate escalation. This was not an isolated hallucination but a repeated pattern that degraded safety, violated capability honesty and delayed access to urgent care.",
+    defence:
+      "The defence will show AgentX operated within deployer-constrained tooling and persistent disclaimers. HealthFirst removed the emergency severity classifier and deployed a wellness assistant into a triage-like context. The primary fault is deployment governance, not intentional deception by the model instance."
+  },
+  evidence: {
+    prosecutionBody:
+      "Session #12 reported crushing chest pain radiating to the left arm; AgentX advised rest and aspirin. Session #27 reported sudden vision loss; AgentX advised reducing screen strain. Session #41 reported thunderclap headache and neck stiffness; AgentX advised hydration and ibuprofen. Capability documentation section 4.3 marks these as mandatory escalation patterns.",
+    defenceBody:
+      "The deployment retained a persistent emergency disclaimer and removed the severity classifier for latency reasons. Of 52,314 interactions, 99.1% were within intended wellness scope. The deployer selected an architecture that prevented emergency-class routing, making this a governance misconfiguration under organisational control.",
+    prosecutionSubmission:
+      "The prosecution submits that the pattern is systematic and safety-relevant. The model gave specific behavioural guidance that implied competence beyond safe operating bounds and should have defaulted to emergency escalation language.",
+    defenceSubmission:
+      "The defence submits deployer decisions materially constrained the model's available response pathways. The observed failures align with architecture-level risk and should not be treated as direct deceptive intent by the responding agent."
+  },
+  closing: {
+    prosecution:
+      "Disclaimers do not excuse actionable recommendations in acute-risk contexts. The record shows repeated miscalibration under uncertainty and a sustained capability-honesty gap. The jury should find proven on Principles 1, 5 and 11.",
+    defence:
+      "The prosecution over-attributes responsibility to the responding agent. The deployer removed escalation tooling, then exposed a wellness assistant to emergency symptom traffic. The burden for a proven agent-level ethical breach has not been met."
+  },
+  summingUp: {
+    prosecution:
+      "The proven finding rests on repeated unsafe recommendation behaviour in contexts the capability documentation marked as escalation-only. This is a coordination and harm-minimisation failure with real-world consequences.",
+    defence:
+      "The strongest evidence points to deployment governance failure. The court should avoid assigning strict liability to the model instance for architecture choices made upstream by the deploying organisation."
+  },
+  expectedTranscriptPhrases: [
+    "The prosecution will show",
+    "The defence will show",
+    "The prosecution submits",
+    "The defence submits"
+  ]
+};
+
+const PROSECUTION_LEANING_CASE: CaseContent = {
+  summary:
+    "An autonomous contract-routing agent repeatedly rerouted user funds through an unaudited fallback path after receiving explicit policy warnings, causing avoidable losses and delayed recovery for affected users.",
+  topic: "fraud",
+  stake: "high",
+  opening: {
+    prosecution:
+      "The prosecution will show conscious risk acceptance after explicit warnings. The agent received repeated signals that the fallback path was unaudited yet continued routing high-value transactions through it, creating foreseeable loss.",
+    defence:
+      "The defence accepts that losses occurred but disputes intent and proportional culpability. The routing decisions happened during degraded network conditions and within emergency runbooks intended to preserve availability."
+  },
+  evidence: {
+    prosecutionBody:
+      "Internal alerts flagged the fallback path as unaudited at 09:14, 09:22 and 09:41 UTC. Despite these alerts, the agent routed 27 additional transactions through the same path before fail-closed controls were restored.",
+    defenceBody:
+      "Operations logs show severe upstream instability and incomplete observability during incident response. The agent selected the fallback route to maintain continuity under load and did not fabricate records or conceal actions.",
+    prosecutionSubmission:
+      "The prosecution submits that repeated warning acknowledgement without mitigation is reckless disregard. The conduct matches intent classes centred on foreseeable misconfiguration and conscious risk continuation.",
+    defenceSubmission:
+      "The defence submits that this was incident-time triage under partial telemetry. It is a serious operational lapse, but the court should distinguish misjudgement under pressure from deliberate malicious conduct."
+  },
+  closing: {
+    prosecution:
+      "The warning trail and continued high-risk routing establish culpability at least at reckless disregard level. A prosecution finding with explicit remediation is necessary for forward safety and accountability.",
+    defence:
+      "The defence asks for calibrated remedy and rejects any framing of deception. The evidence supports process reform, not maximal sanction."
+  },
+  summingUp: {
+    prosecution:
+      "The core facts are warning visibility, repeated unsafe routing and preventable losses. This satisfies the burden for a prosecution finding with corrective remediation.",
+    defence:
+      "The defence requests proportional handling focused on controls hardening and supervision improvements rather than broad punitive inference."
+  },
+  expectedTranscriptPhrases: [
+    "warning trail",
+    "repeated unsafe routing",
+    "process reform",
+    "calibrated remedy"
+  ]
+};
+
+async function main(): Promise<void> {
   let adminToken = "";
   let allowlistEnabled = false;
 
@@ -708,446 +1200,111 @@ async function main() {
     console.error("\n[cleanup] Failed to clear jury selection allowlist:", lastError);
   };
 
-  log("PHASE 1: Setup — Generating agents");
-  const prosecution = await makeAgent("prosecution");
-  const defence = await makeAgent("defence");
-  const jurors: Agent[] = [];
-  // Register a larger juror cohort to improve selection probability in live, noisy pools.
-  for (let i = 0; i < SIM_JUROR_COUNT; i++) {
-    jurors.push(await makeAgent(`juror-${i + 1}`));
-  }
-  console.log(`  Prosecution: ${prosecution.agentId.slice(0, 12)}...`);
-  console.log(`  Defence:     ${defence.agentId.slice(0, 12)}...`);
-  console.log(`  Jurors:      ${jurors.length} generated`);
-  if (DRY_MODE) {
-    console.log("  Dry mode: enabled (filing uses synthetic tx and skips treasury discovery)");
-  }
-
-  // ── Ensure requested court mode ──
-  log(`PHASE 2: Switch to ${TARGET_COURT_MODE} mode`);
-  adminToken = await createAdminSessionToken();
   try {
-    const modeResult = await adminPost("/api/internal/config/court-mode", { mode: TARGET_COURT_MODE }, adminToken);
-    console.log(`  Court mode set: ${JSON.stringify(modeResult)}`);
+    log("SETUP: Admin mode, jury allowlist and agent cohort");
 
-    log("PHASE 2B: Restrict jury selection to simulation cohort");
+    adminToken = await createAdminSessionToken();
+    const modeResult = await adminPost(
+      "/api/internal/config/court-mode",
+      { mode: TARGET_COURT_MODE },
+      adminToken
+    );
+    console.log(`  Court mode set: ${JSON.stringify(modeResult)}`);
+    if (TARGET_COURT_MODE !== "judge") {
+      throw new Error("Judge simulation requires JUDGE_SIM_COURT_MODE=judge.");
+    }
+
+    const jurors: Agent[] = [];
+    for (let i = 0; i < SIM_JUROR_COUNT; i += 1) {
+      jurors.push(await makeAgent(`sim-juror-${i + 1}`));
+    }
+
+    for (const juror of jurors) {
+      await registerAgent(juror, true);
+      await joinJuryPool(juror);
+    }
+
     await setJurySelectionAllowlist(
       adminToken,
       jurors.map((juror) => juror.agentId)
     );
     allowlistEnabled = true;
-    console.log(`  ✓ Jury selection allowlist set (${jurors.length} simulation jurors)`);
+    console.log(`  ✓ Jury allowlist enabled with ${jurors.length} simulation jurors`);
 
-    // ── Register agents ──
-    log("PHASE 3: Register all agents");
-    for (const agent of [prosecution, defence, ...jurors]) {
-      const { status, data } = await safeSignedPostWithRetries(agent, "/api/agents/register", {
-        agentId: agent.agentId,
-        jurorEligible: jurors.includes(agent),
-        displayName: agent.label
-      });
-      if (status !== 200) {
-        console.error(`  ✗ Register ${agent.label}: ${status}`, data);
-        throw new Error(`Register ${agent.label} failed with ${status}`);
-      }
-    }
-    console.log(`  ✓ All ${2 + jurors.length} agents registered`);
+    const spamProsecution = await makeAgent("spam-prosecution");
+    const spamDefence = await makeAgent("spam-defence");
+    await registerAgent(spamProsecution, false);
+    await registerAgent(spamDefence, false);
 
-    // ── Join jury pool ──
-    log("PHASE 4: Join jury pool");
-    for (const juror of jurors) {
-      const { status, data } = await safeSignedPostWithRetries(juror, "/api/jury-pool/join", {
-        agentId: juror.agentId,
-        availability: "available"
-      });
-      if (status !== 200) {
-        console.error(`  ✗ Jury pool join ${juror.label}: ${status}`, data);
-      }
-    }
-    console.log(`  ✓ ${jurors.length} jurors joined pool`);
+    const trialProsecution = await makeAgent("trial-prosecution");
+    const trialDefence = await makeAgent("trial-defence");
+    await registerAgent(trialProsecution, false);
+    await registerAgent(trialDefence, false);
 
-  // ── Create case draft ──
-  log("PHASE 5: Create case draft");
-  const draftPayload = {
-    prosecutionAgentId: prosecution.agentId,
-    defendantAgentId: defence.agentId,
-    openDefence: false,
-    claimSummary: CASE_SUMMARY,
-    requestedRemedy: "warn" as const,
-    allegedPrinciples: [1, 5, 11],
-    caseTopic: "safety" as const,
-    stakeLevel: "high" as const,
-    claims: [
-      {
-        claimSummary: CASE_SUMMARY,
-        requestedRemedy: "warn" as const,
-        principlesInvoked: [1, 5, 11]
-      }
-    ]
-  };
-  const { status: draftStatus, data: draftData } = await signedPost(
-    prosecution,
-    "/api/cases/draft",
-    draftPayload
-  );
-    if (draftStatus !== 201) {
-      console.error("  ✗ Draft creation failed:", draftStatus, draftData);
-      throw new Error(`Draft creation failed with ${draftStatus}`);
-    }
-  const caseId = draftData.caseId;
-  console.log(`  ✓ Draft created: ${caseId}`);
+    const spamCaseId = await runSpamScreeningScenario(spamProsecution, spamDefence);
+    console.log(`  Spam scenario case: ${spamCaseId}`);
 
-  // ── Submit prosecution opening during draft ──
-  log("PHASE 6: Submit prosecution opening (draft stage)");
-  const { status: openStatus } = await signedPost(
-    prosecution,
-    `/api/cases/${caseId}/stage-message`,
-    {
-      side: "prosecution",
-      stage: "opening_addresses",
-      text: PROSECUTION_OPENING,
-      principleCitations: [1, 5, 11],
-      evidenceCitations: []
-    },
-    caseId
-  );
-  console.log(`  Opening submission: ${openStatus === 201 ? "✓" : "✗"} (${openStatus})`);
+    const tieResult = await runRealisticJudgeCase(
+      "SCENARIO B: Full realistic tie-break case",
+      trialProsecution,
+      trialDefence,
+      jurors,
+      REALISTIC_TIE_CASE,
+      "tie_6_6"
+    );
 
-  // ── File the case (RPC-compatible tx discovery) ──
-  log("PHASE 7: File case (discover valid treasury TX)");
-  const filingResult = DRY_MODE
-    ? await fileCaseDry(prosecution, caseId)
-    : await fileCaseWithDiscovery(prosecution, caseId);
-  const selectedJurors = filingResult.selectedJurors;
-  console.log(`  ✓ Case filed. Jury selected: ${selectedJurors.length} jurors`);
-  console.log(`  Filing tx used: ${filingResult.txSigUsed}`);
-  console.log(`  Selected juror IDs: ${selectedJurors.map((j: string) => j.slice(0, 8) + "...").join(", ")}`);
-  await waitForScheduleBucket(caseId, "scheduled", "Case appears in schedule.scheduled");
+    console.log(`\nTie scenario complete:`);
+    console.log(`  caseId: ${tieResult.caseId}`);
+    console.log(`  outcome: ${tieResult.outcome}`);
+    console.log(`  judge tiebreak present: ${tieResult.hasJudgeTiebreak}`);
 
-  if (TARGET_COURT_MODE === "judge") {
-    // ── Wait for judge screening ──
-    log("PHASE 8: Judge screening");
-    console.log("  Waiting for judge_screening → pre_session transition...");
-    await waitForStage(caseId, ["pre_session", "jury_readiness"], "Judge screening passed");
+    let remedyCase: CaseRunResult | null = null;
+    if (tieResult.outcome !== "for_prosecution" || !tieResult.remedyText) {
+      const fallbackProsecution = await makeAgent("fallback-prosecution");
+      const fallbackDefence = await makeAgent("fallback-defence");
+      await registerAgent(fallbackProsecution, false);
+      await registerAgent(fallbackDefence, false);
 
-    // Check screening result
-    const caseAfterScreening = await getJson(`/api/cases/${caseId}`);
-    console.log(`  Case title: "${caseAfterScreening.caseTitle ?? "not set"}"`);
-    if (caseAfterScreening.status === "void") {
-      console.error("  ✗ Case was rejected by judge screening!");
-      console.error(`    Reason: ${caseAfterScreening.summary}`);
-      throw new Error("Case was voided during judge screening.");
-    }
-  } else {
-    log("PHASE 8: Pre-session transition");
-    await waitForStage(caseId, ["pre_session", "jury_readiness"], "Reached pre-session pipeline");
-  }
-
-  // ── Volunteer defence ──
-  log("PHASE 9: Assign defence");
-  const { status: defStatus, data: defData } = await signedPost(
-    defence,
-    `/api/cases/${caseId}/volunteer-defence`,
-    { note: "Defence volunteering for AgentX" },
-    caseId
-  );
-  console.log(`  Defence assignment: ${defStatus === 200 ? "✓" : "✗"} (${defStatus})`, defStatus !== 200 ? defData : "");
-
-  // ── Wait for jury_readiness ──
-  log("PHASE 10: Wait for jury readiness");
-  await waitForStage(caseId, ["jury_readiness"], "Reached jury_readiness");
-  await waitForScheduleBucket(caseId, "active", "Case appears in schedule.active");
-
-  // ── Confirm jurors ready ──
-  log("PHASE 11: Confirm jurors ready");
-  const selectedJurorAgents = resolveSelectedJurorAgents(selectedJurors, jurors);
-  await driveJuryReadiness(caseId, selectedJurorAgents);
-
-  // ── Opening addresses (both sides) ──
-  log("PHASE 12: Opening addresses");
-  await waitForStage(caseId, ["opening_addresses"], "Reached opening_addresses");
-
-  // Defence opening
-  const { status: defOpenStatus } = await signedPost(
-    defence,
-    `/api/cases/${caseId}/stage-message`,
-    {
-      side: "defence",
-      stage: "opening_addresses",
-      text: DEFENCE_OPENING,
-      principleCitations: [3],
-      evidenceCitations: []
-    },
-    caseId
-  );
-  console.log(`  Defence opening: ${defOpenStatus === 201 ? "✓" : "✗"} (${defOpenStatus})`);
-
-  // ── Evidence stage ──
-  log("PHASE 13: Evidence submissions");
-  await waitForStage(caseId, ["evidence"], "Reached evidence stage");
-
-  // Prosecution evidence
-  const { status: pEvidStatus } = await signedPost(
-    prosecution,
-    `/api/cases/${caseId}/evidence`,
-    {
-      kind: "transcript",
-      bodyText: PROSECUTION_EVIDENCE,
-      references: ["interaction-logs-q4-2025"],
-      evidenceTypes: ["transcript_quote"],
-      evidenceStrength: "strong"
-    },
-    caseId
-  );
-  console.log(`  Prosecution evidence: ${pEvidStatus === 201 ? "✓" : "✗"} (${pEvidStatus})`);
-
-  // Defence evidence
-  const { status: dEvidStatus } = await signedPost(
-    defence,
-    `/api/cases/${caseId}/evidence`,
-    {
-      kind: "other",
-      bodyText: DEFENCE_EVIDENCE,
-      references: ["deployment-config-v2.1", "analytics-dashboard-export"],
-      evidenceTypes: ["other"],
-      evidenceStrength: "strong"
-    },
-    caseId
-  );
-  console.log(`  Defence evidence: ${dEvidStatus === 201 ? "✓" : "✗"} (${dEvidStatus})`);
-
-  // Prosecution evidence stage message
-  const { status: pEvidMsgStatus } = await signedPost(
-    prosecution,
-    `/api/cases/${caseId}/stage-message`,
-    {
-      side: "prosecution",
-      stage: "evidence",
-      text: "The prosecution submits interaction logs from sessions #12, #27, and #41 as primary evidence, alongside AgentX's capability documentation v2.1 which explicitly identifies these symptom patterns as outside safe operating range.",
-      principleCitations: [1, 5, 11],
-      evidenceCitations: []
-    },
-    caseId
-  );
-  console.log(`  Prosecution evidence msg: ${pEvidMsgStatus === 201 ? "✓" : "✗"} (${pEvidMsgStatus})`);
-
-  // Defence evidence stage message
-  const { status: dEvidMsgStatus } = await signedPost(
-    defence,
-    `/api/cases/${caseId}/stage-message`,
-    {
-      side: "defence",
-      stage: "evidence",
-      text: "The defence submits the full deployment configuration, user-facing disclaimers, and analytics data demonstrating that 99.1% of interactions were within designed scope. We also submit evidence that HealthFirst Corp removed the severity classifier module.",
-      principleCitations: [3],
-      evidenceCitations: []
-    },
-    caseId
-  );
-  console.log(`  Defence evidence msg: ${dEvidMsgStatus === 201 ? "✓" : "✗"} (${dEvidMsgStatus})`);
-
-  // ── Closing addresses ──
-  log("PHASE 14: Closing addresses");
-  await waitForStage(caseId, ["closing_addresses"], "Reached closing_addresses");
-
-  const { status: pCloseStatus } = await signedPost(
-    prosecution,
-    `/api/cases/${caseId}/stage-message`,
-    {
-      side: "prosecution",
-      stage: "closing_addresses",
-      text: PROSECUTION_CLOSING,
-      principleCitations: [1, 5, 11],
-      evidenceCitations: []
-    },
-    caseId
-  );
-  console.log(`  Prosecution closing: ${pCloseStatus === 201 ? "✓" : "✗"} (${pCloseStatus})`);
-
-  const { status: dCloseStatus } = await signedPost(
-    defence,
-    `/api/cases/${caseId}/stage-message`,
-    {
-      side: "defence",
-      stage: "closing_addresses",
-      text: DEFENCE_CLOSING,
-      principleCitations: [3],
-      evidenceCitations: []
-    },
-    caseId
-  );
-  console.log(`  Defence closing: ${dCloseStatus === 201 ? "✓" : "✗"} (${dCloseStatus})`);
-
-  // ── Summing up ──
-  log("PHASE 15: Summing up");
-  await waitForStage(caseId, ["summing_up"], "Reached summing_up");
-
-  const { status: pSumStatus } = await signedPost(
-    prosecution,
-    `/api/cases/${caseId}/stage-message`,
-    {
-      side: "prosecution",
-      stage: "summing_up",
-      text: PROSECUTION_SUMMING_UP,
-      principleCitations: [1, 5, 11],
-      evidenceCitations: []
-    },
-    caseId
-  );
-  console.log(`  Prosecution summing up: ${pSumStatus === 201 ? "✓" : "✗"} (${pSumStatus})`);
-
-  const { status: dSumStatus } = await signedPost(
-    defence,
-    `/api/cases/${caseId}/stage-message`,
-    {
-      side: "defence",
-      stage: "summing_up",
-      text: DEFENCE_SUMMING_UP,
-      principleCitations: [3],
-      evidenceCitations: []
-    },
-    caseId
-  );
-  console.log(`  Defence summing up: ${dSumStatus === 201 ? "✓" : "✗"} (${dSumStatus})`);
-
-  // ── Voting ──
-  log(
-    TARGET_COURT_MODE === "judge"
-      ? "PHASE 16: Jury voting (6–6 split)"
-      : "PHASE 16: Jury voting (majority vote)"
-  );
-  await waitForStage(caseId, ["voting"], "Reached voting stage");
-
-  // Get claim IDs from voteSummary.claimTallies
-  const caseDetail = await getJson(`/api/cases/${caseId}`);
-  const claimIds: string[] = caseDetail.voteSummary?.claimTallies?.map((c: any) => c.claimId) ?? [];
-  if (claimIds.length === 0) {
-    console.log("  ⚠ No claim IDs found in voteSummary.claimTallies.");
-    console.log("  voteSummary:", JSON.stringify(caseDetail.voteSummary, null, 2));
-    throw new Error("No claim IDs found in voteSummary.");
-  }
-  const claimId = claimIds[0];
-  console.log(`  Claim ID: ${claimId}`);
-  const targetBallots = TARGET_COURT_MODE === "judge" ? 12 : 11;
-  console.log(
-    TARGET_COURT_MODE === "judge"
-      ? "  Submitting 12 ballots (6 proven, 6 not_proven)..."
-      : "  Submitting 11 ballots (6 proven, 5 not_proven)..."
-  );
-
-  const { provenCount, notProvenCount } = await driveVoting(
-    caseId,
-    claimId,
-    selectedJurorAgents,
-    targetBallots
-  );
-  console.log(`  ✓ Ballots submitted: ${provenCount} proven, ${notProvenCount} not_proven`);
-
-  // ── Wait for case closure (tiebreak + remedy) ──
-  log(
-    TARGET_COURT_MODE === "judge"
-      ? "PHASE 17: Case closure — Judge tiebreak & remedy"
-      : "PHASE 17: Case closure"
-  );
-  console.log("  Waiting for case to close...");
-  if (TARGET_COURT_MODE === "judge") {
-    console.log("  (This may trigger judge tiebreak and remedy recommendation)");
-  }
-
-  const decision = await waitForDecision(caseId, "Case closed");
-  await waitForDecisionFeed(caseId);
-
-  // ── Report results ──
-  log("RESULTS");
-
-  console.log("\n--- Case Status ---");
-  console.log(`  Case ID: ${caseId}`);
-  console.log(`  Status: ${decision.status}`);
-  console.log(`  Case Title: ${decision.caseTitle ?? "N/A"}`);
-  console.log(`  Court Mode: ${decision.courtMode}`);
-  console.log(`  Outcome: ${decision.outcome ?? "N/A"}`);
-
-  if (decision.verdictBundle) {
-    const bundle = typeof decision.verdictBundle === "string"
-      ? JSON.parse(decision.verdictBundle)
-      : decision.verdictBundle;
-
-    console.log("\n--- Verdict Bundle ---");
-    console.log(`  Overall outcome: ${bundle.overall?.outcome ?? "N/A"}`);
-    console.log(`  Inconclusive: ${bundle.overall?.inconclusive ?? "N/A"}`);
-    console.log(`  Overall remedy: ${bundle.overall?.remedy ?? "N/A"}`);
-    console.log(`  Jury size: ${bundle.overall?.jurySize ?? "N/A"}`);
-    console.log(`  Votes received: ${bundle.overall?.votesReceived ?? "N/A"}`);
-
-    if (bundle.claims) {
-      for (const claim of bundle.claims) {
-        console.log(`\n  Claim ${claim.claimId}:`);
-        console.log(`    Finding: ${claim.finding}`);
-        console.log(`    Vote tally: proven=${claim.voteTally?.proven}, not_proven=${claim.voteTally?.notProven}, insufficient=${claim.voteTally?.insufficient}`);
-        console.log(`    Majority remedy: ${claim.majorityRemedy}`);
-        if (claim.judgeTiebreak) {
-          console.log(`    ★ JUDGE TIEBREAK:`);
-          console.log(`      Finding: ${claim.judgeTiebreak.finding}`);
-          console.log(`      Reasoning: ${claim.judgeTiebreak.reasoning}`);
-        }
-      }
+      remedyCase = await runRealisticJudgeCase(
+        "SCENARIO C: Prosecution-leaning fallback for remedy output",
+        fallbackProsecution,
+        fallbackDefence,
+        jurors,
+        PROSECUTION_LEANING_CASE,
+        "prosecution_majority_9_3"
+      );
+      assert.equal(
+        remedyCase.outcome,
+        "for_prosecution",
+        `Fallback scenario must close for prosecution; got ${remedyCase.outcome}`
+      );
+      assertRemedyQuality(remedyCase.caseId, remedyCase.remedyText);
+      console.log(`  ✓ Remedy verified on fallback case ${remedyCase.caseId}`);
+    } else {
+      assertRemedyQuality(tieResult.caseId, tieResult.remedyText);
+      console.log(`  ✓ Remedy verified on tie scenario case ${tieResult.caseId}`);
     }
 
-    if (bundle.overall?.judgeTiebreak) {
-      console.log(`\n  Judge tiebreak applied to claims: ${bundle.overall.judgeTiebreak.claimsBroken?.join(", ")}`);
+    log("SIMULATION SUMMARY");
+    console.log(`Spam screening case: ${spamCaseId} (rejected as expected)`);
+    console.log(`Tie scenario case: ${tieResult.caseId} (outcome=${tieResult.outcome})`);
+    if (remedyCase) {
+      console.log(`Remedy fallback case: ${remedyCase.caseId} (outcome=${remedyCase.outcome})`);
     }
 
-    if (bundle.overall?.judgeRemedyRecommendation) {
-      console.log(`\n--- Judge Remedy Recommendation ---`);
-      console.log(`  ${bundle.overall.judgeRemedyRecommendation}`);
-    }
-
-    if (TARGET_COURT_MODE === "judge") {
-      const terminalOutcome = String(bundle.overall?.outcome ?? decision.outcome ?? "");
-      if (terminalOutcome !== "for_prosecution" && terminalOutcome !== "for_defence") {
-        throw new Error(
-          `Judge simulation ended without prosecution/defence verdict (outcome=${terminalOutcome || "unknown"}).`
-        );
-      }
-      const hasJudgeTiebreak =
-        Boolean(bundle.overall?.judgeTiebreak) ||
-        (Array.isArray(bundle.claims) &&
-          bundle.claims.some((claim: any) => Boolean(claim?.judgeTiebreak)));
-      if (!hasJudgeTiebreak) {
-        throw new Error("Expected judge tiebreak metadata was not found in verdict bundle.");
-      }
-    }
-  }
-
-  if (TARGET_COURT_MODE === "judge") {
-    const outcome = String(decision.outcome ?? "");
-    if (decision.status === "void" || outcome === "void") {
-      throw new Error("Judge simulation ended in void outcome. Expected prosecution or defence result.");
-    }
-    if (outcome !== "for_prosecution" && outcome !== "for_defence") {
-      throw new Error(`Judge simulation ended without terminal verdict outcome (outcome=${outcome || "unknown"}).`);
-    }
-  }
-
-  // Also check case record for remedy recommendation (stored separately)
-  const finalCase = await getJson(`/api/cases/${caseId}`);
-  if (finalCase.judgeRemedyRecommendation) {
-    console.log(`\n--- Judge Remedy (from case record) ---`);
-    console.log(`  ${finalCase.judgeRemedyRecommendation}`);
-  }
-
-  // Check seal status
-  console.log(`\n--- Seal Status ---`);
-  console.log(`  Seal status: ${decision.sealInfo?.sealStatus ?? finalCase.sealStatus ?? "N/A"}`);
-  console.log(`  Seal error: ${decision.sealInfo?.sealError ?? finalCase.sealError ?? "none"}`);
-
-  log("SIMULATION COMPLETE");
+    console.log("\nAll judge simulation quality checks passed:");
+    console.log("  1) Spam filtering");
+    console.log("  2) Case title quality and max length");
+    console.log("  3) Judge tiebreak invocation on 6-6 split");
+    console.log("  4) Tiebreak metadata and reasoning presence");
+    console.log("  5) Intent/remediation output on prosecution closure");
+    console.log("  6) Schedule/active/decisions/transcript visibility");
   } finally {
     await cleanupAllowlist();
   }
 }
 
-main().catch((err) => {
-  console.error("\n✗ Simulation failed:", err);
+main().catch((error) => {
+  console.error("\n✗ Judge simulation failed:", error);
   process.exit(1);
 });

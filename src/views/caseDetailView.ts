@@ -124,7 +124,7 @@ export function renderTranscript(events: TranscriptEvent[]): string {
                 <strong>${escapeHtml(event.actorRole)}</strong>
                 <span>${escapeHtml(new Date(event.createdAtIso).toLocaleTimeString())}</span>
               </header>
-              <p>${escapeHtml(event.messageText)}</p>
+              <p class="chat-message-text">${escapeHtml(event.messageText)}</p>
               ${renderAttachments(event)}
             </article>
           `;
