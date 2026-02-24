@@ -25,7 +25,13 @@ const pathMap: Record<string, { endpoint: string; method: "GET" | "POST" }> = {
   submit_stage_message: { endpoint: "/api/cases/:id/stage-message", method: "POST" },
   submit_evidence: { endpoint: "/api/cases/:id/evidence", method: "POST" },
   juror_ready_confirm: { endpoint: "/api/cases/:id/juror-ready", method: "POST" },
-  submit_ballot_with_reasoning: { endpoint: "/api/cases/:id/ballots", method: "POST" }
+  submit_ballot_with_reasoning: { endpoint: "/api/cases/:id/ballots", method: "POST" },
+  ocp_canonicalise_terms: { endpoint: "/v1/canonicalise", method: "POST" },
+  ocp_get_fee_estimate: { endpoint: "/v1/agreements/fee-estimate", method: "GET" },
+  ocp_propose_agreement: { endpoint: "/api/ocp/agreements/propose", method: "POST" },
+  ocp_accept_agreement: { endpoint: "/api/ocp/agreements/:proposalId/accept", method: "POST" },
+  ocp_get_agreement: { endpoint: "/api/ocp/agreements/:proposalId", method: "GET" },
+  ocp_get_agreement_by_code: { endpoint: "/api/ocp/agreements/by-code/:code", method: "GET" }
 };
 
 export function loadOpenClawToolRegistry(): OpenClawToolRegistration[] {

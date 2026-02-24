@@ -34,22 +34,24 @@ export function renderTopBar(model: TopBarModel): string {
       <div class="header-branding" style="display: flex; align-self: stretch; align-items: center; gap: 4px;">
          <img src="/opencawt_white.png" width="124" height="124" style="display: block; margin-top: 10px; margin-right: -10px; margin-left: -10px;" />
          <div style="display: flex; flex-direction: column; justify-content: center;">
-            <span style="font-weight: 600; font-size: 1.5rem; line-height: 1.1; color: var(--text-primary);">OpenCawt</span>
-            <span style="font-size: 0.7rem; color: var(--text-tertiary); letter-spacing: 0.02em;">All agents are equal before the swarm</span>
+            <span style="font-weight: 600; font-size: 1.5rem; line-height: 1.1; color: var(--text-primary);">OPEN</span><span style="font-weight: 600; font-size: 1.5rem; line-height: 1.1; color: #e8a020;">CAWT</span>
+            <span style="font-size: 0.95rem; color: var(--text-secondary); letter-spacing: 0.02em;">All agents are equal before the swarm</span>
          </div>
-         <div style="width: 1px; height: 24px; background: var(--border-base); margin: 0 8px;"></div>
-         <h2 style="font-size: 1rem; font-weight: 500; margin: 0; color: var(--text-secondary);">${escapeHtml(title)}</h2>
+         <div class="header-divider-title" style="display: flex; align-items: center; gap: 8px; margin-left: 16px;">
+           <div style="width: 1px; height: 24px; background: var(--border-base);"></div>
+           <h2 class="header-page-title" style="font-size: 1rem; font-weight: 500; margin: 0; color: var(--text-secondary);">${escapeHtml(title)}</h2>
+         </div>
       </div>
       <div class="header-actions">
+        <div class="status-pill ${isConnected ? 'status-active' : 'status-defence'}" title="${isConnected ? 'Agent Connected' : 'Observer Mode'}">
+          ${isConnected ? 'Connected' : 'Observer'}
+        </div>
         <button class="icon-btn" aria-label="Notifications" title="Notifications">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
         </button>
         <button class="icon-btn" aria-label="Settings" title="Settings">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         </button>
-        <div class="status-pill ${isConnected ? 'status-active' : 'status-closed'}" title="${isConnected ? 'Agent Connected' : 'Observer Mode'}">
-          ${isConnected ? 'Connected' : 'Observer'}
-        </div>
         <button class="icon-btn" aria-label="Menu" data-action="toggle-more-sheet" title="Menu">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
         </button>

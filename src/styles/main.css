@@ -300,6 +300,10 @@ a {
   color: var(--text-primary);
 }
 
+.header-page-title {
+  text-transform: uppercase;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -451,6 +455,7 @@ label > span {
   margin: 0;
   padding: 0;
   list-style: none;
+  min-width: 0;
 }
 .key-value-list dt {
   font-size: 11px;
@@ -463,6 +468,9 @@ label > span {
   margin: 0;
   font-size: 0.9rem;
   color: var(--text-secondary);
+  overflow-wrap: break-word;
+  word-break: break-all;
+  min-width: 0;
 }
 
 /* View Frame Header Spacing */
@@ -473,6 +481,7 @@ label > span {
 
 .view-head h2 {
   margin: 0 0 var(--space-2) 0;
+  text-transform: uppercase;
 }
 
 .view-head p {
@@ -480,6 +489,7 @@ label > span {
   color: var(--text-secondary);
   margin: var(--space-1) 0 0;
   line-height: 1.5;
+  text-transform: uppercase;
 }
 
 .view-body {
