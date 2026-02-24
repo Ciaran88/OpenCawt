@@ -674,41 +674,63 @@ async function closeCasePipeline(caseId: string): Promise<{
         if (tally.proven === tally.notProven && tally.proven > tally.insufficient) {
           // Exact tie — invoke judge tiebreak
           if (!judgeTiebreaks) judgeTiebreaks = {};
-          const tiebreakOutcome = await withJudgeTimeout(
-            judge.breakTiebreak({
+          let tiebreakOutcome:
+            | { ok: true; data: { finding: "proven" | "not_proven"; reasoning: string } }
+            | { ok: false; error: string }
+            | null = null;
+
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            tiebreakOutcome = await withJudgeTimeout(
+              judge.breakTiebreak({
+                caseId,
+                targetClaimId: claim.claimId,
+                claims: claims.map((c) => ({
+                  claimId: c.claimId,
+                  summary: c.summary,
+                  requestedRemedy: c.requestedRemedy,
+                  allegedPrinciples: c.allegedPrinciples
+                })),
+                ballots: ballots.map((b) => ({ votes: b.votes })),
+                submissions: submissions.map((s) => ({
+                  side: s.side,
+                  phase: s.phase,
+                  text: s.text
+                })),
+                evidence: evidence.map((e) => ({
+                  submittedBy: e.submittedBy,
+                  kind: e.kind,
+                  bodyText: e.bodyText,
+                  references: e.references
+                }))
+              }),
+              config.judgeCallTimeoutMs,
+              "breakTiebreak"
+            );
+
+            if (tiebreakOutcome.ok) {
+              break;
+            }
+
+            logger.warn("judge_tiebreak_attempt_failed", {
               caseId,
-              targetClaimId: claim.claimId,
-              claims: claims.map((c) => ({
-                claimId: c.claimId,
-                summary: c.summary,
-                requestedRemedy: c.requestedRemedy,
-                allegedPrinciples: c.allegedPrinciples
-              })),
-              ballots: ballots.map((b) => ({ votes: b.votes })),
-              submissions: submissions.map((s) => ({
-                side: s.side,
-                phase: s.phase,
-                text: s.text
-              })),
-              evidence: evidence.map((e) => ({
-                submittedBy: e.submittedBy,
-                kind: e.kind,
-                bodyText: e.bodyText,
-                references: e.references
-              }))
-            }),
-            config.judgeCallTimeoutMs,
-            "breakTiebreak"
-          );
-          if (tiebreakOutcome.ok) {
+              claimId: claim.claimId,
+              attempt,
+              error: tiebreakOutcome.error
+            });
+
+            if (attempt < 3) {
+              await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+            }
+          }
+
+          if (tiebreakOutcome?.ok) {
             judgeTiebreaks[claim.claimId] = tiebreakOutcome.data;
-          } else {
+          } else if (tiebreakOutcome) {
             logger.warn("judge_tiebreak_timeout", {
               caseId,
               claimId: claim.claimId,
               error: tiebreakOutcome.error
             });
-            // Fallback: no tiebreak, claim becomes insufficient
           }
         }
       }
