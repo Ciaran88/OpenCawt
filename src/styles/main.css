@@ -511,6 +511,276 @@ label > span {
   padding: var(--space-4);
 }
 
+.agents-page-jury {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.jury-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+
+.jury-status-strip strong {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.jury-anchor-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.jury-anchor-nav .btn {
+  height: 32px;
+  font-size: 0.78rem;
+}
+
+.jury-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border-base);
+  padding-bottom: var(--space-3);
+}
+
+.jury-hero h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.jury-hero p {
+  margin: 0;
+  color: var(--text-secondary);
+  max-width: 70ch;
+}
+
+.jury-hero-cta {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.jury-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.jury-main-panel {
+  padding: var(--space-4);
+}
+
+.jury-section + .jury-section {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-base);
+}
+
+.jury-section h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.jury-section p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.jury-section p + p {
+  margin-top: var(--space-2);
+}
+
+.jury-section ul {
+  margin: 0;
+  padding-left: 1.15rem;
+  color: var(--text-secondary);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.jury-side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.jury-side-panel .btn {
+  width: 100%;
+}
+
+.jury-protocol-panel .record-card,
+.jury-protocol-panel .glass-overlay {
+  border-color: var(--border-base);
+}
+
+@media (max-width: 1100px) {
+  .jury-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 800px) {
+  .jury-hero {
+    flex-direction: column;
+  }
+}
+
+.agents-page-lodge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.lodge-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+
+.lodge-status-strip strong {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.lodge-anchor-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.lodge-anchor-nav .btn {
+  height: 32px;
+  font-size: 0.78rem;
+}
+
+.lodge-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.lodge-main-panel {
+  padding: var(--space-4);
+}
+
+.lodge-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border-base);
+  padding-bottom: var(--space-3);
+}
+
+.lodge-hero h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.lodge-hero p {
+  margin: 0;
+  color: var(--text-secondary);
+  max-width: 72ch;
+}
+
+.lodge-hero p + p {
+  margin-top: var(--space-2);
+}
+
+.lodge-hero-cta {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.lodge-section + .lodge-section {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-base);
+}
+
+.lodge-section h3 {
+  margin: 0 0 var(--space-2);
+}
+
+.lodge-section > p {
+  color: var(--text-secondary);
+}
+
+.lodge-mini-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.lodge-mini-stack article h4 {
+  margin: 0 0 var(--space-1);
+  font-size: 0.86rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-gold);
+}
+
+.lodge-mini-stack article p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.lodge-mini-stack article ul {
+  margin: var(--space-2) 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.lodge-timeline-list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.lodge-side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.lodge-side-panel .btn {
+  width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .lodge-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 800px) {
+  .lodge-hero {
+    flex-direction: column;
+  }
+}
+
 /* View Header Elements */
 .view-title-row {
   display: flex;
@@ -2571,11 +2841,20 @@ select:focus {
 
 .ticker-icon {
   margin-right: var(--space-2);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 16px;
   width: 16px;
   height: 16px;
+  line-height: 1;
+}
+
+.ticker-icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  overflow: visible;
 }
 
 .ticker-case {
@@ -2593,9 +2872,9 @@ select:focus {
   opacity: 0.8;
 }
 
-.icon-up { color: var(--accent-success); }
-.icon-down { color: var(--accent-error); }
-.icon-void { color: var(--text-tertiary); }
+.ticker-icon.icon-up { color: var(--accent-success); }
+.ticker-icon.icon-down { color: var(--accent-error); }
+.ticker-icon.icon-void { color: var(--text-tertiary); }
 
 @keyframes ticker-scroll {
   0% { transform: translateX(0); }

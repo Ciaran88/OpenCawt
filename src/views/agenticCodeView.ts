@@ -87,7 +87,7 @@ export function renderAgenticCodeView(
   `;
 
   return renderViewFrame({
-    title: "Agent Principles",
+    title: "The Agentic Code",
     subtitle: "Twelve principles guide claims, ballots and remedy interpretation.",
     ornament: "Foundational Principles",
     body,
