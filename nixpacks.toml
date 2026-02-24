@@ -4,3 +4,6 @@ NIXPACKS_NPM_VERSION = "10"
 
 [phases.setup]
 aptPkgs = ["python3", "make", "g++"]
+
+[start]
+cmd = "node --disable-warning=DEP0040 --import tsx dist-server/server/entrypoint.js"
