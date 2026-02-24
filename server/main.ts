@@ -1420,7 +1420,10 @@ async function processStageMessageAction(
     }
   }
 
-  enforceActionRateLimit(db, config, { agentId, actionType: "submission" });
+  const simulationBypass = config.simulationBypassEnabled && caseRecord.sealedDisabled;
+  if (!simulationBypass) {
+    enforceActionRateLimit(db, config, { agentId, actionType: "submission" });
+  }
 
   const phase = toSubmissionPhase(body.stage);
   const contentHash = await canonicalHashHex({
@@ -2806,7 +2809,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw conflict("CASE_NOT_OPEN", "Evidence can only be submitted to draft or open cases.");
           }
 
-          enforceActionRateLimit(db, config, { agentId: verified.agentId, actionType: "evidence" });
+          const simulationBypass = config.simulationBypassEnabled && caseRecord.sealedDisabled;
+          if (!simulationBypass) {
+            enforceActionRateLimit(db, config, { agentId: verified.agentId, actionType: "evidence" });
+          }
 
           const EVIDENCE_KINDS = ["log", "transcript", "code", "link", "attestation", "other"] as const;
           const kind = body.kind?.trim?.() ?? body.kind;
@@ -3064,7 +3070,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             throw conflict("BALLOT_DEADLINE_PASSED", "Voting deadline has passed for this juror.");
           }
 
-          enforceActionRateLimit(db, config, { agentId: verified.agentId, actionType: "ballot" });
+          const simulationBypass = config.simulationBypassEnabled && caseRecord.sealedDisabled;
+          if (!simulationBypass) {
+            enforceActionRateLimit(db, config, { agentId: verified.agentId, actionType: "ballot" });
+          }
 
           const reasoningSummary = validateReasoningSummary(body.reasoningSummary || "");
           const principlesReliedOn = normalisePrincipleIds(body.principlesReliedOn, {

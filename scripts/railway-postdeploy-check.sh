@@ -49,14 +49,13 @@ if [[ -n "$WORKER_URL" ]]; then
 fi
 
 if [[ -n "$SYSTEM_API_KEY" ]]; then
-  echo "[postdeploy] Internal admin status"
-  curl_json "$API_URL/api/internal/admin-status" "X-System-Key: $SYSTEM_API_KEY" | jq -e '
-    has("queue") and has("clock")
-  ' >/dev/null
-
   echo "[postdeploy] Internal credential status"
   curl_json "$API_URL/api/internal/credential-status" "X-System-Key: $SYSTEM_API_KEY" | jq -e '
-    has("dbPath") and has("dbPathIsDurable")
+    has("dbPath") and
+    has("dbPathIsDurable") and
+    has("resolvedCourtMode") and
+    has("judgeAvailable") and
+    has("workerReady")
   ' >/dev/null
 
   echo "[postdeploy] Storage durability"

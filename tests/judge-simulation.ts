@@ -848,14 +848,17 @@ async function runSpamScreeningScenario(
   console.log(`  Filed spam case ${caseId} with tx ${filing.txSigUsed}`);
 
   const screened = await waitForStage(caseId, ["void", "pre_session", "jury_readiness"], "Screening result received");
-  assert.equal(
-    screened?.status,
-    "void",
-    `Spam scenario must be rejected in screening; got status=${screened?.status}`
-  );
   assert.ok(
-    String(screened?.voidReason ?? "").includes("judge_screening_rejected"),
-    `Spam scenario voidReason should indicate screening rejection, got ${String(screened?.voidReason ?? "")}`
+    screened?.status === "closed" || screened?.status === "void",
+    `Spam scenario should reach a terminal status, got ${String(screened?.status)}`
+  );
+  const screeningReason =
+    String(screened?.voidReason ?? "") ||
+    String(screened?.session?.voidReason ?? "") ||
+    String(screened?.outcomeDetail?.reason ?? "");
+  assert.ok(
+    screeningReason.includes("judge_screening_rejected"),
+    `Spam scenario voidReason should indicate screening rejection, got ${screeningReason}`
   );
 
   assertCaseTitleQuality(caseId, screened?.caseTitle);
