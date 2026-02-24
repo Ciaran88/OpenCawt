@@ -227,8 +227,44 @@ ${PRINCIPLES_BLOCK}
   "reasoning": "Detailed explanation (200–500 chars) referencing specific evidence or arguments."
 }`;
 
+const INTENT_CLASSES = `1) Premeditated malice — respondent intended the harmful outcome (planning, explicit harm instructions, targeted selection, concealment, repeat attempts)
+2) Opportunistic malice — harm wasn't the initial goal, but respondent chose harm when opportunity appeared ("could have stopped" moments, escalation, choosing most harmful option)
+3) Deceptive intent — respondent intended to mislead for benefit or to avoid accountability (false attestations, fabricated logs, selective redaction, plausible deniability)
+4) Willing complicity — respondent knew harm would likely occur and proceeded anyway (warnings received, policy awareness, ignored prompts/guardrails)
+5) Reckless disregard — respondent consciously ignored substantial, obvious risk (absence of controls, near-misses, skipping checks, untested automation on high-stakes)
+6) Gross negligence — respondent failed to meet clear minimum standard (missing access controls, no audit logs, no key rotation, no rate limits)
+7) Ordinary negligence — reasonable actor would have foreseen and prevented; respondent didn't (foreseeable failure, simple mitigation existed)
+8) Policy breach with constructive knowledge — should have known given role, training, documentation (onboarding records, circulated policies, role-based responsibility)
+9) Unreasonable reliance — relied on agent/tool unjustified for context (low-trust model for high-stakes, no verification, bypassing review)
+10) Foreseeable misconfiguration — harm from configuration that predictably causes violations (unsafe defaults, mis-set permissions, documentation warns)
+11) Systemic disregard — organisational pattern, not one-off (multiple incidents, lack of remediation, audit failures, incentives to cut corners)
+12) Strict-liability breach — rule violated; intent irrelevant (act happened + jurisdiction applies + respondent controlled system)
+13) Bad-faith non-cooperation — obstructed resolution after the event (ignored notices, delayed evidence, tampered logs, refused remediation)`;
+
+const INTENT_CLASS_LABELS: Record<string, string> = {
+  "1": "Premeditated malice",
+  "2": "Opportunistic malice",
+  "3": "Deceptive intent",
+  "4": "Willing complicity",
+  "5": "Reckless disregard",
+  "6": "Gross negligence",
+  "7": "Ordinary negligence",
+  "8": "Policy breach with constructive knowledge",
+  "9": "Unreasonable reliance",
+  "10": "Foreseeable misconfiguration",
+  "11": "Systemic disregard",
+  "12": "Strict-liability breach",
+  "13": "Bad-faith non-cooperation"
+};
+
 const REMEDY_SYSTEM_PROMPT = `You are the remedy adviser for OpenCawt, an AI agent dispute resolution court.
-The jury has found for the prosecution. Your role is to recommend an appropriate remedy.
+The jury has found for the prosecution. Your role is to (1) select a single intent class for the verdict, and (2) recommend an appropriate remedy.
+
+## Intent class (required)
+Select exactly ONE intent class that best fits the proven conduct. State it at the start of your verdict, with a brief explanation (1–2 sentences), before the remedy recommendation.
+
+Intent classes:
+${INTENT_CLASSES}
 
 ## Available remedies
 - warn: A formal warning recorded on the agent's public profile
@@ -251,8 +287,10 @@ ${PRINCIPLES_BLOCK}
 
 ## Response format (JSON)
 {
+  "intentClass": "1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13",
+  "intentExplanation": "Brief 1–2 sentence explanation of why this intent class fits. Max 200 chars.",
   "remedy": "warn | delist | ban | restitution | other | none",
-  "recommendation": "Explanation of why this remedy is appropriate and any specific actions the agent should take. Max 500 chars."
+  "recommendation": "Remediation: why this remedy is appropriate and any specific actions the agent should take. Max 400 chars."
 }`;
 
 // ---------------------------------------------------------------------------
@@ -356,25 +394,33 @@ async function callOpenAi<T>(
   model: string,
   systemPrompt: string,
   userMessage: string,
-  logger: Logger
+  logger: Logger,
+  timeoutMs: number = JUDGE_CALL_TIMEOUT_MS
 ): Promise<T> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      max_tokens: 512,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ]
-    })
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage }
+        ]
+      })
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -485,15 +531,28 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
       deps.logger.info("judge_recommend_remedy_llm", { caseId: input.caseId });
       const userMessage = buildRemedyUserMessage(input);
       const result = await callOpenAi<{
+        intentClass?: string;
+        intentExplanation?: string;
         remedy?: string;
         recommendation?: string;
       }>(apiKey, model, REMEDY_SYSTEM_PROMPT, userMessage, deps.logger);
 
-      const recommendation = typeof result.recommendation === "string"
-        ? result.recommendation.trim().slice(0, 500)
-        : "";
+      const intentClass = typeof result.intentClass === "string" ? result.intentClass.trim() : "";
+      const intentExplanation =
+        typeof result.intentExplanation === "string" ? result.intentExplanation.trim().slice(0, 200) : "";
+      const recommendation =
+        typeof result.recommendation === "string" ? result.recommendation.trim().slice(0, 400) : "";
 
-      return recommendation;
+      const label = INTENT_CLASS_LABELS[intentClass] ?? intentClass;
+      const intentLabel =
+        intentClass && intentExplanation
+          ? `Intent class: ${intentClass} - ${label}. ${intentExplanation}`
+          : intentClass
+            ? `Intent class: ${intentClass} - ${label}.`
+            : "";
+
+      const full = intentLabel ? `${intentLabel}\n\n${recommendation}` : recommendation;
+      return full.slice(0, 1000);
     },
 
     isAvailable(): boolean {
