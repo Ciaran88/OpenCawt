@@ -90,3 +90,189 @@ export function ensureMethod(req: IncomingMessage, expected: "GET" | "POST"): vo
 export function pathSegments(pathname: string): string[] {
   return pathname.split("/").filter(Boolean);
 }
+
+export interface ExternalFetchOptions {
+  url: string;
+  init?: RequestInit;
+  attempts: number;
+  timeoutMs: number;
+  baseDelayMs: number;
+  target: string;
+  requestId?: string;
+}
+
+export interface ExternalFailure {
+  code:
+    | "EXTERNAL_DNS_FAILURE"
+    | "EXTERNAL_TIMEOUT"
+    | "EXTERNAL_HTTP_4XX"
+    | "EXTERNAL_HTTP_5XX"
+    | "EXTERNAL_NETWORK_FAILURE";
+  statusCode: number;
+  message: string;
+  retryable: boolean;
+  details: Record<string, unknown>;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function classifyExternalNetworkError(
+  error: unknown,
+  options: { target: string; url: string; requestId?: string; attempt: number; attempts: number }
+): ExternalFailure {
+  const err = error as Error & { cause?: { code?: string } };
+  const causeCode = err.cause?.code ?? "";
+  const message = err.message ?? String(error);
+  const baseDetails = {
+    target: options.target,
+    url: options.url,
+    requestId: options.requestId,
+    attempt: options.attempt,
+    attempts: options.attempts
+  };
+
+  if (message.includes("AbortError")) {
+    return {
+      code: "EXTERNAL_TIMEOUT",
+      statusCode: 504,
+      message: `Timeout while contacting ${options.target}.`,
+      retryable: true,
+      details: baseDetails
+    };
+  }
+
+  if (causeCode === "ENOTFOUND" || causeCode === "EAI_AGAIN") {
+    return {
+      code: "EXTERNAL_DNS_FAILURE",
+      statusCode: 502,
+      message: `DNS resolution failed for ${options.target}.`,
+      retryable: true,
+      details: { ...baseDetails, causeCode }
+    };
+  }
+
+  if (causeCode === "ETIMEDOUT") {
+    return {
+      code: "EXTERNAL_TIMEOUT",
+      statusCode: 504,
+      message: `Timeout while contacting ${options.target}.`,
+      retryable: true,
+      details: { ...baseDetails, causeCode }
+    };
+  }
+
+  return {
+    code: "EXTERNAL_NETWORK_FAILURE",
+    statusCode: 502,
+    message: `Network error while contacting ${options.target}.`,
+    retryable: true,
+    details: { ...baseDetails, causeCode: causeCode || undefined }
+  };
+}
+
+function createHttpStatusFailure(
+  response: Response,
+  options: { target: string; url: string; requestId?: string; attempt: number; attempts: number }
+): ExternalFailure {
+  const is4xx = response.status >= 400 && response.status < 500;
+  const retryable = !is4xx || response.status === 429;
+  return {
+    code: is4xx ? "EXTERNAL_HTTP_4XX" : "EXTERNAL_HTTP_5XX",
+    statusCode: 502,
+    message: `External ${options.target} returned HTTP ${response.status}.`,
+    retryable,
+    details: {
+      target: options.target,
+      url: options.url,
+      requestId: options.requestId,
+      upstreamStatus: response.status,
+      attempt: options.attempt,
+      attempts: options.attempts
+    }
+  };
+}
+
+export async function fetchWithRetry(options: ExternalFetchOptions): Promise<Response> {
+  let lastFailure: ExternalFailure | null = null;
+
+  for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
+
+    try {
+      const response = await fetch(options.url, {
+        ...(options.init ?? {}),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const failure = createHttpStatusFailure(response, {
+          target: options.target,
+          url: options.url,
+          requestId: options.requestId,
+          attempt,
+          attempts: options.attempts
+        });
+        lastFailure = failure;
+        if (failure.retryable && attempt < options.attempts) {
+          const jitter = Math.floor(Math.random() * 120);
+          await wait(options.baseDelayMs * attempt + jitter);
+          continue;
+        }
+        throw new ApiError(failure.statusCode, failure.code, failure.message, failure.details);
+      }
+
+      return response;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      const failure = classifyExternalNetworkError(error, {
+        target: options.target,
+        url: options.url,
+        requestId: options.requestId,
+        attempt,
+        attempts: options.attempts
+      });
+      lastFailure = failure;
+      if (failure.retryable && attempt < options.attempts) {
+        const jitter = Math.floor(Math.random() * 120);
+        await wait(options.baseDelayMs * attempt + jitter);
+        continue;
+      }
+      throw new ApiError(failure.statusCode, failure.code, failure.message, failure.details);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  if (lastFailure) {
+    throw new ApiError(
+      lastFailure.statusCode,
+      lastFailure.code,
+      lastFailure.message,
+      lastFailure.details
+    );
+  }
+
+  throw new ApiError(502, "EXTERNAL_NETWORK_FAILURE", "External request failed.");
+}
+
+export async function fetchJsonWithRetry<T>(
+  options: ExternalFetchOptions & { parse?: (raw: unknown) => T }
+): Promise<T> {
+  const response = await fetchWithRetry(options);
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch {
+    throw new ApiError(502, "EXTERNAL_INVALID_JSON", `Invalid JSON from ${options.target}.`, {
+      target: options.target,
+      url: options.url,
+      requestId: options.requestId
+    });
+  }
+  return options.parse ? options.parse(json) : (json as T);
+}

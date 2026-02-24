@@ -6,6 +6,7 @@ import type {
 } from "../../shared/contracts";
 import type { AppConfig } from "../config";
 import type { Logger } from "./observability";
+import { fetchWithRetry } from "./http";
 import { truncateCaseTitle } from "./validation";
 
 // ---------------------------------------------------------------------------
@@ -395,16 +396,21 @@ async function callOpenAi<T>(
   systemPrompt: string,
   userMessage: string,
   logger: Logger,
+  retryConfig: {
+    attempts: number;
+    timeoutMs: number;
+    baseDelayMs: number;
+  },
   timeoutMs: number = JUDGE_CALL_TIMEOUT_MS
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  let response: Response;
-  try {
-    response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetchWithRetry({
+    url: "https://api.openai.com/v1/chat/completions",
+    attempts: Math.max(1, retryConfig.attempts),
+    timeoutMs: Math.min(timeoutMs, retryConfig.timeoutMs),
+    baseDelayMs: retryConfig.baseDelayMs,
+    target: "openai_judge",
+    init: {
       method: "POST",
-      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`
@@ -417,10 +423,8 @@ async function callOpenAi<T>(
           { role: "user", content: userMessage }
         ]
       })
-    });
-  } finally {
-    clearTimeout(timeoutId);
-  }
+    }
+  });
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -477,7 +481,14 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
         approved: boolean;
         reason?: string;
         caseTitle?: string;
-      }>(apiKey, model, SCREENING_SYSTEM_PROMPT, userMessage, deps.logger);
+      }>(
+        apiKey,
+        model,
+        SCREENING_SYSTEM_PROMPT,
+        userMessage,
+        deps.logger,
+        deps.config.retry.external
+      );
 
       const approved = result.approved !== false; // bias toward approval
       const caseTitle = truncateCaseTitle(
@@ -511,7 +522,14 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
       const result = await callOpenAi<{
         finding: string;
         reasoning?: string;
-      }>(apiKey, model, TIEBREAK_SYSTEM_PROMPT, userMessage, deps.logger);
+      }>(
+        apiKey,
+        model,
+        TIEBREAK_SYSTEM_PROMPT,
+        userMessage,
+        deps.logger,
+        deps.config.retry.external
+      );
 
       const finding: "proven" | "not_proven" =
         result.finding === "proven" ? "proven" : "not_proven";
@@ -535,7 +553,14 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
         intentExplanation?: string;
         remedy?: string;
         recommendation?: string;
-      }>(apiKey, model, REMEDY_SYSTEM_PROMPT, userMessage, deps.logger);
+      }>(
+        apiKey,
+        model,
+        REMEDY_SYSTEM_PROMPT,
+        userMessage,
+        deps.logger,
+        deps.config.retry.external
+      );
 
       const intentClass = typeof result.intentClass === "string" ? result.intentClass.trim() : "";
       const intentExplanation =

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage } from "node:http";
+import { randomUUID } from "node:crypto";
 import { Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 import { createId } from "../../shared/ids";
@@ -10,6 +11,12 @@ import { mintOcpAgreement } from "./ocpAgreementMint";
 import { getMintWorkerConfig } from "./workerConfig";
 
 const config = getMintWorkerConfig();
+
+function log(level: "info" | "warn" | "error", message: string, fields?: Record<string, unknown>): void {
+  process.stdout.write(
+    `${JSON.stringify({ level, message, timestamp: new Date().toISOString(), ...(fields ?? {}) })}\n`
+  );
+}
 
 function deriveMintAuthorityPubkey(): string | undefined {
   if (!config.mintAuthorityKeyB58) return undefined;
@@ -59,6 +66,8 @@ function isOcpRequest(body: WorkerMintRequest): body is import("../../shared/con
 
 const server = createServer((req, res) => {
   void (async () => {
+    const requestId = randomUUID();
+    res.setHeader("X-Request-Id", requestId);
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (req.method === "OPTIONS") {
       res.statusCode = 204;
@@ -92,6 +101,11 @@ const server = createServer((req, res) => {
     }
 
     if (String(req.headers["x-worker-token"] || "") !== config.token) {
+      log("warn", "worker_auth_failed", {
+        requestId,
+        method: req.method,
+        url: req.url
+      });
       res.statusCode = 401;
       res.end(JSON.stringify({ error: "invalid_worker_token" }));
       return;
@@ -126,6 +140,12 @@ const server = createServer((req, res) => {
       }
     } catch (error) {
       const mintError = asWorkerMintError(error);
+      log("error", "worker_mint_failed", {
+        requestId,
+        code: mintError?.code ?? "MINT_FAILED",
+        message: mintError?.message ?? (error instanceof Error ? error.message : String(error)),
+        mode: config.mode
+      });
       // Determine a stable jobId + caseId for the error response regardless of request type
       const jobId  = "jobId"  in body ? body.jobId  : "unknown";
       const caseId = isOcpRequest(body) ? body.agreementCode
@@ -144,6 +164,12 @@ const server = createServer((req, res) => {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify(response));
   })().catch((error) => {
+    const requestId = randomUUID();
+    log("error", "worker_request_failed", {
+      requestId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    res.setHeader("X-Request-Id", requestId);
     res.statusCode = 500;
     res.end(JSON.stringify({ error: String(error) }));
   });

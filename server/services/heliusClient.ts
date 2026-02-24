@@ -1,5 +1,6 @@
 import type { AppConfig } from "../config";
-import { ApiError, badRequest } from "./errors";
+import { badRequest } from "./errors";
+import { fetchJsonWithRetry } from "./http";
 
 interface RpcEnvelope<T> {
   jsonrpc: "2.0";
@@ -30,56 +31,6 @@ function withApiKey(url: string, apiKey?: string): string {
   return `${url}${joiner}api-key=${encodeURIComponent(apiKey)}`;
 }
 
-async function wait(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchWithRetry<T>(
-  url: string,
-  init: RequestInit,
-  input: {
-    attempts: number;
-    timeoutMs: number;
-    baseDelayMs: number;
-    parse: (raw: unknown) => T;
-  }
-): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= input.attempts; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        ...init,
-        signal: controller.signal,
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          ...(init.headers ?? {})
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const json = (await response.json()) as unknown;
-      return input.parse(json);
-    } catch (error) {
-      lastError = error;
-      if (attempt < input.attempts) {
-        const jitter = Math.floor(Math.random() * 90);
-        await wait(input.baseDelayMs * attempt + jitter);
-      }
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  throw new ApiError(502, "EXTERNAL_CALL_FAILED", `Helius request failed: ${String(lastError)}`);
-}
-
 class RpcHeliusClient implements HeliusClient {
   private readonly rpcUrl: string;
   private readonly dasUrl: string;
@@ -97,13 +48,20 @@ class RpcHeliusClient implements HeliusClient {
       params
     };
 
-    const envelope = await fetchWithRetry<RpcEnvelope<T>>(this.rpcUrl, {
-      method: "POST",
-      body: JSON.stringify(body)
-    }, {
+    const envelope = await fetchJsonWithRetry<RpcEnvelope<T>>({
+      url: this.rpcUrl,
+      init: {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        }
+      },
       attempts: this.config.retry.external.attempts,
       timeoutMs: this.config.retry.external.timeoutMs,
       baseDelayMs: this.config.retry.external.baseDelayMs,
+      target: "helius_rpc",
       parse: (raw) => raw as RpcEnvelope<T>
     });
 
@@ -148,19 +106,22 @@ class RpcHeliusClient implements HeliusClient {
       params
     };
 
-    const envelope = await fetchWithRetry<RpcEnvelope<Record<string, unknown>>>(
-      this.dasUrl,
-      {
+    const envelope = await fetchJsonWithRetry<RpcEnvelope<Record<string, unknown>>>({
+      url: this.dasUrl,
+      init: {
         method: "POST",
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        }
       },
-      {
-        attempts: this.config.retry.das.attempts,
-        timeoutMs: this.config.retry.das.timeoutMs,
-        baseDelayMs: this.config.retry.das.baseDelayMs,
-        parse: (raw) => raw as RpcEnvelope<Record<string, unknown>>
-      }
-    );
+      attempts: this.config.retry.das.attempts,
+      timeoutMs: this.config.retry.das.timeoutMs,
+      baseDelayMs: this.config.retry.das.baseDelayMs,
+      target: `helius_das:${method}`,
+      parse: (raw) => raw as RpcEnvelope<Record<string, unknown>>
+    });
 
     if (envelope.error) {
       throw badRequest("HELIUS_DAS_ERROR", envelope.error.message, {

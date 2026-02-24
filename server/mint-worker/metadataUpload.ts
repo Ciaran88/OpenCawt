@@ -122,27 +122,70 @@ async function pinataRequest<T>(
         if (response.status === 403 && text.includes("FORBIDDEN")) {
           throw new WorkerMintError({
             code: "PINATA_QUOTA_EXCEEDED",
-            message: `PINATA_HTTP_403:${text.slice(0, 220)}`,
+            message: `pinata quota exceeded at ${endpoint}: ${text.slice(0, 220)}`,
             retryable: false
           });
         }
-        throw new Error(`PINATA_HTTP_${response.status}:${text.slice(0, 220)}`);
+        throw new WorkerMintError({
+          code: response.status >= 500 ? "PINATA_HTTP_5XX" : "PINATA_HTTP_4XX",
+          message: `pinata http ${response.status} at ${endpoint}: ${text.slice(0, 220)}`,
+          retryable: response.status >= 500 || response.status === 429
+        });
       }
 
       return (await response.json()) as T;
     } catch (error) {
       lastError = error;
-      if (attempt < config.externalAttempts) {
+      const workerError =
+        error instanceof WorkerMintError
+          ? error
+          : toPinataWorkerError(error, endpoint);
+      lastError = workerError;
+      if (workerError.retryable && attempt < config.externalAttempts) {
         const backoff = config.externalBaseDelayMs * attempt;
         const jitter = Math.floor(Math.random() * 140);
         await wait(backoff + jitter);
+      } else if (!(error instanceof WorkerMintError)) {
+        throw workerError;
       }
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  throw new Error(`Pinata upload failed after retries: ${String(lastError)}`);
+  if (lastError instanceof WorkerMintError) {
+    throw lastError;
+  }
+  throw new WorkerMintError({
+    code: "PINATA_REQUEST_FAILED",
+    message: `Pinata upload failed after retries at ${endpoint}: ${String(lastError)}`,
+    retryable: false
+  });
+}
+
+function toPinataWorkerError(error: unknown, endpoint: string): WorkerMintError {
+  const err = error as Error & { cause?: { code?: string } };
+  const message = err.message ?? String(error);
+  const causeCode = err.cause?.code ?? "";
+  if (message.includes("AbortError")) {
+    return new WorkerMintError({
+      code: "PINATA_TIMEOUT",
+      message: `pinata timeout at ${endpoint}`,
+      retryable: true
+    });
+  }
+  if (causeCode === "ENOTFOUND" || causeCode === "EAI_AGAIN") {
+    return new WorkerMintError({
+      code: "PINATA_DNS_FAILURE",
+      message: `pinata dns failure at ${endpoint}`,
+      retryable: true
+    });
+  }
+  return new WorkerMintError({
+    code: "PINATA_NETWORK_FAILURE",
+    message: `pinata network failure at ${endpoint}: ${message}`,
+    retryable: true
+  });
 }
 
 export async function ensureSealImageUri(config: MintWorkerConfig): Promise<string> {

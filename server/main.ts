@@ -129,6 +129,7 @@ import {
   validateStakeLevel
 } from "./services/validation";
 import {
+  fetchJsonWithRetry,
   pathSegments,
   readJsonBody,
   sendApiError,
@@ -848,6 +849,77 @@ const sessionEngine = createSessionEngine({
   }
 });
 
+function withApiKey(url: string, apiKey?: string): string {
+  if (!apiKey) {
+    return url;
+  }
+  if (url.includes("api-key=")) {
+    return url;
+  }
+  const joiner = url.includes("?") ? "&" : "?";
+  return `${url}${joiner}api-key=${encodeURIComponent(apiKey)}`;
+}
+
+async function runStartupDependencyProbe(): Promise<void> {
+  const probeRequestId = createRequestId();
+  logger.info("startup_dependency_probe_start", { requestId: probeRequestId });
+
+  if (config.defaultCourtMode === "judge" && !judge.isAvailable()) {
+    throw new Error("startup probe failed: Judge Mode is default but judge integration is unavailable.");
+  }
+
+  if (config.solanaMode === "rpc") {
+    const heliusUrl = withApiKey(config.heliusRpcUrl || config.solanaRpcUrl, config.heliusApiKey);
+    const envelope = await fetchJsonWithRetry<{
+      result?: string;
+      error?: { message?: string };
+    }>({
+      url: heliusUrl,
+      target: "helius_rpc_health",
+      requestId: probeRequestId,
+      attempts: config.retry.external.attempts,
+      timeoutMs: config.retry.external.timeoutMs,
+      baseDelayMs: config.retry.external.baseDelayMs,
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: Date.now(),
+          method: "getHealth",
+          params: []
+        })
+      }
+    });
+    if (envelope.error) {
+      throw new Error(`startup probe failed: Helius RPC error: ${envelope.error.message ?? "unknown"}`);
+    }
+  }
+
+  if (config.sealWorkerMode === "http") {
+    await fetchJsonWithRetry<{ ok?: boolean }>({
+      url: `${config.sealWorkerUrl.replace(/\/$/, "")}/health`,
+      target: "seal_worker_health",
+      requestId: probeRequestId,
+      attempts: config.retry.external.attempts,
+      timeoutMs: config.retry.external.timeoutMs,
+      baseDelayMs: config.retry.external.baseDelayMs,
+      init: {
+        method: "GET",
+        headers: {
+          "X-Worker-Token": config.workerToken
+        }
+      },
+      parse: (raw) => raw as { ok?: boolean }
+    });
+  }
+
+  logger.info("startup_dependency_probe_ok", { requestId: probeRequestId });
+}
+
 async function handleSignedMutationWithIdempotency<TPayload, TResult>(input: {
   req: IncomingMessage;
   pathname: string;
@@ -1105,6 +1177,20 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
 
       if (namedDefendantCase) {
         await maybeDispatchNamedDefenceInvite(caseId, { force: true });
+      }
+
+      if (caseRecord.agreementCode?.trim()) {
+        try {
+          const ocpModule = await import(/* @vite-ignore */ "../OCP/server/main");
+          await ocpModule.dispatchAgreementDisputeFiled(caseRecord.agreementCode.trim(), caseId);
+        } catch (err) {
+          logger.warn("ocp_dispute_filed_dispatch_failed", {
+            requestId: createRequestId(),
+            caseId,
+            agreementCode: caseRecord.agreementCode,
+            error: err instanceof Error ? err.message : String(err)
+          });
+        }
       }
 
       return {
@@ -3260,6 +3346,14 @@ server.listen(config.apiPort, config.apiHost, () => {
     `OpenCawt API listening on http://${config.apiHost}:${config.apiPort} (db ${config.dbPath})\n`
   );
   sessionEngine.start();
+  if (config.dependencyProbeOnBoot) {
+    void runStartupDependencyProbe().catch((error) => {
+      logger.error("startup_dependency_probe_failed", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+      process.exit(1);
+    });
+  }
 
 });
 

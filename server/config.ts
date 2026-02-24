@@ -76,6 +76,7 @@ export interface AppConfig {
   judgeOpenAiApiKey: string;
   judgeOpenAiModel: string;
   defaultCourtMode: CourtMode;
+  dependencyProbeOnBoot: boolean;
 }
 
 export function isDurableDbPath(pathValue: string): boolean {
@@ -400,7 +401,8 @@ export function getConfig(): AppConfig {
     adminSessionTtlSec: numberEnv("ADMIN_SESSION_TTL_SEC", 900),
     judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", stringEnv("OPENAI_API_KEY", "")),
     judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini"),
-    defaultCourtMode
+    defaultCourtMode,
+    dependencyProbeOnBoot: booleanEnv("DEPENDENCY_PROBE_ON_BOOT", false)
   };
   validateConfig(config);
   return config;

@@ -1,6 +1,6 @@
 import type { AppConfig } from "../config";
 import { createHeliusClient } from "./heliusClient";
-import { badRequest } from "./errors";
+import { ApiError, badRequest } from "./errors";
 
 export interface SolanaVerificationResult {
   txSig: string;
@@ -86,7 +86,38 @@ class RpcSolanaProvider implements SolanaProvider {
     txSig: string,
     expectedPayerWallet?: string
   ): Promise<SolanaVerificationResult> {
-    const result = await this.helius.getTransaction(txSig);
+    let result: Record<string, unknown> | null;
+    try {
+      result = await this.helius.getTransaction(txSig);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (error.code === "EXTERNAL_DNS_FAILURE") {
+          throw badRequest(
+            "HELIUS_RPC_DNS_FAILURE",
+            "Unable to resolve Helius RPC host during treasury verification.",
+            error.details
+          );
+        }
+        if (error.code === "EXTERNAL_TIMEOUT") {
+          throw badRequest(
+            "HELIUS_RPC_TIMEOUT",
+            "Timed out while contacting Helius RPC during treasury verification.",
+            error.details
+          );
+        }
+        if (error.code.startsWith("EXTERNAL_")) {
+          throw badRequest(
+            "HELIUS_RPC_ERROR",
+            "Helius RPC verification call failed.",
+            {
+              upstreamCode: error.code,
+              ...(error.details ?? {})
+            }
+          );
+        }
+      }
+      throw error;
+    }
     if (!result) {
       throw badRequest(
         "SOLANA_TX_NOT_FOUND",

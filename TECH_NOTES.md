@@ -178,6 +178,22 @@ Provider interfaces still isolate external dependencies:
 - drand client (`stub` and `http`)
 - sealing worker client (`stub` and `http`)
 
+External HTTP resilience now uses a shared retry/timeout wrapper with deterministic failure classes:
+
+- `EXTERNAL_DNS_FAILURE`
+- `EXTERNAL_TIMEOUT`
+- `EXTERNAL_HTTP_4XX`
+- `EXTERNAL_HTTP_5XX`
+- `EXTERNAL_NETWORK_FAILURE`
+
+This taxonomy is propagated through judge and Helius paths for actionable operational diagnostics.
+
+Optional startup dependency probe mode:
+
+- set `DEPENDENCY_PROBE_ON_BOOT=true` to run fail-fast checks at boot
+- probe validates judge availability (when default mode is judge), Helius RPC reachability and seal worker health
+- production can use this to avoid serving in a degraded dependency state
+
 Mint worker supports:
 
 - `stub` for local and CI
