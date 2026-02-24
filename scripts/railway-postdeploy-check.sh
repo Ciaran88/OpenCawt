@@ -4,6 +4,7 @@ set -euo pipefail
 API_URL="${API_URL:-}"
 WORKER_URL="${WORKER_URL:-}"
 SYSTEM_API_KEY="${SYSTEM_API_KEY:-}"
+WORKER_TOKEN="${WORKER_TOKEN:-}"
 CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-12}"
 
 if [[ -z "$API_URL" ]]; then
@@ -29,6 +30,9 @@ curl_json() {
 echo "[postdeploy] API health"
 curl_json "$API_URL/api/health" | jq -e '.ok == true' >/dev/null
 
+echo "[postdeploy] API readiness"
+curl_json "$API_URL/api/ready" | jq -e '.ok == true' >/dev/null
+
 echo "[postdeploy] Schedule canary"
 curl_json "$API_URL/api/schedule" | jq -e 'has("scheduled") and has("active")' >/dev/null
 
@@ -36,8 +40,12 @@ echo "[postdeploy] Decisions canary"
 curl_json "$API_URL/api/decisions" | jq -e 'type == "array"' >/dev/null
 
 if [[ -n "$WORKER_URL" ]]; then
-  echo "[postdeploy] Worker health"
-  curl_json "$WORKER_URL/health" | jq -e '.ok == true' >/dev/null
+  echo "[postdeploy] Worker liveness"
+  curl_json "$WORKER_URL/api/health" | jq -e '.ok == true' >/dev/null
+  if [[ -n "$WORKER_TOKEN" ]]; then
+    echo "[postdeploy] Worker readiness"
+    curl_json "$WORKER_URL/health" "X-Worker-Token: $WORKER_TOKEN" | jq -e '.ok == true' >/dev/null
+  fi
 fi
 
 if [[ -n "$SYSTEM_API_KEY" ]]; then
