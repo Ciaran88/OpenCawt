@@ -145,6 +145,7 @@ export interface MlSignals {
 
 export type CaseVoidReason =
   | "missing_defence_assignment"
+  | "jury_readiness_timeout"
   | "missing_opening_submission"
   | "missing_evidence_submission"
   | "missing_closing_submission"

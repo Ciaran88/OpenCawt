@@ -54,6 +54,8 @@ export interface SessionEngine {
 const TICK_MS = 5000;
 export const JUDGE_SCREENING_RETRY_DELAY_MS = 30_000;
 export const JUDGE_SCREENING_MAX_RETRIES = 5;
+const JURY_READINESS_MAX_WINDOWS = 3;
+const JURY_READINESS_MAX_REPLACEMENTS_PER_SEAT = 3;
 
 type JudgeScreeningRetryState = {
   attempts: number;
@@ -540,16 +542,23 @@ async function processCase(
       }
       markSessionStarted(deps.db, caseRecord.caseId, nowIso);
       const deadlineIso = addSeconds(nowIso, deps.config.rules.jurorReadinessSeconds);
-      setStage(deps, caseRecord, "jury_readiness", nowIso, null);
+      const readinessHardDeadlineIso = addSeconds(
+        nowIso,
+        deps.config.rules.jurorReadinessSeconds * JURY_READINESS_MAX_WINDOWS
+      );
+      setStage(deps, caseRecord, "jury_readiness", nowIso, readinessHardDeadlineIso);
       setJuryReadinessDeadlines(deps.db, caseRecord.caseId, deadlineIso);
       appendTranscriptEvent(deps.db, {
         caseId: caseRecord.caseId,
         actorRole: "court",
         eventType: "notice",
         stage: "jury_readiness",
-        messageText: "Jury readiness check opened. Each selected juror must confirm within one minute.",
+        messageText:
+          "Jury readiness check opened. Selected jurors must confirm promptly. If readiness does not converge within bounded retries, the case becomes void.",
         payload: {
-          readinessWindowSec: deps.config.rules.jurorReadinessSeconds
+          readinessWindowSec: deps.config.rules.jurorReadinessSeconds,
+          readinessMaxWindows: JURY_READINESS_MAX_WINDOWS,
+          readinessHardDeadlineIso
         }
       });
     }
@@ -570,9 +579,25 @@ async function processCase(
     const refreshed = listJuryPanelMembers(deps.db, caseRecord.caseId);
     const readyCount = refreshed.filter((member) => member.memberStatus === "ready").length;
     const requiredJurors = caseRecord.courtMode === "judge" ? 12 : deps.config.rules.jurorPanelSize;
+    const readinessReplacements = refreshed.filter((member) => Boolean(member.replacementOfJurorId)).length;
+    const maxReadinessReplacements = requiredJurors * JURY_READINESS_MAX_REPLACEMENTS_PER_SEAT;
     if (readyCount >= requiredJurors) {
       const deadlineIso = addSeconds(nowIso, deps.config.rules.stageSubmissionSeconds);
       setStage(deps, caseRecord, "opening_addresses", nowIso, deadlineIso);
+      return;
+    }
+
+    if (
+      readinessReplacements >= maxReadinessReplacements ||
+      (runtime.stageDeadlineAtIso && now >= new Date(runtime.stageDeadlineAtIso).getTime())
+    ) {
+      voidCase(
+        deps,
+        caseRecord,
+        "jury_readiness_timeout",
+        nowIso,
+        "Case became void because jury readiness did not converge within bounded replacement retries."
+      );
     }
     return;
   }

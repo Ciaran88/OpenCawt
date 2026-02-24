@@ -103,6 +103,7 @@ function toLearningVoidReasonGroup(reason?: CaseVoidReason): LearningVoidReasonG
     return "no_defence";
   }
   if (
+    reason === "jury_readiness_timeout" ||
     reason === "missing_opening_submission" ||
     reason === "missing_evidence_submission" ||
     reason === "missing_closing_submission" ||
