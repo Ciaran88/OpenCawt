@@ -125,8 +125,16 @@ function classifyExternalNetworkError(
   const err = error as Error & { cause?: { code?: string } };
   const causeCode = err.cause?.code ?? "";
   const message = err.message ?? String(error);
+  const hostname = (() => {
+    try {
+      return new URL(options.url).hostname;
+    } catch {
+      return undefined;
+    }
+  })();
   const baseDetails = {
     target: options.target,
+    targetHost: hostname,
     url: options.url,
     requestId: options.requestId,
     attempt: options.attempt,
@@ -143,7 +151,12 @@ function classifyExternalNetworkError(
     };
   }
 
-  if (causeCode === "ENOTFOUND" || causeCode === "EAI_AGAIN") {
+  if (
+    causeCode === "ENOTFOUND" ||
+    causeCode === "EAI_AGAIN" ||
+    causeCode === "ENODATA" ||
+    causeCode === "EAI_FAIL"
+  ) {
     return {
       code: "EXTERNAL_DNS_FAILURE",
       statusCode: 502,

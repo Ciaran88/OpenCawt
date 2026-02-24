@@ -15,6 +15,7 @@ import {
 } from "../db/repository";
 import type { Db } from "../db/sqlite";
 import { badRequest } from "./errors";
+import { fetchJsonWithRetry } from "./http";
 
 function createStubSealResponse(request: WorkerSealRequest): WorkerSealResponse {
   const suffix = request.caseId.replace(/[^a-zA-Z0-9]/g, "").slice(-8);
@@ -31,49 +32,29 @@ function createStubSealResponse(request: WorkerSealRequest): WorkerSealResponse 
   };
 }
 
-async function wait(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function postWorkerMint(
   config: AppConfig,
   request: WorkerSealRequest,
   mode: "enqueue" | "retry"
 ): Promise<WorkerSealResponse> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= config.retry.external.attempts; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), config.retry.external.timeoutMs);
-    try {
-      const response = await fetch(`${config.sealWorkerUrl.replace(/\/$/, "")}/mint`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Worker-Token": config.workerToken,
-          "X-OpenCawt-Seal-Mode": mode
-        },
-        body: JSON.stringify(request),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        throw new Error(`SEAL_WORKER_HTTP_${response.status}`);
-      }
-
-      return (await response.json()) as WorkerSealResponse;
-    } catch (error) {
-      lastError = error;
-      if (attempt < config.retry.external.attempts) {
-        const backoff = config.retry.external.baseDelayMs * attempt;
-        const jitter = Math.floor(Math.random() * 160);
-        await wait(backoff + jitter);
-      }
-    } finally {
-      clearTimeout(timeout);
+  const requestId = createId("req");
+  return fetchJsonWithRetry<WorkerSealResponse>({
+    url: `${config.sealWorkerUrl.replace(/\/$/, "")}/mint`,
+    target: "seal_worker_mint",
+    requestId,
+    attempts: config.retry.external.attempts,
+    timeoutMs: config.retry.external.timeoutMs,
+    baseDelayMs: config.retry.external.baseDelayMs,
+    init: {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Worker-Token": config.workerToken,
+        "X-OpenCawt-Seal-Mode": mode
+      },
+      body: JSON.stringify(request)
     }
-  }
-
-  throw new Error(`SEAL_WORKER_ERROR:${String(lastError)}`);
+  });
 }
 
 function buildDecisionUrl(config: AppConfig, caseId: string): string {

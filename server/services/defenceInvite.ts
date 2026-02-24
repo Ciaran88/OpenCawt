@@ -3,6 +3,7 @@ import { canonicalJson } from "../../shared/canonicalJson";
 import { createId } from "../../shared/ids";
 import type { AppConfig } from "../config";
 import { ApiError } from "./errors";
+import { fetchWithRetry } from "./http";
 import { validateNotifyUrl } from "./validation";
 
 interface DispatchDefenceInviteInput {
@@ -21,8 +22,6 @@ export interface DispatchDefenceInviteResult {
   statusCode?: number;
   error?: string;
 }
-
-const REQUEST_TIMEOUT_MS = 8000;
 
 export async function dispatchDefenceInvite(
   config: AppConfig,
@@ -59,28 +58,25 @@ export async function dispatchDefenceInvite(
     .update(payloadBody, "utf8")
     .digest("hex");
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const requestId = createId("req");
   try {
-    const response = await fetch(notifyUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-OpenCawt-Event-Id": eventId,
-        "X-OpenCawt-Signature": signature
-      },
-      body: payloadBody,
-      signal: controller.signal
+    const response = await fetchWithRetry({
+      url: notifyUrl,
+      target: "defence_invite_webhook",
+      requestId,
+      attempts: config.retry.external.attempts,
+      timeoutMs: config.retry.external.timeoutMs,
+      baseDelayMs: config.retry.external.baseDelayMs,
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-OpenCawt-Event-Id": eventId,
+          "X-OpenCawt-Signature": signature
+        },
+        body: payloadBody
+      }
     });
-    if (!response.ok) {
-      return {
-        delivered: false,
-        eventId,
-        sentAtIso,
-        statusCode: response.status,
-        error: `HTTP_${response.status}`
-      };
-    }
 
     return {
       delivered: true,
@@ -89,13 +85,20 @@ export async function dispatchDefenceInvite(
       statusCode: response.status
     };
   } catch (error) {
+    if (error instanceof ApiError) {
+      return {
+        delivered: false,
+        eventId,
+        sentAtIso,
+        statusCode: error.statusCode,
+        error: `${error.code}:${requestId}`
+      };
+    }
     return {
       delivered: false,
       eventId,
       sentAtIso,
       error: error instanceof Error ? error.message : "DISPATCH_FAILED"
     };
-  } finally {
-    clearTimeout(timer);
   }
 }

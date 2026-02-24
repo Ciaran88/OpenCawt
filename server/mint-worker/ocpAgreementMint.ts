@@ -13,7 +13,7 @@
 
 import type { OcpMintRequest, WorkerSealRequest, WorkerSealResponse } from "../../shared/contracts";
 import type { MintWorkerConfig } from "./workerConfig";
-import { ensureSealImageUri } from "./metadataUpload";
+import { ensureSealImageUri, pinJsonToIpfs } from "./metadataUpload";
 import { WorkerMintError } from "./errors";
 import { mintWithMetaplexNft } from "./metaplexNftMint";
 
@@ -102,50 +102,7 @@ async function uploadOcpMetadata(
     sealedAtIso
   );
 
-  interface PinataJsonResponse { IpfsHash: string }
-
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= config.externalAttempts; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), config.externalTimeoutMs);
-    try {
-      const response = await fetch(
-        `${config.pinataApiBase.replace(/\/$/, "")}/pinning/pinJSONToIPFS`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${config.pinataJwt}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(metadata),
-          signal: controller.signal,
-        }
-      );
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`PINATA_HTTP_${response.status}:${text.slice(0, 220)}`);
-      }
-
-      const result = (await response.json()) as PinataJsonResponse;
-      const cid = result.IpfsHash;
-      if (config.pinataGatewayBase) {
-        return `${config.pinataGatewayBase.replace(/\/$/, "")}/ipfs/${cid}`;
-      }
-      return `ipfs://${cid}`;
-    } catch (err) {
-      lastError = err;
-      if (attempt < config.externalAttempts) {
-        const backoff = config.externalBaseDelayMs * attempt;
-        const jitter = Math.floor(Math.random() * 140);
-        await new Promise((r) => setTimeout(r, backoff + jitter));
-      }
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  throw new Error(`OCP metadata upload failed after retries: ${String(lastError)}`);
+  return pinJsonToIpfs(config, metadata);
 }
 
 // ── Adapter shim: OcpMintRequest → WorkerSealRequest ─────────────────────────

@@ -21,6 +21,20 @@ function pinataGateway(config: MintWorkerConfig, cid: string): string {
   return `ipfs://${cid}`;
 }
 
+export async function pinJsonToIpfs(
+  config: MintWorkerConfig,
+  payload: Record<string, unknown>
+): Promise<string> {
+  const result = await pinataRequest<PinataJsonResponse>(config, "/pinning/pinJSONToIPFS", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  return pinataGateway(config, result.IpfsHash);
+}
+
 function buildAttributes(request: WorkerSealRequest, sealedAtIso: string): Array<{ trait_type: string; value: string }> {
   return [
     { trait_type: "case_id", value: request.caseId },
@@ -225,13 +239,5 @@ export async function uploadReceiptMetadata(
     sealedAtIso
   );
 
-  const result = await pinataRequest<PinataJsonResponse>(config, "/pinning/pinJSONToIPFS", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(metadata)
-  });
-
-  return pinataGateway(config, result.IpfsHash);
+  return pinJsonToIpfs(config, metadata);
 }

@@ -395,13 +395,15 @@ async function assertDnsSafeHost(
   } catch {
     throw badRequest(
       "NOTIFY_URL_DNS_RESOLUTION_FAILED",
-      `${field} hostname could not be resolved.`
+      `${field} hostname could not be resolved.`,
+      { hostname }
     );
   }
   if (!resolved.length) {
     throw badRequest(
       "NOTIFY_URL_DNS_RESOLUTION_FAILED",
-      `${field} hostname could not be resolved.`
+      `${field} hostname could not be resolved.`,
+      { hostname }
     );
   }
 
@@ -409,7 +411,8 @@ async function assertDnsSafeHost(
     if (isBlockedResolvedIp(entry.address)) {
       throw badRequest(
         "NOTIFY_URL_HOST_BLOCKED_RESOLVED",
-        `${field} resolves to localhost or a private network host.`
+        `${field} resolves to localhost or a private network host.`,
+        { hostname, resolvedIp: entry.address, family: entry.family }
       );
     }
   }
