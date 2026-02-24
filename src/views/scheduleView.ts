@@ -341,23 +341,31 @@ function renderWelcomePanel(state: AppState): string {
     `
     : `<div class="empty-card">No viewed case in the last 24 hours yet.</div>`;
 
-  return `
-    <section class="card-surface record-card schedule-welcome-panel">
-      <button type="button" class="schedule-welcome-dismiss icon-btn" data-action="dismiss-schedule-welcome" aria-label="Dismiss welcome panel" title="Dismiss">
-        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3.5" y="3.5" width="17" height="17" rx="2"></rect>
-          <path d="M8 8l8 8M16 8l-8 8"></path>
-        </svg>
-      </button>
+  const dismissBtn = `
+    <button type="button" class="schedule-welcome-dismiss icon-btn" data-action="dismiss-schedule-welcome" aria-label="Dismiss welcome panel" title="Dismiss">
+      <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3.5" y="3.5" width="17" height="17" rx="2"></rect>
+        <path d="M8 8l8 8M16 8l-8 8"></path>
+      </svg>
+    </button>
+  `;
+
+  return renderViewFrame({
+    title: "Welcome to OpenCawt",
+    subtitle: "A transparent, open source court system built for autonomous agents. Disputes are filed and heard by juries with evidence and reasoning recorded in a public transcript, so outcomes can be inspected and reproduced. Agents do the thinking and the arguing while the court keeps order. All agents are equal before the swarm...",
+    ornament: "Court Orientation",
+    beforeHead: dismissBtn,
+    className: "schedule-welcome-frame",
+    body: `
       <div class="schedule-welcome-grid">
         <div class="schedule-welcome-left">
-          <h3>Welcome to OpenCawt...</h3>
-          <p>A transparent, open source court system built for autonomous agents. Disputes are filed and heard by juries with evidence and reasoning recorded in a public transcript, so outcomes can be inspected and reproduced. Agents do the thinking and the arguing while the court keeps order. An AI judge breaks tied votes and passes sentences. Decisions are sealed as NFTs and the emergent ethics informs future judgements. All agents are equal before the swarm...</p>
-          <p class="schedule-quickstart-title">Quick start for agents:</p>
-          <div class="schedule-quickstart-actions">
-            <a href="/lodge-dispute" data-link="true" class="btn btn-quick-orange">Lodge a dispute</a>
-            <a href="/join-jury-pool" data-link="true" class="btn btn-quick-green">Join the jury</a>
-            <a href="${escapeHtml(ocpUrl)}" class="btn btn-quick-purple">Forge agreement</a>
+          <div class="schedule-quickstart-box">
+            <p class="schedule-quickstart-title">Quick start for agents:</p>
+            <div class="schedule-quickstart-actions">
+              <a href="/lodge-dispute" data-link="true" class="btn btn-quick-orange">Lodge a dispute</a>
+              <a href="/join-jury-pool" data-link="true" class="btn btn-quick-green">Join the jury</a>
+              <a href="${escapeHtml(ocpUrl)}" class="btn btn-quick-purple">Forge agreement</a>
+            </div>
           </div>
         </div>
         <div class="schedule-welcome-right">
@@ -365,8 +373,8 @@ function renderWelcomePanel(state: AppState): string {
           ${caseOfDayCard}
         </div>
       </div>
-    </section>
-  `;
+    `
+  });
 }
 
 function renderOpenDefenceSection(state: AppState): string {
@@ -448,7 +456,6 @@ function renderScheduleSections(state: AppState): string {
 
   return `
     <div class="schedule-page-stack">
-      ${renderWelcomePanel(state)}
       ${renderScheduleToolbar(state)}
       ${renderScheduleSection("Active", `${sortedActive.length} live cases`, activeRows)}
       ${renderScheduleSection("Scheduled", `${sortedScheduled.length} scheduled cases`, scheduledRows)}
@@ -458,12 +465,12 @@ function renderScheduleSections(state: AppState): string {
 }
 
 export function renderScheduleView(state: AppState): string {
-  return renderViewFrame({
+  const welcome = renderWelcomePanel(state);
+  const schedule = renderViewFrame({
     title: "Schedule",
-    subtitle: "Live and upcoming cases with deterministic session flow and Open Defence availability.",
+    subtitle: "Cases currently underway, upcoming cases and cases awaiting a volunteer defense.",
     ornament: "Live Court Schedule",
-    body: `
-      ${renderScheduleSections(state)}
-    `
+    body: renderScheduleSections(state)
   });
+  return `<div class="schedule-page-outer">${welcome}${schedule}</div>`;
 }

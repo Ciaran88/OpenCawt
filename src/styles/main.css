@@ -82,6 +82,19 @@
   box-sizing: border-box;
 }
 
+/* Element baseline — prevent browser defaults from causing flush/unanchored content */
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+}
+
+p {
+  margin-top: 0;
+}
+
+dl {
+  margin: 0;
+}
+
 html, body {
   font-size: 13px;
   line-height: 1.6;
@@ -388,6 +401,11 @@ a {
   border: 1px solid var(--border-base);
   border-radius: var(--radius-lg);
   box-shadow: none; /* No shadow by default */
+}
+
+/* renderCard() produces <article class="card-surface"> with content directly inside — needs base padding */
+article.card-surface {
+  padding: var(--space-4);
 }
 
 .card-surface:hover,
@@ -941,9 +959,16 @@ label > span {
   gap: var(--space-4);
 }
 
-.schedule-welcome-panel {
+/* Two-pane outer wrapper: welcome above, schedule below */
+.schedule-page-outer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Welcome pane — own view-frame, needs position:relative for dismiss button */
+.schedule-welcome-frame {
   position: relative;
-  overflow: hidden;
 }
 
 .schedule-welcome-dismiss {
@@ -955,38 +980,60 @@ label > span {
   z-index: 1;
 }
 
+/* 2-column welcome grid: left (quickstart) | right (case of day) */
 .schedule-welcome-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: var(--space-4);
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
   width: 100%;
+  align-items: start;
 }
 
-.schedule-welcome-left,
-.schedule-welcome-right {
+.schedule-welcome-left {
   min-width: 0;
 }
 
-.schedule-welcome-left h3,
+/* Right column: position:relative so ::before divider is anchored here */
+.schedule-welcome-right {
+  min-width: 0;
+  position: relative;
+}
+
+/* Vertical divider between left and right cells — inset from top and bottom */
+.schedule-welcome-right::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--space-3));   /* centres in the column gap */
+  top: var(--space-4);               /* inset from top — "just short" */
+  bottom: var(--space-4);            /* inset from bottom */
+  width: 1px;
+  background-color: var(--border-base);
+  pointer-events: none;
+}
+
 .schedule-welcome-right h3 {
   margin: 0 0 var(--space-2);
 }
 
-.schedule-welcome-left p {
-  margin: 0;
-  color: var(--text-secondary);
-  line-height: 1.65;
+/* Quick-start box: grey curved container with slightly lighter border */
+.schedule-quickstart-box {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
 }
 
 .schedule-quickstart-title {
-  margin-top: var(--space-4) !important;
-  font-size: 1.05rem;
-  color: var(--text-primary) !important;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
   text-align: center;
+  margin-bottom: var(--space-3);
 }
 
 .schedule-quickstart-actions {
-  margin-top: var(--space-3);
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
@@ -1569,7 +1616,7 @@ select:focus {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-3);
-  padding: 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
 }
 
 .group-head.is-split {
@@ -2295,7 +2342,6 @@ select:focus {
 /* Case Header Card */
 .case-header-card {
   padding: var(--space-4);
-  padding-bottom: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
