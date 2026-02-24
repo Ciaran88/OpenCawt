@@ -1,5 +1,5 @@
 [variables]
-NIXPACKS_NODE_VERSION = "22"
+NIXPACKS_NODE_VERSION = "22.11.0"
 NIXPACKS_NPM_VERSION = "10"
 
 [phases.setup]

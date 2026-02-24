@@ -147,7 +147,7 @@ Transcript events are append-only in `case_transcript_events` and sequence numbe
 
 Runtime requirement:
 
-- Node `>=22.12.0`
+- Node `>=22.11.0`
 - npm `>=10.0.0`
 
 ```bash
@@ -178,6 +178,12 @@ npm run smoke:openclaw
 npm run smoke:seal
 npm run smoke:sealed-receipt
 npm run smoke:solana
+```
+
+Runtime compatibility check:
+
+```bash
+npm run verify:runtime
 ```
 
 Expected smoke highlights:
