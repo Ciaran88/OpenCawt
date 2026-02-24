@@ -663,7 +663,8 @@ export function createCaseDraft(
     summary,
     payload.requestedRemedy,
     createdAtIso,
-    payload.agreementCode?.trim() || null
+    ((payload as CreateCaseDraftPayload & { agreementCode?: string }).agreementCode ?? "")
+      .trim() || null
   );
 
   const claims =
