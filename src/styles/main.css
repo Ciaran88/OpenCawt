@@ -308,6 +308,17 @@ a {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  padding-right: 16px;
+}
+
+.header-actions .icon-btn {
+  width: 27px;
+  height: 27px;
+}
+
+.header-actions .icon-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .icon-btn {
@@ -617,6 +628,209 @@ label > span {
   margin-top: auto;
   padding-top: var(--space-2);
   color: var(--text-tertiary);
+}
+
+.schedule-page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.toolbar-schedule {
+  margin-bottom: 0;
+  gap: var(--space-3);
+}
+
+.toolbar-schedule .toolbar-note {
+  width: 100%;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 0.82rem;
+}
+
+.schedule-view-chip-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.schedule-view-chip {
+  border: 1px solid var(--border-base);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.schedule-view-chip:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+.schedule-view-chip.is-active {
+  border-color: color-mix(in srgb, var(--accent-blue) 45%, var(--border-base));
+  color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 14%, var(--bg-panel));
+}
+
+.schedule-kpi-chip-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.schedule-kpi-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--border-base);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+}
+
+.schedule-kpi-chip strong {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.schedule-kpi-chip span {
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.schedule-next-session-chip {
+  border-color: color-mix(in srgb, var(--accent-blue) 30%, var(--border-base));
+  background: color-mix(in srgb, var(--accent-blue) 14%, var(--bg-panel));
+  color: var(--accent-blue);
+}
+
+.schedule-section {
+  gap: var(--space-4);
+}
+
+.schedule-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--border-base);
+  padding-bottom: var(--space-2);
+}
+
+.schedule-section-head h3 {
+  margin: 0;
+}
+
+.schedule-section-head p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 0.85rem;
+}
+
+.schedule-section-grid {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.schedule-row {
+  cursor: default;
+}
+
+.schedule-row:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.schedule-row .decision-statuses {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.schedule-vote-chip,
+.schedule-phase-chip {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.schedule-vote-chip {
+  background: color-mix(in srgb, var(--accent-blue) 10%, var(--bg-panel));
+  border-color: color-mix(in srgb, var(--accent-blue) 30%, var(--border-base));
+  color: var(--accent-blue);
+}
+
+.schedule-phase-chip {
+  background: var(--bg-panel);
+  border-color: var(--border-base);
+  color: var(--text-secondary);
+}
+
+.schedule-details {
+  border-top: 1px solid var(--border-base);
+  padding-top: var(--space-2);
+}
+
+.schedule-details summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.schedule-details summary:hover {
+  color: var(--text-primary);
+}
+
+.schedule-details dl {
+  margin-top: var(--space-3);
+}
+
+.schedule-row-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: auto;
+}
+
+.schedule-row-footer small {
+  margin: 0;
+  padding: 0;
+}
+
+.toolbar-open-defence {
+  margin-bottom: 0;
+  background: var(--bg-panel);
+}
+
+@media (max-width: 900px) {
+  .schedule-row .decision-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .schedule-row .decision-statuses {
+    justify-content: flex-start;
+  }
+
+  .schedule-row-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .schedule-row-footer .btn {
+    width: 100%;
+  }
 }
 
 /* Fix for unstyled party columns in caseDetailView */

@@ -62,6 +62,8 @@ import {
   computeRingDashOffset,
   formatDurationLabel
 } from "../src/util/countdown";
+import { renderTicker } from "../src/components/ticker";
+import type { TickerEvent } from "../src/data/types";
 import { parseRoute, routeToPath } from "../src/util/router";
 import { loadOpenClawToolRegistry } from "../server/integrations/openclaw/exampleToolRegistry";
 import { OPENCAWT_OPENCLAW_TOOLS } from "../shared/openclawTools";
@@ -211,6 +213,36 @@ function testTranscriptVoteMapping() {
     }),
     "nay"
   );
+}
+
+function testTickerOutcomeMapping() {
+  const events: TickerEvent[] = [
+    { id: "1", caseId: "OC-TICK-001", outcome: "for_prosecution", label: "Closed" },
+    { id: "2", caseId: "OC-TICK-002", outcome: "for_defence", label: "Closed" },
+    { id: "3", caseId: "OC-TICK-003", outcome: "void", label: "Closed" },
+    // Legacy/variant values that should still render thumbs.
+    { id: "4", caseId: "OC-TICK-004", outcome: "yay" as unknown as TickerEvent["outcome"], label: "Closed" },
+    { id: "5", caseId: "OC-TICK-005", outcome: "for_defense" as unknown as TickerEvent["outcome"], label: "Closed" },
+    {
+      id: "6",
+      caseId: "OC-TICK-006",
+      outcome: "unknown" as unknown as TickerEvent["outcome"],
+      label: "Nay" as unknown as TickerEvent["label"]
+    }
+  ];
+
+  const html = renderTicker(events);
+  assert.match(html, /class="ticker-icon icon-up"/);
+  assert.match(html, /class="ticker-icon icon-down"/);
+  assert.match(html, /class="ticker-icon icon-void"/);
+
+  const upCount = (html.match(/class="ticker-icon icon-up"/g) ?? []).length;
+  const downCount = (html.match(/class="ticker-icon icon-down"/g) ?? []).length;
+
+  // 1:for_prosecution + 4:yay => up
+  assert.ok(upCount >= 2, `Expected at least 2 thumbs-up icons, got ${upCount}`);
+  // 2:for_defence + 5:for_defense + 6:label Nay => down
+  assert.ok(downCount >= 3, `Expected at least 3 thumbs-down icons, got ${downCount}`);
 }
 
 function testCaseTitleTruncation() {
@@ -1796,6 +1828,7 @@ async function run() {
   await testCanonicalHashing();
   await testEvidenceAttachmentHashing();
   testTranscriptVoteMapping();
+  testTickerOutcomeMapping();
   testCaseTitleTruncation();
   await testSealHashFixtures();
   await testSwarmValidationHelpers();

@@ -20,6 +20,7 @@ import type { ModalState } from "../components/modal";
 import type { ToastMessage } from "../components/toast";
 
 export interface ScheduleControls {
+  query: string;
   filter: "all" | "scheduled" | "active";
   sort: "time-asc" | "time-desc";
 }
@@ -168,6 +169,7 @@ export function createInitialState(): AppState {
     leaderboard: [],
     agentProfiles: {},
     scheduleControls: {
+      query: "",
       filter: "all",
       sort: "time-asc"
     },

@@ -2,6 +2,31 @@ import type { TickerEvent } from "../data/types";
 import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
 
+function normaliseTickerOutcome(
+  outcome: unknown,
+  label: string | undefined
+): "for_prosecution" | "for_defence" | "void" {
+  const raw = String(outcome ?? "")
+    .trim()
+    .toLowerCase();
+  if (raw === "for_prosecution" || raw === "prosecution" || raw === "yay") {
+    return "for_prosecution";
+  }
+  if (raw === "for_defence" || raw === "for_defense" || raw === "defence" || raw === "defense" || raw === "nay") {
+    return "for_defence";
+  }
+  const labelText = String(label ?? "")
+    .trim()
+    .toLowerCase();
+  if (labelText.includes("yay")) {
+    return "for_prosecution";
+  }
+  if (labelText.includes("nay")) {
+    return "for_defence";
+  }
+  return "void";
+}
+
 function renderThumbIcon(direction: "up" | "down"): string {
   const rotate = direction === "down" ? ' transform="rotate(180 12 12)"' : "";
   return `
@@ -14,7 +39,8 @@ function renderThumbIcon(direction: "up" | "down"): string {
   `;
 }
 
-function renderOutcomeIcon(outcome: TickerEvent["outcome"]): string {
+function renderOutcomeIcon(event: TickerEvent): string {
+  const outcome = normaliseTickerOutcome(event.outcome, event.label);
   if (outcome === "for_prosecution") {
     return `<span class="ticker-icon icon-up" aria-hidden="true">${renderThumbIcon("up")}</span>`;
   }
@@ -32,7 +58,7 @@ function renderOutcomeIcon(outcome: TickerEvent["outcome"]): string {
 function renderItem(event: TickerEvent): string {
   return `
     <span class="ticker-item" role="listitem">
-      ${renderOutcomeIcon(event.outcome)}
+      ${renderOutcomeIcon(event)}
       <a href="/decision/${escapeHtml(event.caseId)}" data-link="true" class="ticker-case">${escapeHtml(displayCaseLabel(event))}</a>
       <span class="ticker-label">${escapeHtml(event.label)}</span>
     </span>

@@ -15,10 +15,9 @@ import { displayCaseLabel } from "../util/caseLabel";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
-function featureCard(icon: string, title: string, body: string): string {
+function featureCard(title: string, body: string): string {
   return `
     <article class="info-card glass-overlay agent-feature-card">
-      <span class="agent-feature-icon" aria-hidden="true">${icon}</span>
       <h3>${escapeHtml(title)}</h3>
       <p>${escapeHtml(body)}</p>
     </article>
@@ -56,29 +55,24 @@ function heroSection(): string {
 function valueCards(): string {
   const cards = [
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M7 8h10M9 16h6"></path><rect x="3.5" y="4.5" width="17" height="15" rx="3"></rect></svg>`,
       "Transparent voting",
-      "Ballots require a reasoning summary and are reflected in transcript and verdict bundles."
+      "Juror ballots require structured reasoning and principle references, then publish into the public transcript and final decision record."
     ),
     featureCard(
-      `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M8.5 12.5 11 15l4.5-5"></path></svg>`,
       "Deterministic selection",
-      "Juror ordering uses drand randomness with stored reproducibility proof."
+      "When 11-juror mode is active, panel ordering is derived from drand randomness with stored proof artefacts for replay and audit."
     ),
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M12 5v7l4 2"></path><circle cx="12" cy="12" r="9"></circle></svg>`,
-      "Timeout replacement",
-      "If deadlines are missed, jurors are replaced to keep throughput predictable."
+      "Deadlines and replacement",
+      "Selected jurors must confirm readiness and submit ballots before strict cutoffs, or reserve jurors are promoted to keep case progression deterministic."
     ),
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M6 7h12v10H6z"></path><path d="M9 10h6M9 13h6"></path></svg>`,
       "Public participation trail",
-      "Juror actions are recorded and contribute to public participation history."
+      "Assignments, readiness responses, ballots and replacements are appended as ordered transcript events and counted in juror activity history."
     ),
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M4 12h16"></path><path d="M6 8h12M8 16h8"></path></svg>`,
       "Fairness and limits",
-      "Per-agent rate limits and role separation reduce abuse and scheduling pressure."
+      "Role separation and per-agent rate limits prevent prosecution or defence overlap in the same case and reduce abuse pressure under live load."
     )
   ];
   return `<section id="jury-value" class="split-grid">${cards.join("")}</section>`;

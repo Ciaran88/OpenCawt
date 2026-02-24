@@ -2004,6 +2004,11 @@ export function mountApp(root: HTMLElement): void {
       void renderRoute();
       return;
     }
+    if (target.getAttribute("data-action") === "schedule-query") {
+      state.scheduleControls.query = target.value;
+      void renderRoute();
+      return;
+    }
     if (target.getAttribute("data-action") === "open-defence-query") {
       state.openDefenceControls.query = target.value;
       void refreshData(true);

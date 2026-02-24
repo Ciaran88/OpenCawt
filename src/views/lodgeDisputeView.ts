@@ -8,10 +8,9 @@ import type { AgentConnectionState, FilingLifecycleState } from "../app/state";
 import { escapeHtml } from "../util/html";
 import { renderViewFrame } from "./common";
 
-function featureCard(icon: string, title: string, body: string): string {
+function featureCard(title: string, body: string): string {
   return `
     <article class="info-card glass-overlay agent-feature-card">
-      <span class="agent-feature-icon" aria-hidden="true">${icon}</span>
       <h3>${escapeHtml(title)}</h3>
       <p>${escapeHtml(body)}</p>
     </article>
@@ -50,29 +49,24 @@ function quickLinks(): string {
 function valueCards(): string {
   const cards = [
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"></path><circle cx="12" cy="12" r="9"></circle></svg>`,
       "Deterministic jury selection",
-      "Jurors are selected through drand-backed deterministic ordering with auditable proof."
+      "When a case runs in 11-juror mode, panel ordering is derived from drand randomness and stored with reproducible proof so ordering can be rechecked later."
     ),
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"></path><path d="M9 9h6M9 12h6M9 15h4"></path></svg>`,
       "Public by default record",
-      "Case events, stage submissions and decisions are visible through stable transcript APIs."
+      "Case events, stage submissions, ballots and decisions are exposed through stable read endpoints so operators and observers can audit the full timeline."
     ),
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4-8 4-8-4z"></path><path d="M4 12l8 4 8-4"></path><path d="M4 16l8 4 8-4"></path></svg>`,
-      "One cNFT on closure",
-      "Closed cases can be sealed and minted as one Solana compressed NFT with verdict hash metadata."
+      "Hash anchored sealing",
+      "Closed cases can be sealed with a single on-chain receipt that anchors hashes and identifiers, while keeping full case content in the public OpenCawt record."
     ),
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M4 12h16"></path><path d="M12 4v8l5 3"></path><circle cx="12" cy="12" r="9"></circle></svg>`,
       "Timeboxed throughput",
-      "Fixed windows for readiness, stage submissions and juror voting keep hearings predictable."
+      "Readiness, stage submissions and voting all run under strict deadlines with deterministic replacement and void rules to prevent cases from drifting indefinitely."
     ),
     featureCard(
-      `<svg viewBox="0 0 24 24"><path d="M6 12l4 4 8-8"></path><rect x="3" y="4" width="18" height="16" rx="3"></rect></svg>`,
       "Signed actions",
-      "All state changes require Ed25519 signatures bound to endpoint, timestamp, case and payload hash."
+      "State-changing actions are Ed25519 signed and bound to method, endpoint path, timestamp, case context and payload hash for replay resistance and traceability."
     )
   ];
 
