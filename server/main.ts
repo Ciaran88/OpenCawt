@@ -45,6 +45,7 @@ import {
   getDefenceInviteDispatchTarget,
   getCaseRuntime,
   getDecisionCase,
+  getSealQueueMetrics,
   getSealJobByCaseId,
   getSealJobByJobId,
   isTreasuryTxUsed,
@@ -65,6 +66,7 @@ import {
   markJurorVoted,
   replaceJuryMembers,
   recordDefenceInviteAttempt,
+  requeueSealJobForRedrive,
   rebuildAllAgentStats,
   searchAgents,
   revokeAgentCapabilityByHash,
@@ -1434,6 +1436,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "GET" && pathname === "/api/internal/credential-status") {
       assertSystemKey(req, config);
       const latestBackupAtIso = findLatestBackupIso(config.backupDir);
+      const sealQueue = getSealQueueMetrics(db);
       sendJson(res, 200, {
         solanaMode: config.solanaMode,
         sealWorkerMode: config.sealWorkerMode,
@@ -1447,7 +1450,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         hasWorkerToken: Boolean(config.workerToken),
         hasSystemApiKey: Boolean(config.systemApiKey),
         hasHeliusWebhookToken: Boolean(config.heliusWebhookToken),
-        hasSealWorkerUrl: Boolean(config.sealWorkerUrl)
+        hasSealWorkerUrl: Boolean(config.sealWorkerUrl),
+        sealQueueDepth: sealQueue.depth,
+        sealOldestQueuedAtIso: sealQueue.oldestQueuedAtIso,
+        sealFailedRecentCount: sealQueue.failedRecentCount,
+        sealDeadLetterCount: sealQueue.deadLetterCount
       });
       return;
     }
@@ -1712,6 +1719,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           "Mint worker (http): receives seal request from server, uploads metadata (Pinata), mints cNFT on Solana.";
       }
       const workflowSummary = workflowParts.join(" ");
+      const sealQueue = getSealQueueMetrics(db);
 
       sendJson(res, 200, {
         db: { ready: dbReady },
@@ -1727,7 +1735,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         treasuryAddress: config.treasuryAddress,
         sealWorkerUrl: config.sealWorkerUrl,
         sealWorkerMode: config.sealWorkerMode,
-        workflowSummary
+        workflowSummary,
+        sealQueue: {
+          depth: sealQueue.depth,
+          oldestQueuedAtIso: sealQueue.oldestQueuedAtIso,
+          failedRecentCount: sealQueue.failedRecentCount,
+          deadLetterCount: sealQueue.deadLetterCount
+        }
       });
       return;
     }
@@ -3155,11 +3169,62 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[0] === "api" &&
       segments[1] === "internal" &&
       segments[2] === "seal-jobs" &&
+      segments[4] === "redrive"
+    ) {
+      assertSystemKey(req, config);
+      const jobId = decodeURIComponent(segments[3]);
+      const job = getSealJobByJobId(db, jobId);
+      if (!job) {
+        throw notFound("SEAL_JOB_NOT_FOUND", "Seal job was not found.");
+      }
+      if (job.status === "minted") {
+        sendJson(res, 200, {
+          ok: true,
+          redriven: false,
+          replayed: true,
+          jobId,
+          status: job.status
+        });
+        return;
+      }
+      if (job.status === "minting" || job.status === "queued") {
+        sendJson(res, 200, {
+          ok: true,
+          redriven: false,
+          replayed: true,
+          jobId,
+          status: job.status
+        });
+        return;
+      }
+      if (!requeueSealJobForRedrive(db, jobId)) {
+        throw conflict("SEAL_JOB_NOT_REDRIVABLE", "Seal job cannot be re-driven from current state.");
+      }
+      const result = await retrySealJob({ db, config, jobId });
+      sendJson(res, 200, {
+        ok: true,
+        redriven: true,
+        jobId,
+        result
+      });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "seal-jobs" &&
       segments[4] === "retry"
     ) {
       assertSystemKey(req, config);
       const jobId = decodeURIComponent(segments[3]);
       try {
+        const job = getSealJobByJobId(db, jobId);
+        if (job?.status === "dead_letter") {
+          requeueSealJobForRedrive(db, jobId);
+        }
         const result = await retrySealJob({ db, config, jobId });
         sendJson(res, 200, result);
       } catch (err) {

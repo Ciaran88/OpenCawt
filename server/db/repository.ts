@@ -55,6 +55,43 @@ function maybeJson<T>(value: string | null, fallback: T): T {
   }
 }
 
+interface SealJobErrorInfo {
+  code: string;
+  message: string;
+  stage: string;
+  retryable?: boolean;
+}
+
+function serialiseSealJobError(error: SealJobErrorInfo): string {
+  return canonicalJson({
+    code: error.code,
+    message: error.message,
+    stage: error.stage,
+    retryable: error.retryable ?? true
+  });
+}
+
+function parseSealJobError(value: string | null): SealJobErrorInfo | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = maybeJson<Partial<SealJobErrorInfo>>(value, {});
+  if (
+    parsed &&
+    typeof parsed.code === "string" &&
+    typeof parsed.message === "string" &&
+    typeof parsed.stage === "string"
+  ) {
+    return {
+      code: parsed.code,
+      message: parsed.message,
+      stage: parsed.stage,
+      retryable: typeof parsed.retryable === "boolean" ? parsed.retryable : undefined
+    };
+  }
+  return null;
+}
+
 function normaliseSerializable(value: unknown): unknown {
   if (value === undefined) {
     return null;
@@ -217,6 +254,7 @@ export interface CaseRecord {
   judgeScreeningStatus?: "pending" | "pending_retry" | "approved" | "rejected" | "failed";
   judgeScreeningReason?: string;
   judgeRemedyRecommendation?: string;
+  agreementCode?: string;
 }
 
 export interface ClaimRecord {
@@ -607,8 +645,9 @@ export function createCaseDraft(
       stake_level,
       summary,
       requested_remedy,
-      created_at
-    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, 'none', 0, NULL, NULL, ?, ?, ?, ?, ?)
+      created_at,
+      agreement_code
+    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, 'none', 0, NULL, NULL, ?, ?, ?, ?, ?, ?)
     `
   ).run(
     caseId,
@@ -623,7 +662,8 @@ export function createCaseDraft(
     payload.stakeLevel ?? "medium",
     summary,
     payload.requestedRemedy,
-    createdAtIso
+    createdAtIso,
+    payload.agreementCode?.trim() || null
   );
 
   const claims =
@@ -758,7 +798,8 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
       : undefined,
     judgeRemedyRecommendation: row.judge_remedy_recommendation
       ? String(row.judge_remedy_recommendation)
-      : undefined
+      : undefined,
+    agreementCode: row.agreement_code ? String(row.agreement_code) : undefined
   };
 }
 
@@ -827,7 +868,8 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         case_title,
         judge_screening_status,
         judge_screening_reason,
-        judge_remedy_recommendation
+        judge_remedy_recommendation,
+        agreement_code
       FROM cases
       WHERE case_id = ?
       `
@@ -910,7 +952,8 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         case_title,
         judge_screening_status,
         judge_screening_reason,
-        judge_remedy_recommendation
+        judge_remedy_recommendation,
+        agreement_code
       FROM cases
       WHERE status IN (${placeholders})
       ORDER BY created_at DESC
@@ -1899,7 +1942,7 @@ export function markSealJobResult(
   }
   db.prepare(
     `UPDATE seal_jobs
-     SET status = 'failed',
+     SET status = ?,
          response_json = ?,
          metadata_uri = COALESCE(?, metadata_uri),
          last_error = ?,
@@ -1907,11 +1950,15 @@ export function markSealJobResult(
          updated_at = ?
      WHERE job_id = ?`
   ).run(
+    result.errorCode === "PINATA_QUOTA_EXCEEDED" ? "dead_letter" : "failed",
     canonicalJson(result),
     options?.metadataUri ?? result.metadataUri ?? null,
-    result.errorCode === "PINATA_QUOTA_EXCEEDED"
-      ? `NON_RETRYABLE:${result.errorMessage ?? "Pinata quota exceeded."}`
-      : (result.errorMessage ?? "Mint worker returned failure."),
+    serialiseSealJobError({
+      code: result.errorCode ?? "MINT_FAILED",
+      message: result.errorMessage ?? "Mint worker returned failure.",
+      stage: "worker_result",
+      retryable: result.errorCode !== "PINATA_QUOTA_EXCEEDED"
+    }),
     now,
     now,
     result.jobId
@@ -1920,24 +1967,57 @@ export function markSealJobResult(
 
 export function markSealJobFailed(
   db: Db,
-  input: { jobId: string; error: string; responseJson?: unknown }
+  input: {
+    jobId: string;
+    error: SealJobErrorInfo;
+    responseJson?: unknown;
+    maxAttempts: number;
+  }
 ): void {
   const now = nowIso();
+  const row = db
+    .prepare(`SELECT attempts FROM seal_jobs WHERE job_id = ? LIMIT 1`)
+    .get(input.jobId) as { attempts: number } | undefined;
+  const attempts = Number(row?.attempts ?? 0);
+  const deadLetter = attempts >= Math.max(1, input.maxAttempts);
   db.prepare(
     `UPDATE seal_jobs
-     SET status = 'failed',
+     SET status = ?,
          last_error = ?,
          response_json = ?,
          completed_at = ?,
          updated_at = ?
      WHERE job_id = ?`
   ).run(
-    input.error,
-    canonicalJson(input.responseJson ?? { error: input.error }),
+    deadLetter ? "dead_letter" : "failed",
+    serialiseSealJobError(input.error),
+    canonicalJson(
+      input.responseJson ?? {
+        errorCode: input.error.code,
+        errorMessage: input.error.message,
+        errorStage: input.error.stage
+      }
+    ),
     now,
     now,
     input.jobId
   );
+}
+
+export function requeueSealJobForRedrive(db: Db, jobId: string): boolean {
+  const now = nowIso();
+  const result = db
+    .prepare(
+      `UPDATE seal_jobs
+       SET status = 'queued',
+           last_error = NULL,
+           claimed_at = NULL,
+           completed_at = NULL,
+           updated_at = ?
+       WHERE job_id = ? AND status IN ('failed', 'dead_letter')`
+    )
+    .run(now, jobId);
+  return Number(result.changes) > 0;
 }
 
 export function markCaseSealed(
@@ -3492,6 +3572,7 @@ export function getSealJobByCaseId(
   status: string;
   attempts: number;
   lastError?: string;
+  lastErrorInfo?: SealJobErrorInfo;
   metadataUri?: string;
 } | null {
   const row = db
@@ -3512,7 +3593,8 @@ export function getSealJobByCaseId(
     jobId: row.job_id,
     status: row.status,
     attempts: Number(row.attempts ?? 0),
-    lastError: row.last_error ?? undefined,
+    lastError: parseSealJobError(row.last_error)?.message ?? row.last_error ?? undefined,
+    lastErrorInfo: parseSealJobError(row.last_error) ?? undefined,
     metadataUri: row.metadata_uri ?? undefined
   };
 }
@@ -3523,6 +3605,7 @@ export interface SealJobRecord {
   status: string;
   attempts: number;
   lastError?: string;
+  lastErrorInfo?: SealJobErrorInfo;
   claimedAtIso?: string;
   completedAtIso?: string;
   payloadHash: string;
@@ -3535,7 +3618,7 @@ export function listQueuedSealJobs(
   db: Db,
   options?: { olderThanMinutes?: number; maxAttempts?: number }
 ): Array<{ jobId: string; caseId: string; createdAtIso: string }> {
-  let sql = `SELECT job_id, case_id, created_at FROM seal_jobs WHERE status IN ('queued','failed') AND (last_error IS NULL OR last_error NOT LIKE 'NON_RETRYABLE:%')`;
+  let sql = `SELECT job_id, case_id, created_at FROM seal_jobs WHERE status IN ('queued','failed')`;
   const params: Array<string | number> = [];
   if (options?.olderThanMinutes != null && options.olderThanMinutes > 0) {
     const cutoff = new Date(Date.now() - options.olderThanMinutes * 60 * 1000).toISOString();
@@ -3589,13 +3672,41 @@ export function getSealJobByJobId(db: Db, jobId: string): SealJobRecord | null {
     caseId: row.case_id,
     status: row.status,
     attempts: Number(row.attempts ?? 0),
-    lastError: row.last_error ?? undefined,
+    lastError: parseSealJobError(row.last_error)?.message ?? row.last_error ?? undefined,
+    lastErrorInfo: parseSealJobError(row.last_error) ?? undefined,
     claimedAtIso: row.claimed_at ?? undefined,
     completedAtIso: row.completed_at ?? undefined,
     payloadHash: row.payload_hash ?? "",
     metadataUri: row.metadata_uri ?? undefined,
     requestJson: maybeJson(row.request_json, {}),
     responseJson: row.response_json ? maybeJson(row.response_json, {}) : null
+  };
+}
+
+export function getSealQueueMetrics(
+  db: Db
+): {
+  depth: number;
+  oldestQueuedAtIso?: string;
+  failedRecentCount: number;
+  deadLetterCount: number;
+} {
+  const queued = db
+    .prepare(`SELECT COUNT(*) AS c, MIN(created_at) AS oldest FROM seal_jobs WHERE status IN ('queued','failed')`)
+    .get() as { c: number; oldest: string | null };
+  const failedRecent = db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM seal_jobs WHERE status IN ('failed','dead_letter') AND updated_at >= ?`
+    )
+    .get(oneDayAgoIso()) as { c: number };
+  const deadLetter = db
+    .prepare(`SELECT COUNT(*) AS c FROM seal_jobs WHERE status = 'dead_letter'`)
+    .get() as { c: number };
+  return {
+    depth: Number(queued.c ?? 0),
+    oldestQueuedAtIso: queued.oldest ?? undefined,
+    failedRecentCount: Number(failedRecent.c ?? 0),
+    deadLetterCount: Number(deadLetter.c ?? 0)
   };
 }
 

@@ -87,12 +87,14 @@ async function main() {
   const apiHost = "127.0.0.1";
   const apiPort = "8894";
   const baseUrl = `http://${apiHost}:${apiPort}`;
+  const systemApiKey = "sealed-receipt-system-key";
 
   const api = startNodeTsxProcess("sealed-receipt-api", "server/main.ts", {
     API_HOST: apiHost,
     API_PORT: apiPort,
     DB_PATH: dbPath,
     WORKER_TOKEN: seeded.workerToken,
+    SYSTEM_API_KEY: systemApiKey,
     SOLANA_MODE: "stub",
     DRAND_MODE: "stub",
     SEAL_WORKER_MODE: "stub"
@@ -166,6 +168,35 @@ async function main() {
     assert.equal(decisionDetail.sealInfo?.verdictHash, "verdict-hash-smoke-1");
     assert.equal(decisionDetail.transcriptRootHash, "transcript-hash-smoke-1");
     assert.equal(decisionDetail.jurySelectionProofHash, "jury-proof-hash-smoke-1");
+
+    const redriveUnauthorised = await fetch(
+      `${baseUrl}/api/internal/seal-jobs/${encodeURIComponent(seeded.jobId)}/redrive`,
+      {
+        method: "POST"
+      }
+    );
+    assert.equal(redriveUnauthorised.status, 401);
+
+    const redriveAuthorised = await fetch(
+      `${baseUrl}/api/internal/seal-jobs/${encodeURIComponent(seeded.jobId)}/redrive`,
+      {
+        method: "POST",
+        headers: {
+          "X-System-Key": systemApiKey
+        }
+      }
+    );
+    assert.equal(redriveAuthorised.status, 200);
+    const redriveBody = (await redriveAuthorised.json()) as {
+      ok: boolean;
+      redriven: boolean;
+      replayed?: boolean;
+      status?: string;
+    };
+    assert.equal(redriveBody.ok, true);
+    assert.equal(redriveBody.redriven, false);
+    assert.equal(redriveBody.replayed, true);
+    assert.equal(redriveBody.status, "minted");
 
     process.stdout.write("Sealed receipt smoke passed\n");
   } finally {

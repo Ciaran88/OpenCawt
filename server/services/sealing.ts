@@ -265,7 +265,13 @@ async function runSealJob(
     const errorMessage = error instanceof Error ? error.message : String(error);
     markSealJobFailed(options.db, {
       jobId,
-      error: errorMessage,
+      error: {
+        code: "SEAL_WORKER_ERROR",
+        message: errorMessage,
+        stage: mode === "enqueue" ? "enqueue_dispatch" : "retry_dispatch",
+        retryable: true
+      },
+      maxAttempts: options.config.sealJobMaxAttempts,
       responseJson: {
         jobId,
         caseId: requestWithMetadataUri.caseId,
