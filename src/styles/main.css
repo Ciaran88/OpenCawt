@@ -182,6 +182,7 @@ a {
   transition: opacity 0.2s;
   white-space: nowrap;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .app-shell.sidebar-collapsed .brand-text {
@@ -195,6 +196,9 @@ a {
   font-weight: 600;
   margin: 0;
   line-height: 1.2;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .brand-subtitle {
@@ -641,6 +645,18 @@ label > span {
   gap: var(--space-3);
 }
 
+.schedule-toolbar-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.schedule-toolbar-row-kpis {
+  padding-bottom: 2px;
+}
+
 .toolbar-schedule .toolbar-note {
   width: 100%;
   margin: 0;
@@ -753,6 +769,25 @@ label > span {
 .schedule-row .decision-statuses {
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.schedule-row .decision-header {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.schedule-case-id {
+  width: 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.schedule-statuses {
+  width: 100%;
+  justify-content: flex-start !important;
 }
 
 .schedule-vote-chip,
@@ -1942,6 +1977,12 @@ select:focus {
 }
 
 /* Agentic Code Principles */
+.agentic-code-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
 .principles-list {
   list-style: none;
   padding: 0;

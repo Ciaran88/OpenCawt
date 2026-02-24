@@ -9,8 +9,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "dev:server": "node --import tsx server/main.ts",
-    "dev:worker": "node --import tsx server/mint-worker/main.ts",
+    "dev:server": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx server/main.ts",
+    "dev:worker": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx server/mint-worker/main.ts",
     "release:gate": "bash scripts/release-gate.sh",
     "verify:runtime": "bash scripts/verify-runtime.sh",
     "build:server": "tsc -p tsconfig.server.build.json",
@@ -18,13 +18,13 @@
     "build": "npm run verify:runtime && tsc --noEmit && tsc --noEmit -p tsconfig.server.json && npm run build:server && vite build && npm run build:ocp:embedded",
     "start": "npm run start:compiled",
     "start:compiled": "node --disable-warning=DEP0040 --import tsx dist-server/server/entrypoint.js",
-    "start:tsx": "node --import tsx server/entrypoint.ts",
+    "start:tsx": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx server/entrypoint.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
     "lint:server": "tsc --noEmit -p tsconfig.server.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --import tsx tests/run-tests.ts",
+    "test": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx tests/run-tests.ts",
     "db:reset": "node --import tsx server/scripts/resetDb.ts",
     "db:seed": "node --import tsx server/scripts/seedPhase3.ts",
     "db:backup": "node --import tsx server/scripts/backupDb.ts",
@@ -47,7 +47,7 @@
     "smoke:solana": "node --import tsx tests/smoke/solana.smoke.ts",
     "smoke:seal": "node --import tsx tests/smoke/seal-callback.smoke.ts",
     "smoke:sealed-receipt": "node --import tsx tests/smoke/sealed-receipt.smoke.ts",
-    "simulate:judge": "node --import tsx tests/judge-simulation.ts"
+    "simulate:judge": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx tests/judge-simulation.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

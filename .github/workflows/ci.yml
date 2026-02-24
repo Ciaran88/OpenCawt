@@ -26,4 +26,6 @@ jobs:
       - name: Run release gate
         env:
           RELEASE_GATE_MODE: local
+          APP_ENV: development
+          COURT_MODE: 11-juror
         run: npm run release:gate

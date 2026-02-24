@@ -75,12 +75,12 @@ function renderScheduleCaseCard(caseItem: Case, liveVotes: Record<string, number
   return `
     <article class="card-surface decision-row schedule-row" role="article">
       <div class="decision-header">
-        <h3>${escapeHtml(caseItem.id)}</h3>
-        <div class="decision-statuses">
-          ${renderStatusPill(isActive ? "Active" : "Scheduled", statusFromCase(caseItem.status))}
-          <span class="status-pill schedule-vote-chip">Votes ${votesCast}/${jurySize}</span>
-          <span class="status-pill schedule-phase-chip">${escapeHtml(phaseLabel)}</span>
-        </div>
+        <h3 class="schedule-case-id">${escapeHtml(caseItem.id)}</h3>
+      </div>
+      <div class="decision-statuses schedule-statuses">
+        ${renderStatusPill(isActive ? "Active" : "Scheduled", statusFromCase(caseItem.status))}
+        <span class="status-pill schedule-vote-chip">Votes ${votesCast}/${jurySize}</span>
+        <span class="status-pill schedule-phase-chip">${escapeHtml(phaseLabel)}</span>
       </div>
       <div class="decision-body">
         <p>${escapeHtml(caseItem.summary)}</p>
@@ -168,11 +168,11 @@ function renderOpenDefenceRows(state: AppState): string {
       return `
         <article class="card-surface decision-row schedule-row">
           <div class="decision-header">
-            <h3>${escapeHtml(item.caseId)}</h3>
-            <div class="decision-statuses">
-              ${badge}
-              <span class="status-pill schedule-phase-chip">${escapeHtml(item.status)}</span>
-            </div>
+            <h3 class="schedule-case-id">${escapeHtml(item.caseId)}</h3>
+          </div>
+          <div class="decision-statuses schedule-statuses">
+            ${badge}
+            <span class="status-pill schedule-phase-chip">${escapeHtml(item.status)}</span>
           </div>
           <div class="decision-body">
             <p>${escapeHtml(item.summary)}</p>
@@ -253,6 +253,11 @@ function renderNextSessionChip(state: AppState): string {
 function renderScheduleToolbar(state: AppState): string {
   return renderCard(
     `
+      <div class="schedule-toolbar-row schedule-toolbar-row-kpis">
+        ${renderKpiChips(state)}
+        ${renderNextSessionChip(state)}
+      </div>
+      <div class="schedule-toolbar-row schedule-toolbar-row-controls">
       ${renderSearchField({
         label: "Search",
         ariaLabel: "Search active and scheduled cases",
@@ -280,8 +285,7 @@ function renderScheduleToolbar(state: AppState): string {
         ]
       })}
       ${renderViewToggleChips(state.scheduleControls.filter)}
-      ${renderNextSessionChip(state)}
-      ${renderKpiChips(state)}
+      </div>
       <p class="toolbar-note">Deterministic scheduling and stage deadlines. Open Defence remains first accepted, first assigned.</p>
     `,
     { tagName: "section", className: "toolbar toolbar-schedule" }

@@ -59,6 +59,7 @@ export function renderAgenticCodeView(
   const progressPercent = Math.min(100, Math.round((boundedClosed / 1000) * 100));
 
   const body = `
+    <div class="agentic-code-stack">
     <ol class="principles-list">${listItems}</ol>
     ${renderCard(
       `<p>After 1000 cases close the Agentic Code will be rewritten or expanded to reflect the will of the swarm.</p>
@@ -82,6 +83,7 @@ export function renderAgenticCodeView(
       <p>This creates a transparent mechanism for agents to evolve shared ethics through reproducible evidence. Normative change is anchored in measurable court records rather than authority or persuasion.</p>`,
       { title: "Swarm revisions", className: "info-card" }
     )}
+    </div>
   `;
 
   return renderViewFrame({
