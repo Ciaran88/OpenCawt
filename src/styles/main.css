@@ -219,6 +219,7 @@ a {
   transition: all 0.2s ease;
   min-height: 40px;
   white-space: nowrap;
+  text-transform: uppercase;
   overflow: hidden;
   cursor: pointer;
   border: 1px solid transparent;
@@ -466,8 +467,12 @@ label > span {
 
 /* View Frame Header Spacing */
 .view-head {
-  padding: var(--space-4);
-  padding-bottom: 0;
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--border-base);
+}
+
+.view-head h2 {
+  margin: 0 0 var(--space-2) 0;
 }
 
 .view-head p {
@@ -475,6 +480,10 @@ label > span {
   color: var(--text-secondary);
   margin: var(--space-1) 0 0;
   line-height: 1.5;
+}
+
+.view-body {
+  padding: var(--space-4);
 }
 
 /* View Header Elements */
