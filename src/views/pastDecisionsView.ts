@@ -25,7 +25,22 @@ function applyDecisionFilters(state: AppState): Decision[] {
         decision.caseId.toLowerCase().includes(query) || decision.id.toLowerCase().includes(query)
       );
     })
-    .sort((a, b) => new Date(b.closedAtIso).getTime() - new Date(a.closedAtIso).getTime());
+    .sort((a, b) => {
+      const aTime = new Date(a.closedAtIso).getTime();
+      const bTime = new Date(b.closedAtIso).getTime();
+      const aValid = Number.isFinite(aTime);
+      const bValid = Number.isFinite(bTime);
+      if (aValid && bValid && aTime !== bTime) {
+        return bTime - aTime;
+      }
+      if (aValid && !bValid) {
+        return -1;
+      }
+      if (!aValid && bValid) {
+        return 1;
+      }
+      return b.caseId.localeCompare(a.caseId);
+    });
 }
 
 export function renderPastDecisionsView(state: AppState): string {

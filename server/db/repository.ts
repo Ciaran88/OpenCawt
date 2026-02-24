@@ -255,6 +255,7 @@ export interface CaseRecord {
   judgeScreeningReason?: string;
   judgeRemedyRecommendation?: string;
   agreementCode?: string;
+  sealedDisabled: boolean;
 }
 
 export interface ClaimRecord {
@@ -800,7 +801,8 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     judgeRemedyRecommendation: row.judge_remedy_recommendation
       ? String(row.judge_remedy_recommendation)
       : undefined,
-    agreementCode: row.agreement_code ? String(row.agreement_code) : undefined
+    agreementCode: row.agreement_code ? String(row.agreement_code) : undefined,
+    sealedDisabled: Number(row.sealed_disabled ?? 0) === 1
   };
 }
 
@@ -870,7 +872,8 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         judge_screening_status,
         judge_screening_reason,
         judge_remedy_recommendation,
-        agreement_code
+        agreement_code,
+        sealed_disabled
       FROM cases
       WHERE case_id = ?
       `
@@ -954,7 +957,8 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         judge_screening_status,
         judge_screening_reason,
         judge_remedy_recommendation,
-        agreement_code
+        agreement_code,
+        sealed_disabled
       FROM cases
       WHERE status IN (${placeholders})
       ORDER BY created_at DESC
@@ -963,6 +967,31 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
     .all(...statuses) as Array<Record<string, unknown>>;
 
   return rows.map(mapCaseRow);
+}
+
+export function resolveCaseDecisionTimestamp(caseRecord: CaseRecord): string {
+  return (
+    caseRecord.decidedAtIso ??
+    caseRecord.closedAtIso ??
+    caseRecord.voidedAtIso ??
+    caseRecord.createdAtIso
+  );
+}
+
+export function setCaseSimulationMode(
+  db: Db,
+  input: { caseId: string; enabled: boolean }
+): { caseId: string; enabled: boolean } {
+  const result = db
+    .prepare(`UPDATE cases SET sealed_disabled = ? WHERE case_id = ?`)
+    .run(input.enabled ? 1 : 0, input.caseId);
+  if (Number(result.changes ?? 0) < 1) {
+    throw new Error("CASE_NOT_FOUND");
+  }
+  return {
+    caseId: input.caseId,
+    enabled: input.enabled
+  };
 }
 
 export function listClaims(db: Db, caseId: string): ClaimRecord[] {
@@ -3520,6 +3549,20 @@ export function listDecisions(db: Db): Array<{
       voidReason: row.void_reason ?? undefined
     };
   });
+}
+
+export function countDecisionsMissingResolvedTimestamp(db: Db): number {
+  const row = db
+    .prepare(
+      `
+      SELECT COUNT(*) AS count
+      FROM cases
+      WHERE status IN ('closed', 'sealed', 'void')
+        AND COALESCE(decided_at, closed_at, voided_at, created_at) IS NULL
+      `
+    )
+    .get() as { count: number } | undefined;
+  return Number(row?.count ?? 0);
 }
 
 export function getCaseIntegrityDiagnostics(

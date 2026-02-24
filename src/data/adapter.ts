@@ -51,10 +51,43 @@ function withCaseDisplayDate(caseItem: Case): Case {
 }
 
 function withDecisionDisplayDate(decision: Decision): Decision {
+  const timestamp = resolveDecisionTimestamp(decision);
   return {
     ...decision,
-    displayDateLabel: decision.displayDateLabel ?? formatDashboardDateLabel(decision.closedAtIso)
+    closedAtIso: timestamp ?? decision.closedAtIso,
+    displayDateLabel:
+      decision.displayDateLabel ??
+      (timestamp ? formatDashboardDateLabel(timestamp) : "Timestamp pending")
   };
+}
+
+function isValidIso(value: unknown): value is string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return false;
+  }
+  return Number.isFinite(new Date(value).getTime());
+}
+
+function resolveDecisionTimestamp(decision: Decision): string | null {
+  const record = decision as Decision & {
+    decidedAtIso?: string | null;
+    voidedAtIso?: string | null;
+    updatedAtIso?: string | null;
+    createdAtIso?: string | null;
+  };
+  const candidates: Array<unknown> = [
+    decision.closedAtIso,
+    record.decidedAtIso,
+    record.voidedAtIso,
+    record.updatedAtIso,
+    record.createdAtIso
+  ];
+  for (const candidate of candidates) {
+    if (isValidIso(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function buildTickerFromDecisions(decisions: Decision[]): TickerEvent[] {

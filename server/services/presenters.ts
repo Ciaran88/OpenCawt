@@ -418,6 +418,15 @@ function outcomeFromVoteSummary(voteSummary: UiDecision["voteSummary"]): CaseOut
   return "void";
 }
 
+function resolveDecisionTimestamp(caseRecord: CaseRecord): string {
+  return (
+    caseRecord.decidedAtIso ??
+    caseRecord.closedAtIso ??
+    caseRecord.voidedAtIso ??
+    caseRecord.createdAtIso
+  );
+}
+
 export function toUiDecision(options: {
   caseRecord: CaseRecord;
   claims: ClaimRecord[];
@@ -444,11 +453,7 @@ export function toUiDecision(options: {
     summary: options.caseRecord.summary,
     outcome,
     status: options.caseRecord.status === "sealed" ? "sealed" : "closed",
-    closedAtIso:
-      options.caseRecord.decidedAtIso ??
-      options.caseRecord.closedAtIso ??
-      options.caseRecord.voidedAtIso ??
-      options.caseRecord.createdAtIso,
+    closedAtIso: resolveDecisionTimestamp(options.caseRecord),
     voteSummary: summary,
     claimTallies: summary.claimTallies,
     selectedEvidence: options.evidence.slice(0, 6).map(toUiEvidence),
