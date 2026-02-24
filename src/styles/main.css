@@ -1,17 +1,17 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
-  /* Core Palette - Blue-Tinted Dark Navy */
-  --bg-app: #07090f;
-  --bg-panel: #0c0f1a;
-  --bg-surface: #111520;
-  --bg-surface-hover: #171c2e;
-  --bg-input: #0c0f1a;
+  /* Core Palette - Near-Neutral Dark (OCP-aligned) */
+  --bg-app: #090a0d;
+  --bg-panel: #111215;
+  --bg-surface: #1a1b20;
+  --bg-surface-hover: #1f2028;
+  --bg-input: #111215;
 
-  /* Borders - cool blue-tinted charcoal */
-  --border-base: #1c2134;
-  --border-light: #263049;
-  --border-focus: #384570;
+  /* Borders - near-neutral charcoal (OCP-aligned) */
+  --border-base: #1d2028;
+  --border-light: #262930;
+  --border-focus: #363d56;
 
   /* Text - cool-tinted white */
   --text-primary: #e8eaf2;
@@ -83,6 +83,8 @@
 }
 
 html, body {
+  font-size: 13px;
+  line-height: 1.6;
   margin: 0;
   padding: 0;
   height: 100%;
@@ -196,7 +198,7 @@ a {
 }
 
 .brand-subtitle {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: var(--text-secondary);
   margin: 0;
 }
@@ -221,7 +223,7 @@ a {
   cursor: pointer;
   border: 1px solid transparent;
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   letter-spacing: 0.03em;
 }
 
@@ -392,7 +394,7 @@ a {
 .form-card h3,
 .info-card h3 {
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -416,7 +418,7 @@ label > span {
 /* Toolbar section titles */
 .toolbar h3 {
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -435,10 +437,44 @@ label > span {
   display: block;
 }
 
+/* Muted text utility — matches OCP's --muted: #6b7280 */
+.muted {
+  color: #6b7280;
+}
+
+/* Key-value list: label/value pairs in detail views */
+.key-value-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.key-value-list dt {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+.key-value-list dd {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
 /* View Frame Header Spacing */
 .view-head {
   padding: var(--space-4);
   padding-bottom: 0;
+}
+
+.view-head p {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin: var(--space-1) 0 0;
+  line-height: 1.5;
 }
 
 /* View Header Elements */
@@ -785,7 +821,7 @@ select:focus {
 
 .dashboard-kpi-label {
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-secondary);
@@ -799,7 +835,7 @@ select:focus {
 }
 
 .dashboard-kpi-note {
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   color: var(--text-tertiary);
   margin: var(--space-1) 0 0;
 }
@@ -825,7 +861,7 @@ select:focus {
 
 .group-head h2 {
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -834,7 +870,7 @@ select:focus {
 }
 
 .group-head span {
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   color: var(--text-tertiary);
 }
 
@@ -874,7 +910,7 @@ select:focus {
 }
 
 .case-date {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: var(--text-tertiary);
   margin-top: var(--space-1);
 }
@@ -915,7 +951,7 @@ select:focus {
 }
 
 .segmented-label {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   text-transform: uppercase;
   color: var(--text-tertiary);
 }
@@ -1039,7 +1075,7 @@ select:focus {
 .case-participants-mini {
   display: flex;
   gap: var(--space-3);
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: var(--text-tertiary);
   margin-top: auto;
   word-break: break-all; /* Force long IDs to wrap */
@@ -1061,7 +1097,7 @@ select:focus {
 /* Header Countdown */
 .header-countdown {
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: var(--accent-blue);
   background-color: var(--accent-blue-dim);
   padding: 2px 8px;
@@ -1092,7 +1128,7 @@ select:focus {
   display: flex;
   justify-content: space-between;
   margin-bottom: var(--space-2);
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: var(--text-tertiary);
 }
 
@@ -1146,7 +1182,7 @@ select:focus {
 
 .chat-bubble.role-court p {
   color: var(--text-tertiary);
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   font-style: italic;
 }
 
@@ -1233,7 +1269,7 @@ select:focus {
   border-bottom: 1px solid var(--border-base);
   font-weight: 600;
   background-color: var(--bg-panel);
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1247,10 +1283,10 @@ select:focus {
 .panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-4);
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 /* Inner content: no competing frame, lighter treatment */
@@ -1259,6 +1295,7 @@ select:focus {
   background-color: var(--bg-surface);
   border-radius: var(--radius-md);
   padding: var(--space-3);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 /* Hover: subtle tint only, no border emphasis */
@@ -1328,7 +1365,7 @@ select:focus {
   background-color: var(--bg-panel);
   border-bottom: 1px solid var(--border-base);
   padding: var(--space-3) var(--space-4);
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   font-weight: 600;
   min-height: 50px; /* Ensure consistency */
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
@@ -1345,7 +1382,7 @@ select:focus {
 
 .jury-panel-head h3 {
   margin: 0;
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
@@ -1374,7 +1411,7 @@ select:focus {
   color: var(--text-tertiary);
   font-weight: 500;
   text-transform: uppercase;
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   margin-bottom: 2px;
 }
 
@@ -1518,7 +1555,7 @@ select:focus {
 
 .juror-principles {
   margin-top: var(--space-2);
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   color: var(--accent-blue);
 }
 
@@ -1608,7 +1645,7 @@ select:focus {
   border-radius: var(--radius-md);
   background-color: var(--bg-surface);
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   text-align: center;
   transition: all 0.3s ease;
 }
@@ -1640,7 +1677,7 @@ select:focus {
 }
 
 .case-header-card .step-index {
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   margin-bottom: 2px;
   opacity: 0.7;
 }
@@ -1658,7 +1695,7 @@ select:focus {
   margin-top: 0;
   margin-bottom: var(--space-2);
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.65rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--accent-blue);
   text-transform: uppercase;
@@ -1724,7 +1761,7 @@ select:focus {
 
 .principle-id {
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: var(--text-tertiary);
   background-color: var(--bg-app);
   border: 1px solid var(--border-base);
@@ -1760,7 +1797,7 @@ select:focus {
 }
 
 .principle-detail-grid dt {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   font-weight: 600;
   text-transform: uppercase;
   color: var(--text-tertiary);
@@ -1809,7 +1846,7 @@ select:focus {
 }
 
 .countdown-label {
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   min-width: 48px; /* Prevent jitter */
@@ -1979,7 +2016,7 @@ select:focus {
 }
 
 .admin-section-title {
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2007,7 +2044,7 @@ select:focus {
 }
 
 .admin-status-label {
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--ink-muted, #8a8a9a);
   text-transform: uppercase;
@@ -2018,7 +2055,7 @@ select:focus {
   display: inline-block;
   padding: 3px 10px;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   font-weight: 700;
   letter-spacing: 0.05em;
   width: fit-content;
@@ -2061,7 +2098,7 @@ select:focus {
 }
 
 .admin-status-detail {
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   color: var(--ink-muted, #8a8a9a);
 }
 
@@ -2076,12 +2113,12 @@ select:focus {
   align-items: center;
   gap: 0.5rem;
   margin-top: 2px;
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   color: var(--ink-muted, #8a8a9a);
 }
 
 .admin-treasury-pill .admin-status-label {
-  font-size: 0.7rem;
+  font-size: 0.9rem;
 }
 
 .admin-treasury-value {
@@ -2108,7 +2145,7 @@ select:focus {
 }
 
 .admin-address-row dt {
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--ink-muted, #8a8a9a);
   min-width: 8rem;
@@ -2122,7 +2159,7 @@ select:focus {
 
 .admin-address-code {
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   word-break: break-all;
 }
 
@@ -2195,7 +2232,7 @@ select:focus {
 }
 
 .admin-toggle-note {
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   margin: 0;
 }
 
@@ -2235,7 +2272,7 @@ select:focus {
   display: flex;
   align-items: center;
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   width: 100%;
 }
 
