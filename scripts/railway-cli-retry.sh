@@ -11,10 +11,13 @@ base_delay="${RAILWAY_CLI_RETRY_BASE_SEC:-2}"
 
 last_error=""
 for ((i=1; i<=attempts; i++)); do
-  if railway "$@"; then
+  output="$(railway "$@" 2>&1)"
+  rc=$?
+  if [[ $rc -eq 0 ]] && ! grep -qi "Failed to fetch" <<<"$output"; then
+    printf '%s\n' "$output"
     exit 0
   fi
-  rc=$?
+  printf '%s\n' "$output" >&2
   last_error="railway command failed with exit $rc"
   if [[ $i -lt $attempts ]]; then
     sleep_for=$((base_delay * i))
