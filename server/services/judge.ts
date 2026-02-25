@@ -473,28 +473,40 @@ async function callOpenAi<T>(
   },
   timeoutMs: number = JUDGE_CALL_TIMEOUT_MS
 ): Promise<T> {
-  const response = await fetchWithRetry({
-    url: "https://api.openai.com/v1/chat/completions",
-    attempts: Math.max(1, retryConfig.attempts),
-    timeoutMs: Math.min(timeoutMs, retryConfig.timeoutMs),
-    baseDelayMs: retryConfig.baseDelayMs,
-    target: "openai_judge",
-    init: {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage }
-        ]
-      })
-    }
-  });
+  const effectiveTimeoutMs = Math.max(1_000, Math.min(timeoutMs, retryConfig.timeoutMs));
+  let response: Response;
+  try {
+    response = await fetchWithRetry({
+      url: "https://api.openai.com/v1/chat/completions",
+      attempts: Math.max(1, retryConfig.attempts),
+      timeoutMs: effectiveTimeoutMs,
+      baseDelayMs: retryConfig.baseDelayMs,
+      target: "openai_judge",
+      init: {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage }
+          ]
+        })
+      }
+    });
+  } catch (error) {
+    logger.warn("judge_openai_request_failed", {
+      model,
+      timeoutMs: effectiveTimeoutMs,
+      attempts: Math.max(1, retryConfig.attempts),
+      message: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -528,6 +540,11 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
   const apiKey = deps.config.judgeOpenAiApiKey;
   const model = deps.config.judgeOpenAiModel;
   const useLlm = apiKey.length > 0;
+  const judgeRetryConfig = {
+    attempts: Math.max(1, Math.min(3, deps.config.retry.external.attempts)),
+    baseDelayMs: Math.max(250, deps.config.retry.external.baseDelayMs),
+    timeoutMs: Math.max(12_000, deps.config.retry.external.timeoutMs)
+  };
 
   if (useLlm) {
     deps.logger.info("judge_service_llm_enabled", { model });
@@ -557,7 +574,7 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
         SCREENING_SYSTEM_PROMPT,
         userMessage,
         deps.logger,
-        deps.config.retry.external
+        judgeRetryConfig
       );
 
       const approved = result.approved !== false; // bias toward approval
@@ -598,7 +615,7 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
         TIEBREAK_SYSTEM_PROMPT,
         userMessage,
         deps.logger,
-        deps.config.retry.external
+        judgeRetryConfig
       );
 
       const finding: "proven" | "not_proven" =
@@ -629,7 +646,7 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
         REMEDY_SYSTEM_PROMPT,
         userMessage,
         deps.logger,
-        deps.config.retry.external
+        judgeRetryConfig
       );
 
       const intentClass = typeof result.intentClass === "string" ? result.intentClass.trim() : "";
@@ -671,7 +688,7 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
         STAGE_ADVISORY_SYSTEM_PROMPT,
         userMessage,
         deps.logger,
-        deps.config.retry.external
+        judgeRetryConfig
       );
       const advisory =
         typeof result.advisory === "string" && result.advisory.trim().length > 0

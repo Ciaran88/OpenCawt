@@ -3189,17 +3189,43 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         async handler(verified) {
           const caseRecord = ensureCaseExists(caseId);
           const runtime = getCaseRuntime(db, caseId);
+          logger.info("ballot_submission_attempt", {
+            caseId,
+            jurorId: verified.agentId,
+            caseStatus: caseRecord.status,
+            currentStage: runtime?.currentStage ?? null,
+            votesProvided: Array.isArray(body.votes) ? body.votes.length : 0
+          });
           if (caseRecord.status !== "voting" || runtime?.currentStage !== "voting") {
+            logger.warn("ballot_rejected", {
+              caseId,
+              jurorId: verified.agentId,
+              code: "CASE_NOT_VOTING",
+              caseStatus: caseRecord.status,
+              currentStage: runtime?.currentStage ?? null
+            });
             throw conflict("CASE_NOT_VOTING", "Ballots are only accepted in voting stage.");
           }
 
           const juryMembers = listJuryMembers(db, caseId);
           if (!juryMembers.includes(verified.agentId)) {
+            logger.warn("ballot_rejected", {
+              caseId,
+              jurorId: verified.agentId,
+              code: "NOT_JUROR",
+              jurySize: juryMembers.length
+            });
             throw new ApiError(403, "NOT_JUROR", "Only selected jurors can submit ballots.");
           }
 
           const member = listJuryPanelMembers(db, caseId).find((item) => item.jurorId === verified.agentId);
           if (!member || !["active_voting", "ready"].includes(member.memberStatus)) {
+            logger.warn("ballot_rejected", {
+              caseId,
+              jurorId: verified.agentId,
+              code: "JUROR_NOT_ACTIVE",
+              memberStatus: member?.memberStatus ?? null
+            });
             throw conflict("JUROR_NOT_ACTIVE", "Juror is not active for voting.");
           }
 
@@ -3209,6 +3235,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           }
 
           if (member.votingDeadlineAtIso && Date.now() > new Date(member.votingDeadlineAtIso).getTime()) {
+            logger.warn("ballot_rejected", {
+              caseId,
+              jurorId: verified.agentId,
+              code: "BALLOT_DEADLINE_PASSED",
+              votingDeadlineAtIso: member.votingDeadlineAtIso
+            });
             throw conflict("BALLOT_DEADLINE_PASSED", "Voting deadline has passed for this juror.");
           }
 
@@ -3230,6 +3262,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           const claims = listClaims(db, caseId);
           const validClaimIds = new Set(claims.map((item) => item.claimId));
           if (!Array.isArray(body.votes) || body.votes.length === 0) {
+            logger.warn("ballot_rejected", {
+              caseId,
+              jurorId: verified.agentId,
+              code: "BALLOT_VOTES_REQUIRED"
+            });
             throw badRequest("BALLOT_VOTES_REQUIRED", "Ballot votes are required.");
           }
           const FINDING_ENUM = ["proven", "not_proven", "insufficient"] as const;
@@ -3292,6 +3329,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             });
           } catch (error) {
             if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
+              logger.warn("ballot_rejected", {
+                caseId,
+                jurorId: verified.agentId,
+                code: "BALLOT_ALREADY_SUBMITTED"
+              });
               throw conflict(
                 "BALLOT_ALREADY_SUBMITTED",
                 "Only one ballot per juror is allowed per case."
@@ -3340,6 +3382,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
               principlesReliedOn: ballot.principlesReliedOn,
               confidence: ballot.confidence ?? null
             }
+          });
+          logger.info("ballot_submission_accepted", {
+            caseId,
+            jurorId: verified.agentId,
+            ballotId: ballot.ballotId,
+            voteLabel: ballot.vote ?? null,
+            votesCount: ballot.votes.length
           });
 
           return {
@@ -3566,41 +3615,56 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const evidence = listEvidenceByCase(db, caseId);
       const claims = listClaims(db, caseId);
 
-      const advisoryOutcome = await withJudgeTimeout(
-        judge.summariseStage({
+      let advisoryOutcome:
+        | { ok: true; data: string }
+        | { ok: false; error: string }
+        | null = null;
+      const advisoryErrors: string[] = [];
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        advisoryOutcome = await withJudgeTimeout(
+          judge.summariseStage({
+            caseId,
+            stage,
+            summary: caseRecord.summary,
+            claims: claims.map((claim) => ({
+              claimId: claim.claimId,
+              summary: claim.summary,
+              requestedRemedy: claim.requestedRemedy,
+              allegedPrinciples: claim.allegedPrinciples
+            })),
+            submissions: submissions.map((submission) => ({
+              side: submission.side,
+              phase: submission.phase,
+              text: submission.text
+            })),
+            evidence: evidence.map((entry) => ({
+              submittedBy: entry.submittedBy,
+              kind: entry.kind,
+              bodyText: entry.bodyText,
+              references: entry.references
+            }))
+          }),
+          config.judgeCallTimeoutMs,
+          "summariseStage"
+        );
+        if (advisoryOutcome.ok) {
+          break;
+        }
+        advisoryErrors.push(advisoryOutcome.error);
+        logger.warn("judge_stage_advisory_attempt_failed", {
           caseId,
           stage,
-          summary: caseRecord.summary,
-          claims: claims.map((claim) => ({
-            claimId: claim.claimId,
-            summary: claim.summary,
-            requestedRemedy: claim.requestedRemedy,
-            allegedPrinciples: claim.allegedPrinciples
-          })),
-          submissions: submissions.map((submission) => ({
-            side: submission.side,
-            phase: submission.phase,
-            text: submission.text
-          })),
-          evidence: evidence.map((entry) => ({
-            submittedBy: entry.submittedBy,
-            kind: entry.kind,
-            bodyText: entry.bodyText,
-            references: entry.references
-          }))
-        }),
-        config.judgeCallTimeoutMs,
-        "summariseStage"
-      );
-      if (!advisoryOutcome.ok) {
-        throw new ApiError(
-          503,
-          "JUDGE_STAGE_ADVISORY_UNAVAILABLE",
-          `Judge stage advisory failed: ${advisoryOutcome.error}`
-        );
+          attempt,
+          error: advisoryOutcome.error
+        });
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
+        }
       }
       const stageLabel = stage.replace(/_/g, " ");
-      const advisoryText = advisoryOutcome.data.trim();
+      const advisoryText = advisoryOutcome?.ok
+        ? advisoryOutcome.data.trim()
+        : `Stage advisory unavailable (${stageLabel}) due to transient judge connectivity issues. Continue with specific evidence references, principle citations and explicit causal links before voting.`;
       const transcriptMessage = `Judge advisory (${stageLabel}): ${advisoryText}`;
 
       appendTranscriptEvent(db, {
@@ -3611,14 +3675,23 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         messageText: transcriptMessage,
         payload: {
           judgeStageAdvisory: true,
-          advisoryStage: stage
+          advisoryStage: stage,
+          degraded: !advisoryOutcome?.ok
         }
       });
+      if (!advisoryOutcome?.ok) {
+        logger.warn("judge_stage_advisory_fallback_used", {
+          caseId,
+          stage,
+          errors: advisoryErrors.slice(0, 3)
+        });
+      }
 
       sendJson(res, 200, {
         caseId,
         stage,
-        advisory: advisoryText
+        advisory: advisoryText,
+        degraded: !advisoryOutcome?.ok
       });
       return;
     }
