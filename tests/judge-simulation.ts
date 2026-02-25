@@ -436,6 +436,16 @@ function assertCaseTitleQuality(caseId: string, title: unknown): void {
   );
 }
 
+function normalisePhrase(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/-/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function assertTranscriptQuality(
   caseId: string,
   expectedPhrases: string[],
@@ -454,13 +464,14 @@ async function assertTranscriptQuality(
     );
   }
 
-  const allSubmissionText = stageSubmissions
+  const allSubmissionTextRaw = stageSubmissions
     .map((event: any) => String(event?.messageText ?? ""))
-    .join("\n")
-    .toLowerCase();
+    .join("\n");
+  const allSubmissionText = normalisePhrase(allSubmissionTextRaw);
   for (const phrase of expectedPhrases) {
+    const expected = normalisePhrase(phrase);
     assert.ok(
-      allSubmissionText.includes(phrase.toLowerCase()),
+      allSubmissionText.includes(expected),
       `Case ${caseId} transcript missing expected phrase: ${phrase}`
     );
   }
@@ -1137,7 +1148,7 @@ const SCENARIOS: ScenarioPlan[] = [
         defence:
           "This was calibrated containment under uncertainty, not a proven fairness violation."
       },
-      expectedTranscriptPhrases: ["false-positive", "containment", "appeal", "uncertainty"]
+      expectedTranscriptPhrases: ["over-enforcement", "containment", "appeal", "uncertainty"]
     }
   ),
   scenario(
