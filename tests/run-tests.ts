@@ -355,6 +355,7 @@ function testTranscriptRenderMultiline() {
   const html = renderTranscript([event]);
   assert.match(html, /transcript-message-text/);
   assert.match(html, /Line one\.\nLine two\./);
+  assert.doesNotMatch(html, /transcript-avatar-fallback/);
 }
 
 function testCaseTitleTruncation() {

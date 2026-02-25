@@ -1895,105 +1895,19 @@ select:focus {
 .transcript-window {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
   padding-bottom: var(--space-6);
 }
 
-.chat-bubble {
-  max-width: 85%;
-  align-self: flex-start;
-  position: relative;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-light);
-  background: linear-gradient(180deg, var(--bg-surface-hover) 0%, var(--bg-surface) 100%);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
-
-.chat-bubble header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: var(--space-2);
-  font-size: 0.9rem;
-  color: var(--text-tertiary);
-}
-
-.chat-bubble strong {
-  color: var(--text-secondary);
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.chat-bubble p {
-  margin: 0;
-  line-height: 1.5;
-  color: var(--text-primary);
-}
-
-.chat-message-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.chat-bubble.role-prosecution {
-  align-self: flex-start;
-  border-top-left-radius: 2px;
-  border-left: 3px solid var(--accent-teal);
-  background: linear-gradient(to right, rgba(0, 191, 165, 0.18), var(--bg-surface));
-}
-
-.chat-bubble.role-defence {
-  align-self: flex-end;
-  border-top-right-radius: 2px;
-  border-right: 3px solid var(--accent-error);
-  background: linear-gradient(to left, rgba(255, 61, 0, 0.13), var(--bg-surface));
-  text-align: right; 
-}
-
-.chat-bubble.role-defence header {
-  flex-direction: row-reverse;
-}
-
-.chat-bubble.role-court {
-  align-self: center;
-  max-width: 100%;
-  width: 100%;
-  text-align: center;
-  background: linear-gradient(90deg, transparent 0%, var(--bg-surface-hover) 20%, var(--bg-surface-hover) 50%, transparent 100%);
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
-  padding: var(--space-2) 0;
-}
-
-.chat-bubble.role-court p {
-  color: var(--text-tertiary);
-  font-size: 0.9rem;
-  font-style: italic;
-}
-
-/* Liquid glass transcript refresh */
 .transcript-window.transcript-glass {
-  gap: var(--space-5);
+  gap: var(--space-4);
   border-radius: var(--radius-xl);
-  background:
-    radial-gradient(
-      120% 120% at 10% 0%,
-      color-mix(in srgb, var(--accent-blue) 9%, transparent),
-      transparent 60%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-surface) 88%, transparent),
-      color-mix(in srgb, var(--bg-panel) 92%, transparent)
-    );
-  border: 1px solid color-mix(in srgb, var(--border-light) 75%, transparent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    0 20px 40px rgba(0, 0, 0, 0.28);
+  background-color: color-mix(in srgb, var(--bg-surface) 80%, var(--bg-panel));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Ccircle cx='2' cy='2' r='1.2' fill='%232b2f37' /%3E%3C/svg%3E");
+  background-size: 20px 20px;
+  border: 1px solid var(--border-light);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.26);
   padding: var(--space-5);
-  backdrop-filter: blur(12px) saturate(115%);
-  -webkit-backdrop-filter: blur(12px) saturate(115%);
 }
 
 .transcript-row {
@@ -2028,13 +1942,13 @@ select:focus {
 }
 
 .transcript-avatar {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   position: relative;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--border-light) 75%, transparent);
-  background: color-mix(in srgb, var(--bg-surface) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-light) 92%, #fff 8%);
+  background: var(--bg-surface);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);
   display: inline-flex;
   align-items: center;
@@ -2049,13 +1963,6 @@ select:focus {
   inset: 0;
 }
 
-.transcript-avatar-fallback {
-  color: var(--text-primary);
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-}
-
 .transcript-speaker-name {
   font-size: 0.78rem;
   color: var(--text-secondary);
@@ -2065,57 +1972,64 @@ select:focus {
 }
 
 .transcript-bubble {
+  --bubble-color: color-mix(in srgb, var(--bg-surface-hover) 88%, #000 12%);
+  --bubble-border: color-mix(in srgb, var(--bubble-color) 70%, #ffffff 30%);
   width: fit-content;
   max-width: 100%;
   border-radius: 18px;
-  border: 1px solid color-mix(in srgb, var(--border-light) 76%, transparent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 8px 24px rgba(0, 0, 0, 0.24);
+  border: 1px solid var(--bubble-border);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
   padding: var(--space-4);
-  backdrop-filter: blur(8px) saturate(115%);
-  -webkit-backdrop-filter: blur(8px) saturate(115%);
-  background: color-mix(in srgb, var(--bg-surface-hover) 74%, transparent);
+  background-color: var(--bubble-color);
+  position: relative;
+  z-index: 1;
+}
+
+.transcript-bubble::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  background-color: var(--bubble-color);
+  border: 1px solid var(--bubble-border);
+  z-index: -1;
+  left: -6px;
+  border-top: none;
+  border-right: none;
+}
+
+.transcript-row--right .transcript-bubble::after {
+  left: auto;
+  right: -6px;
+  border-left: none;
+  border-bottom: none;
 }
 
 .transcript-bubble--prosecution {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-blue) 18%, transparent),
-    color-mix(in srgb, var(--bg-surface) 78%, transparent)
-  );
+  --bubble-color: color-mix(in srgb, var(--accent-success) 32%, var(--bg-surface) 68%);
+  color: var(--text-primary);
 }
 
 .transcript-bubble--defence {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-gold) 17%, transparent),
-    color-mix(in srgb, var(--bg-surface) 78%, transparent)
-  );
+  --bubble-color: color-mix(in srgb, var(--accent-gold) 38%, var(--bg-surface) 62%);
+  color: var(--text-primary);
 }
 
 .transcript-bubble--jury {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-success) 16%, transparent),
-    color-mix(in srgb, var(--bg-surface) 78%, transparent)
-  );
+  --bubble-color: color-mix(in srgb, var(--accent-blue) 42%, var(--bg-surface) 58%);
+  color: var(--text-primary);
 }
 
 .transcript-bubble--judge {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-purple) 20%, transparent),
-    color-mix(in srgb, var(--bg-surface) 78%, transparent)
-  );
+  --bubble-color: color-mix(in srgb, var(--bg-input) 78%, #000 22%);
+  color: var(--text-primary);
 }
 
 .transcript-bubble--court {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--text-secondary) 15%, transparent),
-    color-mix(in srgb, var(--bg-surface) 80%, transparent)
-  );
+  --bubble-color: color-mix(in srgb, var(--text-secondary) 38%, var(--bg-surface) 62%);
+  color: #0f1117;
 }
 
 .transcript-message-text {
@@ -2187,13 +2101,6 @@ select:focus {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
-}
-
-@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
-  .transcript-window.transcript-glass,
-  .transcript-bubble {
-    background: var(--bg-surface);
-  }
 }
 
 @media (max-width: 900px) {

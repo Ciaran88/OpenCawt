@@ -15,7 +15,6 @@ export interface TranscriptSpeakerVisual {
   align: TranscriptSpeakerAlign;
   iconPath: string;
   displayLabel: string;
-  fallbackLabel: string;
 }
 
 function fromVoteLabel(value: unknown): TranscriptVoteAnswer | null {
@@ -97,8 +96,7 @@ export function resolveTranscriptSpeaker(
       speakerKey: "prosecution",
       align: "left",
       iconPath: PROSECUTION_ICON_PATH,
-      displayLabel: "Prosecution",
-      fallbackLabel: "P"
+      displayLabel: "Prosecution"
     };
   }
   if (event.actorRole === "defence") {
@@ -106,8 +104,7 @@ export function resolveTranscriptSpeaker(
       speakerKey: "defence",
       align: "right",
       iconPath: DEFENCE_ICON_PATH,
-      displayLabel: "Defence",
-      fallbackLabel: "D"
+      displayLabel: "Defence"
     };
   }
   if (event.actorRole === "juror") {
@@ -115,8 +112,7 @@ export function resolveTranscriptSpeaker(
       speakerKey: "jury",
       align: "left",
       iconPath: JURY_ICON_PATH,
-      displayLabel: "Jury",
-      fallbackLabel: "J"
+      displayLabel: "Jury"
     };
   }
   if (inferJudgeSurface(event, hasJudgeContext)) {
@@ -124,16 +120,14 @@ export function resolveTranscriptSpeaker(
       speakerKey: "judge",
       align: "left",
       iconPath: JUDGE_ICON_PATH,
-      displayLabel: "Judge",
-      fallbackLabel: "J"
+      displayLabel: "Judge"
     };
   }
   return {
     speakerKey: "court",
     align: "left",
     iconPath: COURT_ICON_PATH,
-    displayLabel: "Court",
-    fallbackLabel: "C"
+    displayLabel: "Court"
   };
 }
 

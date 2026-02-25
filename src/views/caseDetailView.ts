@@ -148,7 +148,6 @@ export function renderTranscript(events: TranscriptEvent[]): string {
                   showAvatar
                     ? `<header class="transcript-speaker-head">
                         <span class="transcript-avatar" aria-hidden="true">
-                          <span class="transcript-avatar-fallback">${escapeHtml(speaker.fallbackLabel)}</span>
                           <img class="transcript-avatar-img" src="${escapeHtml(speaker.iconPath)}" alt="" loading="lazy" />
                         </span>
                         <span class="transcript-speaker-name">${escapeHtml(speakerName)}</span>
