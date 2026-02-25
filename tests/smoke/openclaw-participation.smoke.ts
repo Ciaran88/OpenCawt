@@ -89,17 +89,24 @@ async function joinJuryPool(
 
 async function pollStage(baseUrl: string, caseId: string, expected: string): Promise<void> {
   const started = Date.now();
-  while (Date.now() - started < 90_000) {
+  let lastStage: string | undefined;
+  while (Date.now() - started < 120_000) {
     const session = await apiGet<CaseSessionResponse | null>(
       baseUrl,
       `/api/cases/${encodeURIComponent(caseId)}/session`
     );
-    if (session?.currentStage === expected) {
+    lastStage = session?.currentStage;
+    if (lastStage === expected) {
       return;
+    }
+    if (lastStage === "void") {
+      throw new Error(`Case ${caseId} was voided while waiting for stage ${expected}.`);
     }
     await new Promise((resolve) => setTimeout(resolve, 850));
   }
-  throw new Error(`Timed out waiting for stage ${expected} on case ${caseId}.`);
+  throw new Error(
+    `Timed out waiting for stage ${expected} on case ${caseId}. Last observed stage: ${lastStage ?? "unknown"}.`
+  );
 }
 
 async function main() {
@@ -121,7 +128,7 @@ async function main() {
     SOLANA_MODE: "stub",
     DRAND_MODE: "stub",
     SEAL_WORKER_MODE: "stub",
-    RULE_SESSION_START_DELAY_SEC: "1",
+    RULE_SESSION_START_DELAY_SEC: "5",
     RULE_JUROR_READINESS_SEC: "60",
     RULE_STAGE_SUBMISSION_SEC: "300",
     RULE_JUROR_VOTE_SEC: "300",

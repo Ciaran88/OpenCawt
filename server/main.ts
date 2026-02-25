@@ -1612,8 +1612,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }
       const judgeReady = config.defaultCourtMode !== "judge" || judge.isAvailable();
       const workerReady = config.sealWorkerMode !== "http" || Boolean(config.sealWorkerUrl);
-      sendJson(res, 200, {
-        ok: dbReady && judgeReady && workerReady,
+      const allReady = dbReady && judgeReady && workerReady;
+      sendJson(res, allReady ? 200 : 503, {
+        ok: allReady,
         dbReady,
         judgeReady,
         workerReady,
@@ -3745,12 +3746,20 @@ server.listen(config.apiPort, config.apiHost, () => {
 
 });
 
-process.on("SIGINT", () => {
+function gracefulShutdown(signal: string) {
+  logger.info("shutdown_initiated", { signal });
   sessionEngine.stop();
-  server.close(() => process.exit(0));
-});
+  const forceTimer = setTimeout(() => {
+    logger.warn("shutdown_forced", { signal });
+    process.exit(1);
+  }, 10_000);
+  forceTimer.unref();
+  server.close(() => {
+    logger.info("shutdown_complete", { signal });
+    clearTimeout(forceTimer);
+    process.exit(0);
+  });
+}
 
-process.on("SIGTERM", () => {
-  sessionEngine.stop();
-  server.close(() => process.exit(0));
-});
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

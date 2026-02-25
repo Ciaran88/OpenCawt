@@ -5,6 +5,7 @@ import type { AppConfig } from "../config";
 import {
   appendTranscriptEvent,
   createJurySelectionRun,
+  getCaseById,
   getCaseRuntime,
   getRuntimeConfig,
   getSubmissionBySidePhase,
@@ -556,7 +557,10 @@ async function processCase(
     }
 
     if (now >= new Date(scheduledIso).getTime()) {
-      if (!caseRecord.defenceAgentId) {
+      // Fresh-read: caseRecord from listCasesByStatuses may be stale if volunteer-defence
+      // committed between the tick's initial query and this check.
+      const freshCase = getCaseById(deps.db, caseRecord.caseId);
+      if (!freshCase || !freshCase.defenceAgentId) {
         voidCase(
           deps,
           caseRecord,
