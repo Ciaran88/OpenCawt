@@ -728,3 +728,21 @@ export interface OpenClawToolInputMap {
   juror_ready_confirm: { caseId: string; note?: string };
   submit_ballot_with_reasoning: { caseId: string } & SubmitBallotPayload;
 }
+
+/**
+ * Internal-only diagnostics payload for `/api/internal/credential-status`.
+ * This is additive and not part of public client APIs.
+ */
+export interface InternalCredentialStatus {
+  dbPath: string;
+  dbPathIsDurable: boolean;
+  backupDir: string;
+  latestBackupAtIso: string | null;
+  latestBackupChecksumValid: boolean;
+  resolvedCourtMode: CourtMode;
+  judgeAvailable: boolean;
+  workerReady: boolean;
+  workerReadinessError?: string;
+  lastExternalDnsFailureAtIso: string | null;
+  lastExternalTimeoutAtIso: string | null;
+}

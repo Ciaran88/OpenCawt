@@ -114,6 +114,33 @@ export interface ExternalFailure {
   details: Record<string, unknown>;
 }
 
+type ExternalFailureTelemetry = {
+  lastExternalDnsFailureAtIso: string | null;
+  lastExternalTimeoutAtIso: string | null;
+};
+
+const externalFailureTelemetry: ExternalFailureTelemetry = {
+  lastExternalDnsFailureAtIso: null,
+  lastExternalTimeoutAtIso: null
+};
+
+function recordExternalFailureTelemetry(code: ExternalFailure["code"]): void {
+  const nowIso = new Date().toISOString();
+  if (code === "EXTERNAL_DNS_FAILURE") {
+    externalFailureTelemetry.lastExternalDnsFailureAtIso = nowIso;
+  }
+  if (code === "EXTERNAL_TIMEOUT") {
+    externalFailureTelemetry.lastExternalTimeoutAtIso = nowIso;
+  }
+}
+
+export function getExternalFailureTelemetry(): ExternalFailureTelemetry {
+  return {
+    lastExternalDnsFailureAtIso: externalFailureTelemetry.lastExternalDnsFailureAtIso,
+    lastExternalTimeoutAtIso: externalFailureTelemetry.lastExternalTimeoutAtIso
+  };
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -247,6 +274,7 @@ export async function fetchWithRetry(options: ExternalFetchOptions): Promise<Res
           attempt,
           attempts: options.attempts
         });
+        recordExternalFailureTelemetry(failure.code);
         lastFailure = failure;
         if (failure.retryable && attempt < options.attempts) {
           const exponentialDelay = options.baseDelayMs * Math.pow(2, attempt - 1);
@@ -271,6 +299,7 @@ export async function fetchWithRetry(options: ExternalFetchOptions): Promise<Res
         attempt,
         attempts: options.attempts
       });
+      recordExternalFailureTelemetry(failure.code);
       lastFailure = failure;
       if (failure.retryable && attempt < options.attempts) {
         const exponentialDelay = options.baseDelayMs * Math.pow(2, attempt - 1);

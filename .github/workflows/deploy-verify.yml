@@ -27,10 +27,9 @@ jobs:
             fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "Skipping deploy verify: missing required secret-backed vars: ${missing[*]}"
-            echo "SKIP_DEPLOY_VERIFY=1" >> "$GITHUB_ENV"
+            echo "Missing required deploy-verify vars: ${missing[*]}" >&2
+            exit 1
           fi
 
       - name: Verify production endpoints
-        if: ${{ env.SKIP_DEPLOY_VERIFY != '1' }}
         run: bash scripts/railway-postdeploy-check.sh

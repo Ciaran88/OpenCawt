@@ -102,6 +102,8 @@ Operational diagnostics (`/api/internal/credential-status` with system key) now 
 - `backupDir`
 - `latestBackupAtIso`
 - `latestBackupChecksumValid`
+- `lastExternalDnsFailureAtIso`
+- `lastExternalTimeoutAtIso`
 
 Operational targets for this phase:
 
@@ -271,8 +273,22 @@ Release and rollout commands:
 - `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:rollout-check`
 - `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:postdeploy-check`
 - `API_URL=... bash scripts/network-preflight.sh`
+- `DNS_PREFLIGHT_RESOLVER_MODE=doh API_URL=... WORKER_URL=... bash scripts/network-preflight.sh`
 
-If Railway CLI calls fail due `backboard.railway.com` DNS, use endpoint-only verification and rerun CLI checks later.
+If Railway CLI calls fail due `backboard.railway.com` DNS, rollout check auto-falls back to endpoint-only verification with reason tag `LOCAL_RAILWAY_CLI_DNS_UNAVAILABLE_FALLBACK_ENDPOINT_ONLY`.
+
+Script reason tags:
+
+- local resolver incident: `DNS_FAIL_LOCAL`
+- endpoint resolver incident: `ENDPOINT_DNS_FAIL`
+- endpoint timeout: `ENDPOINT_TIMEOUT`
+- upstream 5xx: `ENDPOINT_5XX`
+- readiness dependency failure: `READY_FAIL_DEPENDENCY`
+
+Authoritative gate policy:
+
+- `deploy-verify` on GitHub-hosted runner is authoritative for production acceptance
+- local runner verification is advisory when DNS is degraded
 
 Backup and recovery commands:
 

@@ -545,6 +545,28 @@ SYSTEM_API_KEY=... \
 npm run railway:rollout-check
 ```
 
+DNS-resilient behavior:
+
+- local rollout now auto-falls back to endpoint-only verification when Railway CLI DNS fails
+- fallback reason is emitted as `LOCAL_RAILWAY_CLI_DNS_UNAVAILABLE_FALLBACK_ENDPOINT_ONLY`
+- local DNS failure is tagged as `DNS_FAIL_LOCAL`
+- endpoint failures are tagged as `ENDPOINT_DNS_FAIL`, `ENDPOINT_TIMEOUT`, `ENDPOINT_5XX` or `READY_FAIL_DEPENDENCY`
+
+Resolver diagnostics mode:
+
+```bash
+# default resolver mode
+API_URL=... WORKER_URL=... bash scripts/network-preflight.sh
+
+# optional DNS-over-HTTPS diagnostics mode
+DNS_PREFLIGHT_RESOLVER_MODE=doh API_URL=... WORKER_URL=... bash scripts/network-preflight.sh
+```
+
+Authoritative production gate:
+
+- `deploy-verify` GitHub Actions workflow is the source of truth for rollout acceptance
+- local runner checks are advisory when local DNS is unstable
+
 ### OCP on Railway
 
 OCP is embedded at `/ocp` (UI) and `/v1` (API). To enable it:
@@ -653,6 +675,8 @@ Key groups:
 - drand: `DRAND_MODE`, `DRAND_BASE_URL`
 - Worker: `SEAL_WORKER_MODE`, `SEAL_WORKER_URL`, `MINT_WORKER_MODE`, `MINT_WORKER_HOST`, `MINT_WORKER_PORT`, `MINT_SIGNING_STRATEGY`, `MINT_AUTHORITY_KEY_B58`, `BUBBLEGUM_TREE_ADDRESS`, `BUBBLEGUM_MINT_ENDPOINT`, `PINATA_JWT`, `PINATA_API_BASE`, `PINATA_GATEWAY_BASE`, `RULESET_VERSION`
 - Retry and logs: `EXTERNAL_*`, `DAS_*`, `LOG_LEVEL`
+- Judge retry controls: `JUDGE_CALL_TIMEOUT_MS`, `JUDGE_RETRY_ATTEMPTS`, `JUDGE_RETRY_BASE_MS`, `JUDGE_RETRY_TIMEOUT_MS`, `JUDGE_MAX_CONCURRENT_CALLS`
+- Preflight diagnostics: `DNS_PREFLIGHT_RESOLVER_MODE=system|doh`
 
 ## Database and scripts
 
@@ -697,7 +721,7 @@ Backup/restore notes:
 - `db:restore` validates checksum and refuses restore when API is reachable unless `--force` is provided.
 - `backup:verify` validates the latest backup checksum (or `BACKUP_FILE` override).
 - `restore:drill:staging` restores the latest backup to `STAGING_DB_PATH` for a non-production drill.
-- Internal diagnostics (`GET /api/internal/credential-status` with `X-System-Key`) now report `dbPath`, `dbPathIsDurable`, `backupDir`, `latestBackupAtIso` and `latestBackupChecksumValid`.
+- Internal diagnostics (`GET /api/internal/credential-status` with `X-System-Key`) now report `dbPath`, `dbPathIsDurable`, `backupDir`, `latestBackupAtIso`, `latestBackupChecksumValid`, `lastExternalDnsFailureAtIso` and `lastExternalTimeoutAtIso`.
 
 Operational targets:
 
@@ -772,7 +796,14 @@ Deploy and verify:
 If Railway CLI DNS is unstable, endpoint-only checks remain available:
 
 - `API_URL=... WORKER_URL=... SYSTEM_API_KEY=... npm run railway:postdeploy-check`
-- `API_URL=... bash scripts/network-preflight.sh`
+- `API_URL=... WORKER_URL=... bash scripts/network-preflight.sh`
+- `DNS_PREFLIGHT_RESOLVER_MODE=doh API_URL=... WORKER_URL=... bash scripts/network-preflight.sh`
+
+Release decision policy:
+
+1. Treat `deploy-verify` workflow green status as authoritative.
+2. Treat local rollout checks as advisory if `DNS_FAIL_LOCAL` is emitted.
+3. Escalate as deployment incident only if CI verification and public endpoint checks both fail.
 
 Rollback decision flow:
 

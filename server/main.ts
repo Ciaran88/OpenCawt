@@ -144,6 +144,7 @@ import {
 } from "./services/validation";
 import {
   fetchJsonWithRetry,
+  getExternalFailureTelemetry,
   pathSegments,
   readJsonBody,
   sendApiError,
@@ -1664,6 +1665,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const workerProbeRequestId = createRequestId();
       const workerProbe = await probeSealWorkerReadiness(workerProbeRequestId);
       const missingDecisionTimestamps = countDecisionsMissingResolvedTimestamp(db);
+      const externalTelemetry = getExternalFailureTelemetry();
       sendJson(res, 200, {
         solanaMode: config.solanaMode,
         sealWorkerMode: config.sealWorkerMode,
@@ -1689,6 +1691,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         missingDecisionTimestampCount: missingDecisionTimestamps,
         workerReady: workerProbe.ready,
         workerReadinessError: workerProbe.error,
+        lastExternalDnsFailureAtIso: externalTelemetry.lastExternalDnsFailureAtIso,
+        lastExternalTimeoutAtIso: externalTelemetry.lastExternalTimeoutAtIso,
         resolvedCourtMode:
           (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode,
         judgeAvailable: judge.isAvailable()
