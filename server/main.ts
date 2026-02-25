@@ -61,6 +61,7 @@ import {
   listDefenceInvitesForAgent,
   listBallotsByCase,
   listCasesByStatuses,
+  listVoidedCases,
   listClaims,
   listEligibleJurors,
   listEvidenceByCase,
@@ -76,6 +77,7 @@ import {
   recordCaseView,
   rebuildAllAgentStats,
   searchAgents,
+  searchCasesGlobal,
   revokeAgentCapabilityByHash,
   saveUsedTreasuryTx,
   setAgentBanned,
@@ -2319,6 +2321,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "GET" && pathname === "/api/cases/search") {
+      const q = url.searchParams.get("q") ?? "";
+      const rawLimit = Number(url.searchParams.get("limit") || "20");
+      const limit = Number.isFinite(rawLimit) ? Math.min(rawLimit, 50) : 20;
+      const cases = searchCasesGlobal(db, { q: q || undefined, limit });
+      sendJson(res, 200, { cases });
+      return;
+    }
+
     if (
       method === "GET" &&
       segments.length === 4 &&
@@ -2427,13 +2438,29 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (method === "GET" && pathname === "/api/decisions") {
-      const decisionRecords = listCasesByStatuses(db, ["closed", "sealed", "void"]).sort((a, b) => {
+      const decisionRecords = listCasesByStatuses(db, ["closed", "sealed"]).sort((a, b) => {
         const aTime = new Date(resolveCaseDecisionTimestamp(a)).getTime();
         const bTime = new Date(resolveCaseDecisionTimestamp(b)).getTime();
         return bTime - aTime;
       });
       const decisions = await Promise.all(decisionRecords.map((item) => hydrateDecision(item)));
       sendJson(res, 200, decisions);
+      return;
+    }
+
+    if (
+      method === "GET" &&
+      segments.length === 3 &&
+      segments[0] === "api" &&
+      segments[1] === "decisions" &&
+      segments[2] === "voided"
+    ) {
+      const page = Math.max(1, Number(url.searchParams.get("page") || "1"));
+      const perPage = Math.min(40, Math.max(1, Number(url.searchParams.get("per_page") || "40")));
+      const offset = (page - 1) * perPage;
+      const { records, total } = listVoidedCases(db, { limit: perPage, offset });
+      const decisions = await Promise.all(records.map((item) => hydrateDecision(item)));
+      sendJson(res, 200, { items: decisions, total, page, perPage });
       return;
     }
 

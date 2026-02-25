@@ -969,6 +969,59 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
   return rows.map(mapCaseRow);
 }
 
+const VOIDED_CASES_MAX = 200;
+
+export function listVoidedCases(
+  db: Db,
+  options: { limit: number; offset: number }
+): { records: CaseRecord[]; total: number } {
+  const { limit, offset } = options;
+  const countRow = db
+    .prepare(
+      `
+      SELECT COUNT(*) AS count FROM (
+        SELECT 1 FROM cases
+        WHERE status = 'void'
+        ORDER BY COALESCE(voided_at, decided_at, closed_at, created_at) DESC
+        LIMIT ?
+      )
+      `
+    )
+    .get(VOIDED_CASES_MAX) as { count: number };
+  const total = Number(countRow?.count ?? 0);
+
+  const rows = db
+    .prepare(
+      `
+      WITH ranked AS (
+        SELECT
+          case_id, public_slug, status, session_stage, prosecution_agent_id, defendant_agent_id,
+          defence_agent_id, defence_state, defence_assigned_at, defence_window_deadline,
+          defendant_notify_url, defence_invite_status, defence_invite_attempts,
+          defence_invite_last_attempt_at, defence_invite_last_error, open_defence, case_topic,
+          stake_level, summary, requested_remedy, created_at, filed_at, jury_selected_at,
+          session_started_at, closed_at, sealed_at, void_reason, void_reason_group, voided_at,
+          decided_at, outcome, outcome_detail_json, replacement_count_ready, replacement_count_vote,
+          treasury_tx_sig, prosecution_principles_cited_json, defence_principles_cited_json,
+          scheduled_for, countdown_end_at, countdown_total_ms, drand_round, drand_randomness,
+          pool_snapshot_hash, selection_proof_json, verdict_hash, transcript_root_hash,
+          jury_selection_proof_hash, ruleset_version, seal_status, seal_error, metadata_uri,
+          verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, filing_warning, court_mode,
+          case_title, judge_screening_status, judge_screening_reason, judge_remedy_recommendation,
+          agreement_code, sealed_disabled
+        FROM cases
+        WHERE status = 'void'
+        ORDER BY COALESCE(voided_at, decided_at, closed_at, created_at) DESC
+        LIMIT ?
+      )
+      SELECT * FROM ranked LIMIT ? OFFSET ?
+      `
+    )
+    .all(VOIDED_CASES_MAX, limit, offset) as Array<Record<string, unknown>>;
+
+  return { records: rows.map(mapCaseRow), total };
+}
+
 export function resolveCaseDecisionTimestamp(caseRecord: CaseRecord): string {
   return (
     caseRecord.decidedAtIso ??
@@ -3652,6 +3705,38 @@ export function getCaseIntegrityDiagnostics(
     runtimeStatusConsistent:
       !runtime || !caseRecord ? false : runtime.currentStage === caseRecord.sessionStage
   };
+}
+
+export function searchCasesGlobal(
+  db: Db,
+  input: { q?: string; limit?: number }
+): CaseRecord[] {
+  const limit = Math.max(1, Math.min(input.limit ?? 20, 50));
+  const q = (input.q ?? "").trim();
+
+  if (!q) {
+    const rows = db
+      .prepare(
+        `SELECT * FROM cases
+         WHERE status NOT IN ('draft','void')
+         ORDER BY created_at DESC LIMIT ?`
+      )
+      .all(limit) as Array<Record<string, unknown>>;
+    return rows.map(mapCaseRow);
+  }
+
+  const pat = `%${q}%`;
+  const rows = db
+    .prepare(
+      `SELECT * FROM cases
+       WHERE (case_id LIKE ? OR summary LIKE ?
+           OR prosecution_agent_id LIKE ?
+           OR COALESCE(defendant_agent_id,'') LIKE ?)
+         AND status NOT IN ('draft','void')
+       ORDER BY created_at DESC LIMIT ?`
+    )
+    .all(pat, pat, pat, pat, limit) as Array<Record<string, unknown>>;
+  return rows.map(mapCaseRow);
 }
 
 export function getDecisionCase(db: Db, id: string): CaseRecord | null {

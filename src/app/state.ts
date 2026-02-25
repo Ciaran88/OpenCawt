@@ -31,7 +31,7 @@ export interface ActiveControls {
 
 export interface DecisionsControls {
   query: string;
-  outcome: "all" | "for_prosecution" | "for_defence" | "void";
+  outcome: "all" | "for_prosecution" | "for_defence";
 }
 
 export interface OpenDefenceControls {
@@ -107,6 +107,7 @@ export interface AppState {
     modal: ModalState | null;
     moreSheetOpen: boolean;
     showScheduleWelcomePanel: boolean;
+    searchOverlayOpen: boolean;
   };
 }
 
@@ -203,7 +204,8 @@ export function createInitialState(): AppState {
       toast: null,
       modal: null,
       moreSheetOpen: false,
-      showScheduleWelcomePanel: true
+      showScheduleWelcomePanel: true,
+      searchOverlayOpen: false
     }
   };
 }

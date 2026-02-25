@@ -300,6 +300,7 @@ a {
   width: 24px;
   height: 24px;
   margin-left: -2px;
+  margin-top: -2px;
 }
 
 .app-shell.sidebar-collapsed .nav-item {
@@ -1798,6 +1799,23 @@ select:focus {
   color: var(--text-secondary);
   background-color: var(--bg-panel);
   border: 1px solid var(--border-base);
+}
+
+.voided-pagination {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.voided-page-info {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* Filter Dropdown */
@@ -3338,4 +3356,368 @@ select:focus {
 @keyframes ticker-scroll {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   SEARCH OVERLAY
+   ═══════════════════════════════════════════════════════ */
+
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(5, 6, 10, 0.82);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.search-pane {
+  width: min(640px, calc(100vw - 32px));
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 72vh;
+}
+
+.search-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-base);
+}
+
+.search-input-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+  min-width: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.search-input::placeholder { color: var(--text-tertiary); }
+.search-input::-webkit-search-cancel-button { display: none; }
+
+.search-close-btn {
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+.search-close-btn:hover { opacity: 1; }
+
+.search-tabs-row {
+  display: flex;
+  border-bottom: 1px solid var(--border-base);
+  padding: 0 var(--space-4);
+}
+
+.search-tab {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.search-tab:hover { color: var(--text-secondary); }
+
+.search-tab.is-active {
+  color: var(--accent-gold);
+  border-bottom-color: var(--accent-gold);
+}
+
+.search-results {
+  overflow-y: auto;
+  flex: 1;
+  padding: var(--space-2);
+  min-height: 80px;
+}
+
+.search-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+
+.search-result-item:hover,
+.search-result-item.is-focused {
+  background: var(--bg-surface);
+}
+
+.sri-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sri-id {
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  color: var(--accent-gold);
+  letter-spacing: 0.02em;
+}
+
+.sri-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sri-id-small {
+  font-size: 0.75rem;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-tertiary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sri-summary {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.sri-meta {
+  display: flex;
+  gap: var(--space-3);
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.search-hint {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   MODAL OVERLAY
+   ═══════════════════════════════════════════════════════ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: rgba(5, 6, 10, 0.78);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+}
+
+.modal-card {
+  width: min(500px, 100%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-xl);
+  padding: var(--space-5);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+.modal-card h2 {
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent-gold);
+  margin: 0 0 var(--space-4);
+}
+
+.modal-body {
+  margin-bottom: var(--space-4);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   BOTTOM SHEET
+   ═══════════════════════════════════════════════════════ */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: rgba(5, 6, 10, 0.75);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet-panel {
+  width: min(520px, 100%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-top-left-radius: var(--radius-xl);
+  border-top-right-radius: var(--radius-xl);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-base);
+  position: sticky;
+  top: 0;
+  background: var(--bg-panel);
+  z-index: 1;
+}
+
+.sheet-header h2 {
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent-gold);
+  margin: 0;
+}
+
+.sheet-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.sheet-close:hover { color: var(--text-primary); }
+
+.sheet-close svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  fill: none;
+  stroke-linecap: round;
+}
+
+.sheet-list {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2);
+}
+
+.sheet-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+
+.sheet-item:hover { background: var(--bg-surface); }
+
+.sheet-item-title {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.sheet-item-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   AGENT SEARCH SUGGESTIONS  (legacy modal)
+   ═══════════════════════════════════════════════════════ */
+
+.agent-search-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: var(--space-1);
+  background: var(--bg-surface);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.agent-search-suggestion {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: calc(var(--radius-md) - 2px);
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  transition: background 0.1s, color 0.1s;
+}
+
+.agent-search-suggestion:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
 }

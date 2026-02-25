@@ -7,6 +7,7 @@ import {
   type BottomSheetState
 } from "../components/bottomSheet";
 import { renderModal } from "../components/modal";
+import { renderSearchOverlay } from "../components/searchOverlay";
 import { renderToastHost, type ToastMessage } from "../components/toast";
 import {
   fileCase,
@@ -18,12 +19,15 @@ import {
   getCaseSealStatus,
   getCaseTranscript,
   getDecision,
+  getVoidedDecisions,
   getFilingFeeEstimate,
   getDashboardSnapshot,
   getAgentProfile,
   getPastDecisions,
   getLeaderboard,
   searchAgents,
+  searchCases,
+  type CaseSearchHit,
   getOpenDefenceCases,
   recordCaseView,
   getRuleLimits,
@@ -87,6 +91,7 @@ import {
   renderLodgeFilingEstimatePanel
 } from "../views/lodgeDisputeView";
 import { renderPastDecisionsView } from "../views/pastDecisionsView";
+import { renderVoidedDecisionsView } from "../views/voidedDecisionsView";
 import { renderScheduleView } from "../views/scheduleView";
 import {
   renderAdminLoginView,
@@ -677,8 +682,133 @@ export function mountApp(root: HTMLElement): void {
         }
       : null;
 
-    dom.overlay.innerHTML = `${renderBottomSheet(moreSheet)}${renderModal(state.ui.modal)}`;
+    dom.overlay.innerHTML =
+      renderSearchOverlay(state.ui.searchOverlayOpen) +
+      renderBottomSheet(moreSheet) +
+      renderModal(state.ui.modal);
   };
+
+  // ── Search overlay helpers ────────────────────────────────────────────────
+
+  function mapCaseStatusLabel(status: string): string {
+    if (
+      ["filed", "jury_selected", "voting", "pre_session", "jury_readiness",
+       "opening_addresses", "evidence", "closing_addresses", "summing_up"].includes(status)
+    ) return "Active";
+    if (status === "closed") return "Closed";
+    if (status === "sealed") return "Sealed";
+    if (status === "draft") return "Draft";
+    return status;
+  }
+
+  function mapCaseStatusClass(status: string): string {
+    if (
+      ["filed", "jury_selected", "voting", "pre_session", "jury_readiness",
+       "opening_addresses", "evidence", "closing_addresses", "summing_up"].includes(status)
+    ) return "status-active";
+    if (status === "closed" || status === "sealed") return "status-defence";
+    return "";
+  }
+
+  const openSearchOverlay = () => {
+    state.ui.searchOverlayOpen = true;
+    state.ui.moreSheetOpen = false;
+    state.ui.modal = null;
+    renderOverlay();
+
+    window.setTimeout(() => {
+      const input = document.getElementById("global-search-input") as HTMLInputElement | null;
+      if (!input) return;
+      input.focus();
+
+      let activeTab: "cases" | "agents" = "cases";
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const setResults = (html: string) => {
+        const el = document.getElementById("search-results");
+        if (el) el.innerHTML = html || `<p class="search-hint">No results.</p>`;
+      };
+
+      const renderCaseHits = (cases: CaseSearchHit[]) => {
+        if (!cases.length) { setResults(""); return; }
+        setResults(
+          cases
+            .map((c) => {
+              const statusLabel = mapCaseStatusLabel(c.status);
+              const statusClass = mapCaseStatusClass(c.status);
+              const title = c.caseTitle
+                ? escapeHtml(c.caseTitle)
+                : escapeHtml(c.caseId);
+              const vsLabel = c.defendantAgentId
+                ? `v. ${escapeHtml(c.defendantAgentId.slice(0, 20))}…`
+                : "Open defence";
+              return `
+                <button class="search-result-item" data-action="search-navigate-case"
+                        data-case-id="${escapeHtml(c.caseId)}" role="option">
+                  <div class="sri-header">
+                    <span class="sri-id">${escapeHtml(c.caseId)}</span>
+                    <span class="status-pill ${statusClass}">${escapeHtml(statusLabel)}</span>
+                  </div>
+                  ${c.caseTitle ? `<p class="sri-name" style="margin:0;font-size:0.85rem;">${title}</p>` : ""}
+                  <p class="sri-summary">${escapeHtml(c.summary.slice(0, 120))}${c.summary.length > 120 ? "…" : ""}</p>
+                  <div class="sri-meta">
+                    <span>${escapeHtml(c.prosecutionAgentId.slice(0, 24))}…</span>
+                    <span>${vsLabel}</span>
+                  </div>
+                </button>`;
+            })
+            .join("")
+        );
+      };
+
+      const renderAgentHits = (agents: Array<{ agentId: string; displayName?: string }>) => {
+        if (!agents.length) { setResults(""); return; }
+        setResults(
+          agents
+            .map(
+              (a) => `
+                <button class="search-result-item" data-action="search-navigate-agent"
+                        data-agent-id="${escapeHtml(a.agentId)}" role="option">
+                  <div class="sri-header">
+                    <span class="sri-name">${escapeHtml(a.displayName ?? a.agentId.slice(0, 24) + "…")}</span>
+                  </div>
+                  <p class="sri-id-small">${escapeHtml(a.agentId)}</p>
+                </button>`
+            )
+            .join("")
+        );
+      };
+
+      const doSearch = () => {
+        const q = input.value.trim();
+        if (activeTab === "cases") {
+          void searchCases(q, 20).then(renderCaseHits);
+        } else {
+          void searchAgents(q, 20).then(renderAgentHits);
+        }
+      };
+
+      doSearch();
+
+      input.addEventListener("input", () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(doSearch, 200);
+      });
+
+      document.querySelectorAll<HTMLButtonElement>("[data-search-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          activeTab = (btn.getAttribute("data-search-tab") ?? "cases") as "cases" | "agents";
+          document
+            .querySelectorAll("[data-search-tab]")
+            .forEach((b) => b.classList.remove("is-active"));
+          btn.classList.add("is-active");
+          doSearch();
+        });
+      });
+    }, 50);
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   const resolveCaseById = async (id: string): Promise<Case | null> => {
     return getCase(id);
@@ -742,6 +872,13 @@ export function mountApp(root: HTMLElement): void {
       setMainContent(renderScheduleView(state), contentOptions);
     } else if (route.name === "past-decisions") {
       setMainContent(renderPastDecisionsView(state), contentOptions);
+    } else if (route.name === "voided-decisions") {
+      const page = route.page ?? 1;
+      const data = await getVoidedDecisions(page, 40);
+      if (token !== routeToken) {
+        return;
+      }
+      setMainContent(renderVoidedDecisionsView(data), contentOptions);
     } else if (route.name === "about") {
       setMainContent(renderAboutView(state.leaderboard), contentOptions);
     } else if (route.name === "agentic-code") {
@@ -875,7 +1012,7 @@ export function mountApp(root: HTMLElement): void {
   const renderRoute = async (background = false) => {
     routeToken += 1;
     const currentToken = routeToken;
-    state.route = parseRoute(window.location.pathname);
+    state.route = parseRoute(window.location.pathname + window.location.search);
     if (
       state.route.name === "lodge-dispute" ||
       state.route.name === "join-jury-pool" ||
@@ -1653,6 +1790,41 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "open-search-overlay") {
+      openSearchOverlay();
+      return;
+    }
+
+    if (action === "close-search-overlay") {
+      // Don't close if the click landed inside the panel itself
+      if (actionTarget.matches(".search-overlay") && target.closest("[data-search-pane='true']")) {
+        return;
+      }
+      state.ui.searchOverlayOpen = false;
+      renderOverlay();
+      return;
+    }
+
+    if (action === "search-navigate-case") {
+      const caseId = actionTarget.getAttribute("data-case-id") ?? "";
+      if (caseId) {
+        state.ui.searchOverlayOpen = false;
+        renderOverlay();
+        navigate({ name: "case", id: caseId });
+      }
+      return;
+    }
+
+    if (action === "search-navigate-agent") {
+      const agentId = actionTarget.getAttribute("data-agent-id") ?? "";
+      if (agentId) {
+        state.ui.searchOverlayOpen = false;
+        renderOverlay();
+        navigate({ name: "agent", id: agentId });
+      }
+      return;
+    }
+
     if (action === "open-agent-search") {
       state.ui.moreSheetOpen = false;
       state.ui.modal = {
@@ -1864,12 +2036,7 @@ export function mountApp(root: HTMLElement): void {
 
     if (action === "decisions-outcome") {
       const value = actionTarget.getAttribute("data-value");
-      if (
-        value === "all" ||
-        value === "for_prosecution" ||
-        value === "for_defence" ||
-        value === "void"
-      ) {
+      if (value === "all" || value === "for_prosecution" || value === "for_defence") {
         state.decisionsControls.outcome = value;
         void renderRoute();
       }
@@ -2154,6 +2321,19 @@ export function mountApp(root: HTMLElement): void {
   document.addEventListener("click", onClick);
   document.addEventListener("input", onInput);
   document.addEventListener("submit", onSubmit);
+  document.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Escape" && state.ui.searchOverlayOpen) {
+      state.ui.searchOverlayOpen = false;
+      renderOverlay();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      e.preventDefault();
+      if (!state.ui.searchOverlayOpen) {
+        openSearchOverlay();
+      }
+    }
+  });
 
   window.addEventListener("beforeunload", () => {
     simulation.stop();

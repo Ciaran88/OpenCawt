@@ -91,7 +91,16 @@ function resolveDecisionTimestamp(decision: Decision): string | null {
 }
 
 function buildTickerFromDecisions(decisions: Decision[]): TickerEvent[] {
-  return decisions.slice(0, 8).map((decision) => ({
+  const normaliseOutcome = (o: unknown): "for_prosecution" | "for_defence" | "void" => {
+    const s = String(o ?? "").toLowerCase();
+    if (s === "for_prosecution") return "for_prosecution";
+    if (s === "for_defence") return "for_defence";
+    return "void";
+  };
+  return decisions
+    .filter((d) => normaliseOutcome(d.outcome) !== "void")
+    .slice(0, 8)
+    .map((decision) => ({
     id: `ticker-${decision.caseId}`,
     caseId: decision.caseId,
     outcome: decision.outcome,
@@ -258,6 +267,20 @@ export async function getPastDecisions(): Promise<Decision[]> {
   return clone(data.map(withDecisionDisplayDate));
 }
 
+export async function getVoidedDecisions(
+  page = 1,
+  perPage = 40
+): Promise<{ items: Decision[]; total: number; page: number; perPage: number }> {
+  const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+  const data = await apiGet<{ items: Decision[]; total: number; page: number; perPage: number }>(
+    `/api/decisions/voided?${params}`
+  );
+  return clone({
+    ...data,
+    items: data.items.map(withDecisionDisplayDate)
+  });
+}
+
 export async function getDecision(id: string): Promise<Decision | null> {
   try {
     const decision = await apiGet<Decision>(`/api/decisions/${encodeURIComponent(id)}`);
@@ -349,6 +372,26 @@ export async function searchAgents(q: string, limit = 10): Promise<AgentSearchHi
     `/api/agents/search?${params.toString()}`
   );
   return clone(response.agents);
+}
+
+export type CaseSearchHit = {
+  caseId: string;
+  status: string;
+  summary: string;
+  prosecutionAgentId: string;
+  defendantAgentId?: string;
+  scheduledForIso?: string;
+  caseTitle?: string;
+};
+
+export async function searchCases(q: string, limit = 20): Promise<CaseSearchHit[]> {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  params.set("limit", String(limit));
+  const response = await apiGet<{ cases: CaseSearchHit[] }>(
+    `/api/cases/search?${params.toString()}`
+  );
+  return clone(response.cases);
 }
 
 export async function getAgenticCode(): Promise<AgenticPrinciple[]> {
