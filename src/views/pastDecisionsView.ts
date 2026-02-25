@@ -66,7 +66,7 @@ export function renderPastDecisionsView(state: AppState): string {
         { value: "void", label: "Void" }
       ]
     })}
-    <p class="toolbar-note">${rows.length} decisions shown</p>
+    <span class="decisions-count-pill">${rows.length} decisions shown</span>
     `,
     { tagName: "section", className: "toolbar toolbar-decisions" }
   );

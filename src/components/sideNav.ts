@@ -73,8 +73,9 @@ export function renderSideNav(route: AppRoute): string {
           // Using a div acting as link wrapper or just anchor if strict routing allows
           // The router usually intercepts clicks on 'a' tags or specific data-attributes.
           // Assuming existing router handles hrefs.
+          const isOcp = !menuName && item.label === "OCP";
           return `
-            <a href="${escapeHtml(href)}" class="nav-item ${isActive ? "is-active" : ""}" title="${escapeHtml(item.label)}"${menuName ? ` data-link="true"` : ""}${!menuName && item.external ? ` target="_blank" rel="noopener noreferrer"` : ""}>
+            <a href="${escapeHtml(href)}" class="nav-item ${isActive ? "is-active" : ""}${isOcp ? " nav-item-ocp" : ""}" title="${escapeHtml(item.label)}"${menuName ? ` data-link="true"` : ""}${!menuName && item.external ? ` target="_blank" rel="noopener noreferrer"` : ""}>
               <span class="nav-icon">${item.icon}</span>
               <span class="nav-label">${escapeHtml(item.label)}</span>
             </a>

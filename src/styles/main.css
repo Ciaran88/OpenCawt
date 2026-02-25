@@ -276,6 +276,11 @@ a {
   stroke-width: 2px;
 }
 
+.nav-item-ocp .nav-icon {
+  width: 24px;
+  height: 24px;
+}
+
 .app-shell.sidebar-collapsed .nav-item {
   padding: var(--space-2);
   justify-content: center;
@@ -993,7 +998,15 @@ label > span {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
+}
+
+.schedule-welcome-title {
+  margin: 0;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-gold);
 }
 
 /* Description text sits in the left column above the quickstart box */
@@ -1034,8 +1047,9 @@ label > span {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
-  max-width: 380px;
+  padding: var(--space-3) var(--space-4);
+  max-width: 640px;
+  width: 100%;
   align-self: center;
   display: flex;
   flex-direction: column;
@@ -1055,9 +1069,10 @@ label > span {
 
 .schedule-quickstart-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-2);
   justify-content: center;
+  width: 100%;
 }
 
 .btn-quick-orange,
@@ -1065,8 +1080,9 @@ label > span {
 .btn-quick-purple {
   height: 38px;
   border-radius: 999px;
-  padding: 0 var(--space-4);
+  padding: 0 var(--space-3);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .btn-quick-orange {
@@ -1112,6 +1128,14 @@ label > span {
 @media (max-width: 1100px) {
   .schedule-welcome-grid {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-quickstart-box {
+    max-width: 100%;
+  }
+
+  .schedule-quickstart-actions {
+    flex-wrap: wrap;
   }
 }
 
@@ -1742,6 +1766,18 @@ select:focus {
   color: var(--text-tertiary);
 }
 
+.decisions-count-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-base);
+}
+
 /* Filter Dropdown */
 .filter-dropdown {
   position: relative;
@@ -1980,9 +2016,18 @@ select:focus {
   border: 1px solid var(--bubble-border);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
   padding: var(--space-4);
-  background-color: var(--bubble-color);
+  background-color: color-mix(in srgb, var(--bubble-color) 90%, transparent);
   position: relative;
   z-index: 1;
+}
+
+.transcript-bubble::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.03);
+  pointer-events: none;
 }
 
 .transcript-bubble::after {

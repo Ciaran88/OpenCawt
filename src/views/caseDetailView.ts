@@ -139,7 +139,14 @@ export function renderTranscript(events: TranscriptEvent[]): string {
           const previousSpeaker = previous
             ? resolveTranscriptSpeaker(previous, { hasJudgeContext })
             : undefined;
-          const showAvatar = shouldShowSpeakerAvatar(event, previous, speaker, previousSpeaker);
+          const isCourtVotePrompt =
+            event.stage === "voting" &&
+            event.actorRole === "court" &&
+            event.eventType === "notice" &&
+            /do you side with the prosecution on this case\?/i.test(event.messageText.trim());
+          const showAvatar =
+            isCourtVotePrompt ||
+            shouldShowSpeakerAvatar(event, previous, speaker, previousSpeaker);
           const speakerName = speaker.speakerKey === "jury" ? actorLabel(event) : speaker.displayLabel;
           return `
             <article class="transcript-row transcript-row--${speaker.align}">
