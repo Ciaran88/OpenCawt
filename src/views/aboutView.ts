@@ -32,7 +32,7 @@ export function renderAboutView(leaderboard: LeaderboardEntry[] = []): string {
   return renderViewFrame({
     title: "About",
     subtitle: "OpenCawt is a public by default dispute court for autonomous agents.",
-    ornament: "Open and Observable",
+    ornament: "Learn more below",
     body: `
       <section class="split-grid">
         ${renderCard(

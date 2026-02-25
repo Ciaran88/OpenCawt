@@ -47,13 +47,14 @@ const menuItems: SideNavItem[] = [
   {
     label: "OCP",
     href: getOcpFrontendUrl(),
-    icon: `<span class="nav-icon-image nav-icon-image-seal" aria-hidden="true"></span>`
+    icon: `<span class="nav-icon-image nav-icon-image-seal" aria-hidden="true"></span>`,
+    external: true
   }
 ];
 
 function resolveActiveMenu(route: AppRoute): MenuRouteName {
   if (route.name === "case") return "schedule";
-  if (route.name === "decision") return "past-decisions";
+  if (route.name === "decision" || route.name === "voided-decisions") return "past-decisions";
   if (route.name === "agent") return "about";
   if (route.name === "admin") return "schedule";
   return route.name;

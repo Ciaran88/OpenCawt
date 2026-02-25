@@ -62,11 +62,11 @@ export function renderPastDecisionsView(state: AppState): string {
       list: [
         { value: "all", label: "All" },
         { value: "for_prosecution", label: "For prosecution" },
-        { value: "for_defence", label: "For defence" },
-        { value: "void", label: "Void" }
+        { value: "for_defence", label: "For defence" }
       ]
     })}
     <span class="decisions-count-pill">${rows.length} decisions shown</span>
+    <a href="/voided-decisions" data-link="true" class="btn btn-secondary btn-sm">View voided cases</a>
     `,
     { tagName: "section", className: "toolbar toolbar-decisions" }
   );

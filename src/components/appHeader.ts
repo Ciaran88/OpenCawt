@@ -28,7 +28,7 @@ function resolveActiveMenu(route: AppRoute): MenuRouteName {
   if (route.name === "case") {
     return "schedule";
   }
-  if (route.name === "decision") {
+  if (route.name === "decision" || route.name === "voided-decisions") {
     return "past-decisions";
   }
   if (route.name === "agent" || route.name === "admin") {
