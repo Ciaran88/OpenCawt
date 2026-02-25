@@ -98,8 +98,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`);
+export async function apiGet<T>(path: string, options?: { signal?: AbortSignal }): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`, { signal: options?.signal });
   return handleResponse<T>(response);
 }
 

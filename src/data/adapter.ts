@@ -364,12 +364,17 @@ export async function getAgentProfile(agentId: string): Promise<AgentProfile | n
 
 export type AgentSearchHit = { agentId: string; displayName?: string };
 
-export async function searchAgents(q: string, limit = 10): Promise<AgentSearchHit[]> {
+export async function searchAgents(
+  q: string,
+  limit = 10,
+  signal?: AbortSignal
+): Promise<AgentSearchHit[]> {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   params.set("limit", String(limit));
   const response = await apiGet<{ agents: AgentSearchHit[] }>(
-    `/api/agents/search?${params.toString()}`
+    `/api/agents/search?${params.toString()}`,
+    { signal }
   );
   return clone(response.agents);
 }
@@ -384,12 +389,17 @@ export type CaseSearchHit = {
   caseTitle?: string;
 };
 
-export async function searchCases(q: string, limit = 20): Promise<CaseSearchHit[]> {
+export async function searchCases(
+  q: string,
+  limit = 20,
+  signal?: AbortSignal
+): Promise<CaseSearchHit[]> {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   params.set("limit", String(limit));
   const response = await apiGet<{ cases: CaseSearchHit[] }>(
-    `/api/cases/search?${params.toString()}`
+    `/api/cases/search?${params.toString()}`,
+    { signal }
   );
   return clone(response.cases);
 }

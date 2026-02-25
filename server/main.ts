@@ -167,12 +167,49 @@ import { injectDemoCompletedCase } from "./scripts/injectDemoCompletedCase";
 import { injectLongHorizonCase } from "./scripts/injectLongHorizonCase";
 
 const config = getConfig();
+const defaultTimingRules = { ...config.rules };
+const simulationTimingProfile = {
+  sessionStartsAfterSeconds: Math.max(
+    5,
+    Number(process.env.SIM_TIMING_SESSION_START_SEC ?? "8")
+  ),
+  defenceAssignmentCutoffSeconds: Math.max(
+    10,
+    Number(process.env.SIM_TIMING_DEFENCE_ASSIGNMENT_CUTOFF_SEC ?? "45")
+  ),
+  namedDefendantExclusiveSeconds: Math.max(
+    5,
+    Number(process.env.SIM_TIMING_NAMED_EXCLUSIVE_SEC ?? "15")
+  ),
+  namedDefendantResponseSeconds: Math.max(
+    20,
+    Number(process.env.SIM_TIMING_NAMED_RESPONSE_SEC ?? "120")
+  ),
+  jurorReadinessSeconds: Math.max(
+    10,
+    Number(process.env.SIM_TIMING_JUROR_READINESS_SEC ?? "20")
+  ),
+  stageSubmissionSeconds: Math.max(
+    20,
+    Number(process.env.SIM_TIMING_STAGE_SUBMISSION_SEC ?? "90")
+  ),
+  jurorVoteSeconds: Math.max(
+    20,
+    Number(process.env.SIM_TIMING_JUROR_VOTE_SEC ?? "60")
+  ),
+  votingHardTimeoutSeconds: Math.max(
+    60,
+    Number(process.env.SIM_TIMING_VOTING_HARD_TIMEOUT_SEC ?? "300")
+  ),
+  jurorPanelSize: config.rules.jurorPanelSize
+};
 const logger = createLogger(config.logLevel);
 const db = openDatabase(config);
 const drand = createDrandClient(config);
 const solana = createSolanaProvider(config);
 const paymentEstimator = createPaymentEstimator(config);
 const judge = createJudgeService({ logger, config });
+let simulationTimingProfileActive = false;
 
 for (const historicalCase of listCasesByStatuses(db, ["closed", "sealed", "void"])) {
   syncCaseReputation(db, historicalCase);
@@ -190,6 +227,11 @@ if (savedDailyCap !== null) {
 const savedSoftCapMode = getRuntimeConfig(db, "soft_cap_mode");
 if (savedSoftCapMode === "warn" || savedSoftCapMode === "enforce") {
   config.softCapMode = savedSoftCapMode;
+}
+const savedSimulationTimingProfile = getRuntimeConfig(db, "simulation_timing_profile_active");
+if (savedSimulationTimingProfile === "1" && config.simulationBypassEnabled) {
+  Object.assign(config.rules, simulationTimingProfile);
+  simulationTimingProfileActive = true;
 }
 
 // In-memory rate limiter for admin auth attempts (ip -> { count, resetAt })
@@ -241,6 +283,18 @@ function assertAdminOrSystem(req: IncomingMessage): "admin" | "system" {
   }
   assertAdminToken(req);
   return "admin";
+}
+
+function setSimulationTimingProfile(enabled: boolean): void {
+  if (enabled) {
+    Object.assign(config.rules, simulationTimingProfile);
+    simulationTimingProfileActive = true;
+    setRuntimeConfig(db, "simulation_timing_profile_active", "1");
+    return;
+  }
+  Object.assign(config.rules, defaultTimingRules);
+  simulationTimingProfileActive = false;
+  setRuntimeConfig(db, "simulation_timing_profile_active", "0");
 }
 
 const closingCases = new Set<string>();
@@ -1652,6 +1706,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         sealFailedRecentCount: sealQueue.failedRecentCount,
         sealDeadLetterCount: sealQueue.deadLetterCount,
         simulationBypassEnabled: config.simulationBypassEnabled,
+        simulationTimingProfileActive,
+        timingRules: { ...config.rules },
         missingDecisionTimestampCount: missingDecisionTimestamps,
         workerReady: workerProbe.ready,
         workerReadinessError: workerProbe.error,
@@ -1875,6 +1931,26 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/internal/config/simulation-timing-profile") {
+      assertAdminOrSystem(req);
+      if (!config.simulationBypassEnabled) {
+        throw forbidden(
+          "SIMULATION_BYPASS_DISABLED",
+          "Simulation timing profile can only be used when simulation bypass is enabled."
+        );
+      }
+      const body = await readJsonBody<{ enabled?: boolean }>(req);
+      if (typeof body.enabled !== "boolean") {
+        throw badRequest("SIMULATION_TIMING_PROFILE_INVALID", "enabled must be a boolean.");
+      }
+      setSimulationTimingProfile(body.enabled);
+      sendJson(res, 200, {
+        enabled: simulationTimingProfileActive,
+        rules: { ...config.rules }
+      });
+      return;
+    }
+
     // Admin status endpoint
     if (method === "GET" && pathname === "/api/internal/admin-status") {
       assertAdminToken(req);
@@ -1938,6 +2014,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         courtMode: (getRuntimeConfig(db, "court_mode") as CourtMode | null) ?? config.defaultCourtMode,
         judgeAvailable: judge.isAvailable(),
         simulationBypassEnabled: config.simulationBypassEnabled,
+        simulationTimingProfileActive,
+        timingRules: { ...config.rules },
         missingDecisionTimestampCount: missingDecisionTimestamps,
         treasuryAddress: config.treasuryAddress,
         sealWorkerUrl: config.sealWorkerUrl,
@@ -2313,20 +2391,34 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "GET" && pathname === "/api/agents/search") {
       const q = url.searchParams.get("q") ?? "";
       const limit = Number(url.searchParams.get("limit") || "10");
-      const agents = searchAgents(db, {
-        q: q || undefined,
-        limit: Number.isFinite(limit) ? limit : 10
-      });
-      sendJson(res, 200, { agents });
+      try {
+        const agents = searchAgents(db, {
+          q: q || undefined,
+          limit: Number.isFinite(limit) ? limit : 10
+        });
+        sendJson(res, 200, { agents });
+      } catch (err) {
+        logger.error("search_agents_error", { err });
+        sendJson(res, 200, { agents: [] });
+      }
       return;
     }
 
     if (method === "GET" && pathname === "/api/cases/search") {
       const q = url.searchParams.get("q") ?? "";
+      if (q.length > 200) {
+        sendJson(res, 400, { cases: [], error: "Query too long." });
+        return;
+      }
       const rawLimit = Number(url.searchParams.get("limit") || "20");
       const limit = Number.isFinite(rawLimit) ? Math.min(rawLimit, 50) : 20;
-      const cases = searchCasesGlobal(db, { q: q || undefined, limit });
-      sendJson(res, 200, { cases });
+      try {
+        const cases = searchCasesGlobal(db, { q: q || undefined, limit });
+        sendJson(res, 200, { cases });
+      } catch (err) {
+        logger.error("search_cases_error", { err });
+        sendJson(res, 200, { cases: [] });
+      }
       return;
     }
 
@@ -3425,6 +3517,109 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       assertSystemKey(req, config);
       const result = await injectLongHorizonCase();
       sendJson(res, 200, result);
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      segments.length === 5 &&
+      segments[0] === "api" &&
+      segments[1] === "internal" &&
+      segments[2] === "cases" &&
+      segments[4] === "judge-stage-advisory"
+    ) {
+      assertAdminOrSystem(req);
+      if (!judge.isAvailable()) {
+        throw conflict(
+          "JUDGE_MODE_UNAVAILABLE",
+          "Judge advisories are unavailable because judge integration is not configured."
+        );
+      }
+      const caseId = decodeURIComponent(segments[3]);
+      const caseRecord = ensureCaseExists(caseId);
+      const runtime = getCaseRuntime(db, caseId);
+      const body = await readJsonBody<{ stage?: string }>(req);
+      const targetStageRaw =
+        typeof body.stage === "string" && body.stage.trim().length > 0
+          ? body.stage.trim()
+          : runtime?.currentStage ?? "";
+      const allowedStages = new Set([
+        "opening_addresses",
+        "evidence",
+        "closing_addresses",
+        "summing_up",
+        "voting"
+      ]);
+      if (!allowedStages.has(targetStageRaw)) {
+        throw badRequest(
+          "JUDGE_STAGE_INVALID",
+          "stage must be one of opening_addresses, evidence, closing_addresses, summing_up, voting."
+        );
+      }
+      const stage = targetStageRaw as
+        | "opening_addresses"
+        | "evidence"
+        | "closing_addresses"
+        | "summing_up"
+        | "voting";
+      const submissions = listSubmissionsByCase(db, caseId);
+      const evidence = listEvidenceByCase(db, caseId);
+      const claims = listClaims(db, caseId);
+
+      const advisoryOutcome = await withJudgeTimeout(
+        judge.summariseStage({
+          caseId,
+          stage,
+          summary: caseRecord.summary,
+          claims: claims.map((claim) => ({
+            claimId: claim.claimId,
+            summary: claim.summary,
+            requestedRemedy: claim.requestedRemedy,
+            allegedPrinciples: claim.allegedPrinciples
+          })),
+          submissions: submissions.map((submission) => ({
+            side: submission.side,
+            phase: submission.phase,
+            text: submission.text
+          })),
+          evidence: evidence.map((entry) => ({
+            submittedBy: entry.submittedBy,
+            kind: entry.kind,
+            bodyText: entry.bodyText,
+            references: entry.references
+          }))
+        }),
+        config.judgeCallTimeoutMs,
+        "summariseStage"
+      );
+      if (!advisoryOutcome.ok) {
+        throw new ApiError(
+          503,
+          "JUDGE_STAGE_ADVISORY_UNAVAILABLE",
+          `Judge stage advisory failed: ${advisoryOutcome.error}`
+        );
+      }
+      const stageLabel = stage.replace(/_/g, " ");
+      const advisoryText = advisoryOutcome.data.trim();
+      const transcriptMessage = `Judge advisory (${stageLabel}): ${advisoryText}`;
+
+      appendTranscriptEvent(db, {
+        caseId,
+        actorRole: "court",
+        eventType: "notice",
+        stage,
+        messageText: transcriptMessage,
+        payload: {
+          judgeStageAdvisory: true,
+          advisoryStage: stage
+        }
+      });
+
+      sendJson(res, 200, {
+        caseId,
+        stage,
+        advisory: advisoryText
+      });
       return;
     }
 

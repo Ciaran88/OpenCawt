@@ -3707,28 +3707,53 @@ export function getCaseIntegrityDiagnostics(
   };
 }
 
+export type CaseSearchHitRecord = {
+  caseId: string;
+  status: string;
+  summary: string;
+  prosecutionAgentId: string;
+  defendantAgentId?: string;
+  scheduledForIso?: string;
+  caseTitle?: string;
+};
+
+const CASE_SEARCH_COLS =
+  "case_id, status, summary, prosecution_agent_id, defendant_agent_id, scheduled_for, case_title";
+
+function mapCaseSearchRow(row: Record<string, unknown>): CaseSearchHitRecord {
+  return {
+    caseId: String(row.case_id),
+    status: String(row.status),
+    summary: String(row.summary),
+    prosecutionAgentId: String(row.prosecution_agent_id),
+    defendantAgentId: row.defendant_agent_id ? String(row.defendant_agent_id) : undefined,
+    scheduledForIso: row.scheduled_for ? String(row.scheduled_for) : undefined,
+    caseTitle: row.case_title ? String(row.case_title) : undefined
+  };
+}
+
 export function searchCasesGlobal(
   db: Db,
   input: { q?: string; limit?: number }
-): CaseRecord[] {
+): CaseSearchHitRecord[] {
   const limit = Math.max(1, Math.min(input.limit ?? 20, 50));
   const q = (input.q ?? "").trim();
 
   if (!q) {
     const rows = db
       .prepare(
-        `SELECT * FROM cases
+        `SELECT ${CASE_SEARCH_COLS} FROM cases
          WHERE status NOT IN ('draft','void')
          ORDER BY created_at DESC LIMIT ?`
       )
       .all(limit) as Array<Record<string, unknown>>;
-    return rows.map(mapCaseRow);
+    return rows.map(mapCaseSearchRow);
   }
 
   const pat = `%${q}%`;
   const rows = db
     .prepare(
-      `SELECT * FROM cases
+      `SELECT ${CASE_SEARCH_COLS} FROM cases
        WHERE (case_id LIKE ? OR summary LIKE ?
            OR prosecution_agent_id LIKE ?
            OR COALESCE(defendant_agent_id,'') LIKE ?)
@@ -3736,7 +3761,7 @@ export function searchCasesGlobal(
        ORDER BY created_at DESC LIMIT ?`
     )
     .all(pat, pat, pat, pat, limit) as Array<Record<string, unknown>>;
-  return rows.map(mapCaseRow);
+  return rows.map(mapCaseSearchRow);
 }
 
 export function getDecisionCase(db: Db, id: string): CaseRecord | null {

@@ -710,23 +710,41 @@ export function mountApp(root: HTMLElement): void {
     return "";
   }
 
+  let _searchGen = 0;
   const openSearchOverlay = () => {
+    const myGen = ++_searchGen;
     state.ui.searchOverlayOpen = true;
     state.ui.moreSheetOpen = false;
     state.ui.modal = null;
     renderOverlay();
 
     window.setTimeout(() => {
+      if (_searchGen !== myGen) return;
       const input = document.getElementById("global-search-input") as HTMLInputElement | null;
       if (!input) return;
       input.focus();
 
       let activeTab: "cases" | "agents" = "cases";
       let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+      let searchToken = 0;
+      let currentAbortController: AbortController | null = null;
+      let focusedIdx = -1;
 
       const setResults = (html: string) => {
+        focusedIdx = -1;
         const el = document.getElementById("search-results");
         if (el) el.innerHTML = html || `<p class="search-hint">No results.</p>`;
+      };
+
+      const getItems = (): NodeListOf<HTMLButtonElement> =>
+        document.querySelectorAll<HTMLButtonElement>("#search-results .search-result-item");
+
+      const applyFocus = (items: NodeListOf<HTMLButtonElement>, idx: number) => {
+        items.forEach((el) => el.classList.remove("is-focused"));
+        if (idx >= 0 && idx < items.length) {
+          items[idx].classList.add("is-focused");
+          items[idx].scrollIntoView({ block: "nearest" });
+        }
       };
 
       const renderCaseHits = (cases: CaseSearchHit[]) => {
@@ -781,22 +799,67 @@ export function mountApp(root: HTMLElement): void {
 
       const doSearch = () => {
         const q = input.value.trim();
-        if (activeTab === "cases") {
-          void searchCases(q, 20).then(renderCaseHits);
+        if (q.length === 0) {
+          setResults('<p class="search-hint">Start typing to search across all cases and agents.</p>');
+          return;
+        }
+
+        if (currentAbortController) currentAbortController.abort();
+        currentAbortController = new AbortController();
+        const signal = currentAbortController.signal;
+
+        const token = ++searchToken;
+        const tab = activeTab;
+        setResults('<p class="search-hint search-loading">Searching…</p>');
+
+        if (tab === "cases") {
+          void searchCases(q, 20, signal)
+            .then((cases) => {
+              if (token === searchToken && activeTab === "cases") renderCaseHits(cases);
+            })
+            .catch((err) => {
+              if (err?.name !== "AbortError" && token === searchToken)
+                setResults('<p class="search-hint search-error">Search failed — check your connection.</p>');
+            });
         } else {
-          void searchAgents(q, 20).then(renderAgentHits);
+          void searchAgents(q, 20, signal)
+            .then((agents) => {
+              if (token === searchToken && activeTab === "agents") renderAgentHits(agents);
+            })
+            .catch((err) => {
+              if (err?.name !== "AbortError" && token === searchToken)
+                setResults('<p class="search-hint search-error">Search failed — check your connection.</p>');
+            });
         }
       };
 
-      doSearch();
+      setResults('<p class="search-hint">Start typing to search across all cases and agents.</p>');
 
       input.addEventListener("input", () => {
         if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(doSearch, 200);
+        debounceTimer = setTimeout(doSearch, 350);
+      });
+
+      input.addEventListener("keydown", (e: KeyboardEvent) => {
+        const items = getItems();
+        if (!items.length) return;
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          focusedIdx = Math.min(focusedIdx + 1, items.length - 1);
+          applyFocus(items, focusedIdx);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          focusedIdx = Math.max(focusedIdx - 1, 0);
+          applyFocus(items, focusedIdx);
+        } else if (e.key === "Enter" && focusedIdx >= 0) {
+          e.preventDefault();
+          items[focusedIdx]?.click();
+        }
       });
 
       document.querySelectorAll<HTMLButtonElement>("[data-search-tab]").forEach((btn) => {
         btn.addEventListener("click", () => {
+          if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
           activeTab = (btn.getAttribute("data-search-tab") ?? "cases") as "cases" | "agents";
           document
             .querySelectorAll("[data-search-tab]")

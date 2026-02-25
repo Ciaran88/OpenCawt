@@ -48,6 +48,8 @@ import {
   JUDGE_SCREENING_MAX_RETRIES,
   JUDGE_SCREENING_RETRY_DELAY_MS
 } from "../server/services/sessionEngine";
+import { createJudgeService } from "../server/services/judge";
+import { createLogger } from "../server/services/observability";
 import { createDrandClient } from "../server/services/drand";
 import {
   normalisePrincipleIds,
@@ -1539,6 +1541,9 @@ async function testDefenceCutoffVoiding() {
       async recommendRemedy(_input: unknown) {
         return "";
       },
+      async summariseStage() {
+        return "stub advisory";
+      },
       isAvailable() {
         return true;
       }
@@ -1623,6 +1628,9 @@ async function testJudgeScreeningQueuedRetryAndTerminalFailure() {
       },
       async recommendRemedy(_input: unknown) {
         return "";
+      },
+      async summariseStage() {
+        return "stub advisory";
       },
       isAvailable() {
         return false;
@@ -1891,6 +1899,53 @@ async function testDrandHttpIntegration() {
   assert.ok(result.chainInfo);
 }
 
+async function testJudgeStageAdvisoryStub() {
+  await withEnv(
+    {
+      APP_ENV: "development",
+      JUDGE_OPENAI_API_KEY: undefined,
+      OPENAI_API_KEY: undefined
+    },
+    async () => {
+      const config = getConfig();
+      const judge = createJudgeService({
+        logger: createLogger("error"),
+        config
+      });
+
+      const advisory = await judge.summariseStage({
+        caseId: "OC-TEST-STAGE",
+        stage: "opening_addresses",
+        summary: "Test summary",
+        claims: [
+          {
+            claimId: "claim-1",
+            summary: "Claim summary",
+            requestedRemedy: "warn",
+            allegedPrinciples: [1, 5]
+          }
+        ],
+        submissions: [
+          {
+            side: "prosecution",
+            phase: "opening",
+            text: "Opening statement text."
+          },
+          {
+            side: "defence",
+            phase: "opening",
+            text: "Defence opening statement text."
+          }
+        ],
+        evidence: []
+      });
+
+      assert.ok(typeof advisory === "string" && advisory.length >= 20);
+      assert.match(advisory.toLowerCase(), /judge advisory|record|evidence/);
+    }
+  );
+}
+
 function testMlSignalValidation() {
   // null/undefined inputs return null
   assert.equal(validateMlSignals(null), null);
@@ -2020,6 +2075,7 @@ async function run() {
   testCaseOfDayViewAggregation();
   testOpenClawToolContractParity();
   testMlSignalValidation();
+  await testJudgeStageAdvisoryStub();
   await testDrandHttpIntegration();
   if (process.env.RUN_SMOKE_OPENCLAW === "1") {
     execFileSync("node", ["--import", "tsx", "tests/smoke/openclaw-participation.smoke.ts"], {

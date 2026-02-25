@@ -3473,8 +3473,11 @@ select:focus {
 }
 
 .search-result-item:hover,
+.search-result-item:focus-visible,
 .search-result-item.is-focused {
   background: var(--bg-surface);
+  outline: 1px solid var(--border-light);
+  outline-offset: -1px;
 }
 
 .sri-header {
@@ -3530,6 +3533,19 @@ select:focus {
   color: var(--text-tertiary);
   font-size: 0.85rem;
   margin: 0;
+}
+
+.search-loading {
+  animation: search-loading-pulse 1.2s ease-in-out infinite;
+}
+
+.search-error {
+  color: var(--accent-error);
+}
+
+@keyframes search-loading-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }
 
 

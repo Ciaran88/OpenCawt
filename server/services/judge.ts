@@ -114,6 +114,29 @@ export interface JudgeRemedyInput {
   }>;
 }
 
+export interface JudgeStageAdvisoryInput {
+  caseId: string;
+  stage: "opening_addresses" | "evidence" | "closing_addresses" | "summing_up" | "voting";
+  summary: string;
+  claims: Array<{
+    claimId: string;
+    summary: string;
+    requestedRemedy: Remedy;
+    allegedPrinciples: number[];
+  }>;
+  submissions: Array<{
+    side: "prosecution" | "defence";
+    phase: "opening" | "evidence" | "closing" | "summing_up";
+    text: string;
+  }>;
+  evidence: Array<{
+    submittedBy: string;
+    kind: string;
+    bodyText: string;
+    references: string[];
+  }>;
+}
+
 // ---------------------------------------------------------------------------
 // Result types
 // ---------------------------------------------------------------------------
@@ -143,6 +166,7 @@ export interface JudgeService {
    */
   breakTiebreak(input: JudgeTiebreakInput): Promise<JudgeTiebreakResult>;
   recommendRemedy(input: JudgeRemedyInput): Promise<string>;
+  summariseStage(input: JudgeStageAdvisoryInput): Promise<string>;
   isAvailable(): boolean;
 }
 
@@ -294,6 +318,23 @@ ${PRINCIPLES_BLOCK}
   "recommendation": "Remediation: why this remedy is appropriate and any specific actions the agent should take. Max 400 chars."
 }`;
 
+const STAGE_ADVISORY_SYSTEM_PROMPT = `You are the OpenCawt judge issuing a neutral stage advisory.
+You are NOT issuing a verdict. Briefly summarise what the record currently shows and what should be clarified next.
+
+Rules:
+- Stay neutral and concise.
+- Reference concrete points from submissions and evidence when available.
+- Do not decide guilt or final outcome.
+- Mention principle relevance only when justified by the record.
+- Keep output to 2-3 sentences, max 420 chars.
+
+${PRINCIPLES_BLOCK}
+
+Response format (JSON):
+{
+  "advisory": "2-3 sentence neutral stage advisory"
+}`;
+
 // ---------------------------------------------------------------------------
 // User message builders
 // ---------------------------------------------------------------------------
@@ -384,6 +425,35 @@ ${claimLines.join("\n")}
 
 Trial submissions:
 ${submissionLines.join("\n\n")}`;
+}
+
+function buildStageAdvisoryUserMessage(input: JudgeStageAdvisoryInput): string {
+  const claimLines = input.claims.map((claim) => {
+    const principles = claim.allegedPrinciples.map((p) => `P${p}`).join(", ") || "none";
+    return `  - [${claim.claimId}] "${claim.summary}" — Remedy: ${claim.requestedRemedy}, Principles: ${principles}`;
+  });
+
+  const submissionLines = input.submissions.map((submission) => {
+    return `  [${submission.side.toUpperCase()} — ${submission.phase}] ${truncate(submission.text, MAX_SUBMISSION_CHARS)}`;
+  });
+
+  const evidenceLines = input.evidence.map((entry) => {
+    const refs = entry.references.length > 0 ? ` | Refs: ${entry.references.join(", ")}` : "";
+    return `  [${entry.kind} by ${entry.submittedBy}${refs}] ${truncate(entry.bodyText, MAX_EVIDENCE_CHARS)}`;
+  });
+
+  return `Case ID: ${input.caseId}
+Stage: ${input.stage}
+Case summary: ${input.summary}
+
+Claims:
+${claimLines.join("\n")}
+
+Submissions:
+${submissionLines.join("\n")}
+
+Evidence:
+${evidenceLines.join("\n")}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -578,6 +648,36 @@ export function createJudgeService(deps: { logger: Logger; config: AppConfig }):
 
       const full = intentLabel ? `${intentLabel}\n\n${recommendation}` : recommendation;
       return full.slice(0, 1000);
+    },
+
+    async summariseStage(input: JudgeStageAdvisoryInput): Promise<string> {
+      if (!useLlm) {
+        deps.logger.info("judge_stage_advisory_stub", {
+          caseId: input.caseId,
+          stage: input.stage
+        });
+        const stageLabel = input.stage.replace(/_/g, " ");
+        return `Judge advisory (${stageLabel}): the record is partially developed and should remain evidence-led. Each side should clarify concrete facts, principle citations and causal links before voting.`;
+      }
+
+      deps.logger.info("judge_stage_advisory_llm", {
+        caseId: input.caseId,
+        stage: input.stage
+      });
+      const userMessage = buildStageAdvisoryUserMessage(input);
+      const result = await callOpenAi<{ advisory?: string }>(
+        apiKey,
+        model,
+        STAGE_ADVISORY_SYSTEM_PROMPT,
+        userMessage,
+        deps.logger,
+        deps.config.retry.external
+      );
+      const advisory =
+        typeof result.advisory === "string" && result.advisory.trim().length > 0
+          ? result.advisory.trim()
+          : "Judge advisory unavailable for this stage.";
+      return advisory.slice(0, 420);
     },
 
     isAvailable(): boolean {
