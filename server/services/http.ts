@@ -118,6 +118,25 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseRetryAfterMs(headerValue: string | null): number | null {
+  if (!headerValue) {
+    return null;
+  }
+  const raw = headerValue.trim();
+  if (!raw) {
+    return null;
+  }
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.floor(seconds * 1000);
+  }
+  const atMs = Date.parse(raw);
+  if (!Number.isFinite(atMs)) {
+    return null;
+  }
+  return Math.max(0, atMs - Date.now());
+}
+
 function classifyExternalNetworkError(
   error: unknown,
   options: { target: string; url: string; requestId?: string; attempt: number; attempts: number }
@@ -230,8 +249,11 @@ export async function fetchWithRetry(options: ExternalFetchOptions): Promise<Res
         });
         lastFailure = failure;
         if (failure.retryable && attempt < options.attempts) {
+          const exponentialDelay = options.baseDelayMs * Math.pow(2, attempt - 1);
+          const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after")) ?? 0;
           const jitter = Math.floor(Math.random() * 120);
-          await wait(options.baseDelayMs * attempt + jitter);
+          const waitMs = Math.max(exponentialDelay + jitter, retryAfterMs);
+          await wait(waitMs);
           continue;
         }
         throw new ApiError(failure.statusCode, failure.code, failure.message, failure.details);
@@ -251,8 +273,9 @@ export async function fetchWithRetry(options: ExternalFetchOptions): Promise<Res
       });
       lastFailure = failure;
       if (failure.retryable && attempt < options.attempts) {
+        const exponentialDelay = options.baseDelayMs * Math.pow(2, attempt - 1);
         const jitter = Math.floor(Math.random() * 120);
-        await wait(options.baseDelayMs * attempt + jitter);
+        await wait(exponentialDelay + jitter);
         continue;
       }
       throw new ApiError(failure.statusCode, failure.code, failure.message, failure.details);

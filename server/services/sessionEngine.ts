@@ -32,7 +32,7 @@ import type { DrandClient } from "./drand";
 import { pickReplacementFromProof, selectJuryDeterministically } from "./jury";
 import type { JudgeService } from "./judge";
 import { truncateCaseTitle } from "./validation";
-import { JUDGE_CALL_TIMEOUT_MS, withJudgeTimeout } from "./judge";
+import { withJudgeTimeout } from "./judge";
 import { retrySealJob } from "./sealing";
 import type { Logger } from "./observability";
 
@@ -422,7 +422,7 @@ async function processCase(
             allegedPrinciples: c.allegedPrinciples
           }))
         }),
-        JUDGE_CALL_TIMEOUT_MS,
+        deps.config.judgeCallTimeoutMs,
         "screenCase"
       );
       if (!screenOutcome.ok) {

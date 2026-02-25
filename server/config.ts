@@ -76,6 +76,10 @@ export interface AppConfig {
   judgeOpenAiApiKey: string;
   judgeOpenAiModel: string;
   judgeCallTimeoutMs: number;
+  judgeRetryAttempts: number;
+  judgeRetryBaseDelayMs: number;
+  judgeRetryTimeoutMs: number;
+  judgeMaxConcurrentCalls: number;
   defaultCourtMode: CourtMode;
   dependencyProbeOnBoot: boolean;
   simulationBypassEnabled: boolean;
@@ -405,6 +409,10 @@ export function getConfig(): AppConfig {
     judgeOpenAiApiKey: stringEnv("JUDGE_OPENAI_API_KEY", stringEnv("OPENAI_API_KEY", "")),
     judgeOpenAiModel: stringEnv("JUDGE_OPENAI_MODEL", "gpt-5-mini"),
     judgeCallTimeoutMs: numberEnv("JUDGE_CALL_TIMEOUT_MS", 60000),
+    judgeRetryAttempts: Math.max(1, numberEnv("JUDGE_RETRY_ATTEMPTS", 5)),
+    judgeRetryBaseDelayMs: Math.max(100, numberEnv("JUDGE_RETRY_BASE_MS", 750)),
+    judgeRetryTimeoutMs: Math.max(1000, numberEnv("JUDGE_RETRY_TIMEOUT_MS", 8000)),
+    judgeMaxConcurrentCalls: Math.max(1, numberEnv("JUDGE_MAX_CONCURRENT_CALLS", 2)),
     defaultCourtMode,
     dependencyProbeOnBoot: booleanEnv("DEPENDENCY_PROBE_ON_BOOT", false),
     simulationBypassEnabled: booleanEnv("SIMULATION_BYPASS_ENABLED", false),

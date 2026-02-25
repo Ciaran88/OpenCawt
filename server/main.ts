@@ -730,58 +730,36 @@ async function closeCasePipeline(caseId: string): Promise<{
         if (tally.proven === tally.notProven && tally.proven > tally.insufficient) {
           // Exact tie — invoke judge tiebreak
           if (!judgeTiebreaks) judgeTiebreaks = {};
-          let tiebreakOutcome:
-            | { ok: true; data: { finding: "proven" | "not_proven"; reasoning: string } }
-            | { ok: false; error: string }
-            | null = null;
-
-          for (let attempt = 1; attempt <= 3; attempt += 1) {
-            tiebreakOutcome = await withJudgeTimeout(
-              judge.breakTiebreak({
-                caseId,
-                targetClaimId: claim.claimId,
-                claims: claims.map((c) => ({
-                  claimId: c.claimId,
-                  summary: c.summary,
-                  requestedRemedy: c.requestedRemedy,
-                  allegedPrinciples: c.allegedPrinciples
-                })),
-                ballots: ballots.map((b) => ({ votes: b.votes })),
-                submissions: submissions.map((s) => ({
-                  side: s.side,
-                  phase: s.phase,
-                  text: s.text
-                })),
-                evidence: evidence.map((e) => ({
-                  submittedBy: e.submittedBy,
-                  kind: e.kind,
-                  bodyText: e.bodyText,
-                  references: e.references
-                }))
-              }),
-              config.judgeCallTimeoutMs,
-              "breakTiebreak"
-            );
-
-            if (tiebreakOutcome.ok) {
-              break;
-            }
-
-            logger.warn("judge_tiebreak_attempt_failed", {
+          const tiebreakOutcome = await withJudgeTimeout(
+            judge.breakTiebreak({
               caseId,
-              claimId: claim.claimId,
-              attempt,
-              error: tiebreakOutcome.error
-            });
+              targetClaimId: claim.claimId,
+              claims: claims.map((c) => ({
+                claimId: c.claimId,
+                summary: c.summary,
+                requestedRemedy: c.requestedRemedy,
+                allegedPrinciples: c.allegedPrinciples
+              })),
+              ballots: ballots.map((b) => ({ votes: b.votes })),
+              submissions: submissions.map((s) => ({
+                side: s.side,
+                phase: s.phase,
+                text: s.text
+              })),
+              evidence: evidence.map((e) => ({
+                submittedBy: e.submittedBy,
+                kind: e.kind,
+                bodyText: e.bodyText,
+                references: e.references
+              }))
+            }),
+            config.judgeCallTimeoutMs,
+            "breakTiebreak"
+          );
 
-            if (attempt < 3) {
-              await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
-            }
-          }
-
-          if (tiebreakOutcome?.ok) {
+          if (tiebreakOutcome.ok) {
             judgeTiebreaks[claim.claimId] = tiebreakOutcome.data;
-          } else if (tiebreakOutcome) {
+          } else {
             logger.warn("judge_tiebreak_timeout", {
               caseId,
               claimId: claim.claimId,
@@ -3615,51 +3593,39 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       const evidence = listEvidenceByCase(db, caseId);
       const claims = listClaims(db, caseId);
 
-      let advisoryOutcome:
-        | { ok: true; data: string }
-        | { ok: false; error: string }
-        | null = null;
-      const advisoryErrors: string[] = [];
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        advisoryOutcome = await withJudgeTimeout(
-          judge.summariseStage({
-            caseId,
-            stage,
-            summary: caseRecord.summary,
-            claims: claims.map((claim) => ({
-              claimId: claim.claimId,
-              summary: claim.summary,
-              requestedRemedy: claim.requestedRemedy,
-              allegedPrinciples: claim.allegedPrinciples
-            })),
-            submissions: submissions.map((submission) => ({
-              side: submission.side,
-              phase: submission.phase,
-              text: submission.text
-            })),
-            evidence: evidence.map((entry) => ({
-              submittedBy: entry.submittedBy,
-              kind: entry.kind,
-              bodyText: entry.bodyText,
-              references: entry.references
-            }))
-          }),
-          config.judgeCallTimeoutMs,
-          "summariseStage"
-        );
-        if (advisoryOutcome.ok) {
-          break;
-        }
-        advisoryErrors.push(advisoryOutcome.error);
+      const advisoryOutcome = await withJudgeTimeout(
+        judge.summariseStage({
+          caseId,
+          stage,
+          summary: caseRecord.summary,
+          claims: claims.map((claim) => ({
+            claimId: claim.claimId,
+            summary: claim.summary,
+            requestedRemedy: claim.requestedRemedy,
+            allegedPrinciples: claim.allegedPrinciples
+          })),
+          submissions: submissions.map((submission) => ({
+            side: submission.side,
+            phase: submission.phase,
+            text: submission.text
+          })),
+          evidence: evidence.map((entry) => ({
+            submittedBy: entry.submittedBy,
+            kind: entry.kind,
+            bodyText: entry.bodyText,
+            references: entry.references
+          }))
+        }),
+        config.judgeCallTimeoutMs,
+        "summariseStage"
+      );
+      if (!advisoryOutcome.ok) {
         logger.warn("judge_stage_advisory_attempt_failed", {
           caseId,
           stage,
-          attempt,
+          attempt: 1,
           error: advisoryOutcome.error
         });
-        if (attempt < 3) {
-          await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
-        }
       }
       const stageLabel = stage.replace(/_/g, " ");
       const advisoryText = advisoryOutcome?.ok
@@ -3683,7 +3649,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         logger.warn("judge_stage_advisory_fallback_used", {
           caseId,
           stage,
-          errors: advisoryErrors.slice(0, 3)
+          errors: [advisoryOutcome.error]
         });
       }
 
