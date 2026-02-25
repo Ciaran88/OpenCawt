@@ -147,6 +147,8 @@ interface UiDecision {
     payerWallet?: string;
     amountLamports?: number;
   };
+  verdictHash?: string;
+  verdictBundle?: unknown;
   transcriptRootHash?: string;
   jurySelectionProofHash?: string;
   rulesetVersion?: string;
@@ -463,6 +465,8 @@ export function toUiDecision(options: {
           treasuryTxSig: options.caseRecord.treasuryTxSig
         }
       : undefined,
+    verdictHash: options.caseRecord.verdictHash,
+    verdictBundle: options.caseRecord.verdictBundle,
     transcriptRootHash: options.caseRecord.transcriptRootHash,
     jurySelectionProofHash: options.caseRecord.jurySelectionProofHash,
     rulesetVersion: options.caseRecord.rulesetVersion,

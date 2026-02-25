@@ -137,6 +137,20 @@ function makeIdempotencyKey(prefix: string): string {
   return key;
 }
 
+function normaliseBallotReasoning(text: string, side: "prosecution" | "defence"): string {
+  const trimmed = text.trim();
+  const sentenceCount = (trimmed.match(/[.!?](?:\s|$)/g) || []).length;
+  if (sentenceCount >= 2 && sentenceCount <= 3) {
+    return trimmed;
+  }
+  const base = trimmed.replace(/[.!?]+$/g, "").trim();
+  const second =
+    side === "prosecution"
+      ? "This supports a proven finding under the cited principles."
+      : "This supports a not proven finding under the cited principles.";
+  return `${base}. ${second}`;
+}
+
 async function fetchWithTimeout(input: string, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
@@ -716,9 +730,13 @@ async function driveVoting(
       }
 
       const chooseProven = proven < provenTarget;
-      const rationale = chooseProven
+      const rationaleBase = chooseProven
         ? JUROR_RATIONALES_PROVEN[proven % JUROR_RATIONALES_PROVEN.length]
         : JUROR_RATIONALES_NOT_PROVEN[notProven % JUROR_RATIONALES_NOT_PROVEN.length];
+      const rationale = normaliseBallotReasoning(
+        rationaleBase,
+        chooseProven ? "prosecution" : "defence"
+      );
 
       const body = {
         votes: [
