@@ -47,7 +47,7 @@ const menuItems: SideNavItem[] = [
   {
     label: "OCP",
     href: getOcpFrontendUrl(),
-    icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l6 3.2v5.6c0 4.1-2.5 7.7-6 9.2-3.5-1.5-6-5.1-6-9.2V6.2L12 3z"></path><path d="M8.3 10.2h7.4"></path><path d="M8.8 13.1h6.4"></path><path d="M10.2 16h3.6"></path></svg>`
+    icon: `<span class="nav-icon-image nav-icon-image-seal" aria-hidden="true"></span>`
   }
 ];
 
