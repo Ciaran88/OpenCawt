@@ -292,13 +292,13 @@ a {
 .nav-icon-image-seal {
   -webkit-mask-image: url("/icons/seal.png");
   mask-image: url("/icons/seal.png");
-  -webkit-mask-size: 115% 115%;
-  mask-size: 115% 115%;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .nav-item-ocp .nav-icon {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
 .app-shell.sidebar-collapsed .nav-item {
