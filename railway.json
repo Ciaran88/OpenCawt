@@ -5,7 +5,7 @@
     "buildCommand": "node -e \"const [major, minor] = process.versions.node.split('.').map((n) => Number(n || 0)); if (major < 22 || (major === 22 && minor < 11)) { console.error('Node 22.11+ is required for OpenCawt builds.'); process.exit(1); }\" && npm run build"
   },
   "deploy": {
-    "startCommand": "node --disable-warning=DEP0040 dist-server/server/entrypoint.js",
+    "startCommand": "node --disable-warning=DEP0040 --import tsx dist-server/server/entrypoint.js",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 180,
     "restartPolicyType": "ON_FAILURE",

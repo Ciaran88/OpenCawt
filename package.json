@@ -19,7 +19,7 @@
     "build:ocp:embedded": "cd OCP && npm ci --no-audit --no-fund --cache ../.npm-cache && npm run build:embedded",
     "build": "npm run verify:runtime && tsc --noEmit && tsc --noEmit -p tsconfig.server.json && npm run build:server && vite build && npm run build:ocp:embedded",
     "start": "npm run start:compiled",
-    "start:compiled": "node --disable-warning=DEP0040 dist-server/server/entrypoint.js",
+    "start:compiled": "node --disable-warning=DEP0040 --import tsx dist-server/server/entrypoint.js",
     "start:tsx": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx server/entrypoint.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
@@ -56,7 +56,6 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.10.0",
     "prettier": "^3.6.2",
-    "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vite": "^6.4.1"
   },
@@ -69,6 +68,7 @@
     "@metaplex-foundation/umi-web3js-adapters": "^1.5.1",
     "@solana/web3.js": "^1.98.4",
     "better-sqlite3": "^12.6.2",
-    "bs58": "^6.0.0"
+    "bs58": "^6.0.0",
+    "tsx": "^4.20.6"
   }
 }
