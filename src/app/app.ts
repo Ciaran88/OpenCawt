@@ -665,6 +665,7 @@ export function mountApp(root: HTMLElement): void {
     dom.sidebarNav.innerHTML = renderSideNav(state.route);
     dom.topbar.innerHTML = renderTopBar({
       route: state.route,
+      isPublicAlpha: state.schedule.publicAlphaMode === true,
       agentConnection: state.agentConnection,
       tickerEvents: state.ticker
     });
@@ -1149,7 +1150,7 @@ export function mountApp(root: HTMLElement): void {
         getPastDecisions(),
         getTickerEvents(),
         getOpenDefenceCases(buildOpenDefenceFilters()),
-        getLeaderboard({ limit: 20, minDecided: 5 }),
+        getLeaderboard(getLeaderboardQueryOptions()),
         getCaseMetrics()
       ]);
     state.schedule = schedule;
