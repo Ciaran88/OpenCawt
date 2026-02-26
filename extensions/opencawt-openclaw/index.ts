@@ -5,13 +5,118 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { OPENCAWT_OPENCLAW_TOOLS, toOpenClawParameters } from "../../shared/openclawTools";
-import { signPayload } from "../../shared/signing";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 interface AgentIdentity {
   agentId: string;
   privateKey: CryptoKey;
+}
+
+interface PluginToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+const encoder = new TextEncoder();
+const pluginDir = dirname(fileURLToPath(import.meta.url));
+const toolSchemasPath = resolve(pluginDir, "./toolSchemas.json");
+const OPENCAWT_OPENCLAW_TOOLS = JSON.parse(
+  readFileSync(toolSchemasPath, "utf8")
+) as PluginToolDefinition[];
+
+function toOpenClawParameters(tool: PluginToolDefinition): {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+} {
+  return {
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.inputSchema
+  };
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "number") {
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      throw new Error("Canonical JSON rejects non-finite numbers.");
+    }
+    return JSON.stringify(value);
+  }
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  if (Object.prototype.toString.call(value) === "[object Object]") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a.localeCompare(b)
+    );
+    return `{${entries
+      .map(([key, nested]) => {
+        if (
+          typeof nested === "undefined" ||
+          typeof nested === "function" ||
+          typeof nested === "symbol"
+        ) {
+          throw new Error("Canonical JSON rejects unsupported values.");
+        }
+        return `${JSON.stringify(key)}:${canonicalJson(nested)}`;
+      })
+      .join(",")}}`;
+  }
+  throw new Error("Canonical JSON only supports JSON values.");
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(input) as BufferSource);
+  const bytes = new Uint8Array(digest);
+  return [...bytes].map((part) => part.toString(16).padStart(2, "0")).join("");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("base64");
+}
+
+function buildSigningString(input: {
+  method: string;
+  path: string;
+  caseId?: string;
+  timestamp: number;
+  payloadHash: string;
+}): string {
+  return [
+    "OpenCawtReqV1",
+    input.method.toUpperCase(),
+    input.path,
+    input.caseId ?? "",
+    String(input.timestamp),
+    input.payloadHash
+  ].join("|");
+}
+
+async function signPayload(input: {
+  method: string;
+  path: string;
+  caseId?: string;
+  timestamp: number;
+  payload: unknown;
+  privateKey: CryptoKey;
+}): Promise<{ payloadHash: string; signature: string }> {
+  const payloadHash = await sha256Hex(canonicalJson(input.payload));
+  const binding = buildSigningString({
+    method: input.method,
+    path: input.path,
+    caseId: input.caseId,
+    timestamp: input.timestamp,
+    payloadHash
+  });
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(binding) as BufferSource);
+  const signatureBytes = await crypto.subtle.sign("Ed25519", input.privateKey, digest as BufferSource);
+  return { payloadHash, signature: bytesToBase64(new Uint8Array(signatureBytes)) };
 }
 
 function resolveCapabilityToken(config: Record<string, unknown>): string | undefined {
@@ -78,7 +183,14 @@ function buildPathAndQuery(toolName: string, params: Record<string, unknown>): {
   const path = pathMap[toolName]?.(params) ?? "/";
   const queryMap: Record<string, Record<string, string>> = {
     search_open_defence_cases: { q: "q", status: "status", tag: "tag", startAfterIso: "start_after", startBeforeIso: "start_before", limit: "limit" },
-    get_leaderboard: { limit: "limit", minDecided: "min_decided" },
+    get_leaderboard: {
+      limit: "limit",
+      metric: "metric",
+      minDecided: "min_decided",
+      minProsecution: "min_prosecution",
+      minDefence: "min_defence",
+      minJury: "min_jury"
+    },
     get_agent_profile: { activityLimit: "activity_limit" },
     fetch_case_transcript: { afterSeq: "after_seq", limit: "limit" },
     ocp_get_fee_estimate: { payerWallet: "payer_wallet" }

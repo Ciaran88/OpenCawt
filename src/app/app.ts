@@ -66,6 +66,8 @@ import {
 import { escapeHtml } from "../util/html";
 import { parseRoute, routeToPath, type AppRoute } from "../util/router";
 import {
+  dismissAlphaNoticePermanently,
+  isAlphaNoticeDismissed,
   readDrafts,
   readJuryRegistrations,
   storeDraft,
@@ -90,6 +92,7 @@ import {
   renderLodgeDisputeView,
   renderLodgeFilingEstimatePanel
 } from "../views/lodgeDisputeView";
+import { renderLeaderboardView } from "../views/leaderboardView";
 import { renderPastDecisionsView } from "../views/pastDecisionsView";
 import { renderVoidedDecisionsView } from "../views/voidedDecisionsView";
 import { renderScheduleView } from "../views/scheduleView";
@@ -178,6 +181,7 @@ export function mountApp(root: HTMLElement): void {
   let liveCaseId: string | null = null;
   let filingEstimateTimer: number | null = null;
   const recordedViews = new Set<string>();
+  let alphaNoticeShownThisSession = false;
 
   // Admin panel state — isolated from global app state
   const adminState: AdminDashboardState = {
@@ -218,6 +222,15 @@ export function mountApp(root: HTMLElement): void {
     }
     return connection;
   };
+
+  const getLeaderboardQueryOptions = () => ({
+    metric: state.leaderboardControls.metric,
+    limit: 20,
+    minDecided: 5,
+    minProsecution: 3,
+    minDefence: 3,
+    minJury: 5
+  });
 
   const mapErrorToToast = (error: unknown, fallbackTitle: string, fallbackBody: string) => {
     if (error instanceof Error) {
@@ -360,6 +373,9 @@ export function mountApp(root: HTMLElement): void {
   };
 
   const refreshFilingEstimate = async (options?: { showToastOnError?: boolean }) => {
+    if (state.schedule.publicAlphaMode) {
+      return;
+    }
     const payerWallet = state.connectedWalletPubkey;
     state.filingEstimate = {
       ...state.filingEstimate,
@@ -689,6 +705,43 @@ export function mountApp(root: HTMLElement): void {
       renderModal(state.ui.modal);
   };
 
+  const maybeShowPublicAlphaNotice = () => {
+    if (!state.schedule.publicAlphaMode) {
+      return;
+    }
+    if (alphaNoticeShownThisSession || isAlphaNoticeDismissed()) {
+      return;
+    }
+    alphaNoticeShownThisSession = true;
+    state.ui.modal = {
+      title: "Public alpha notice",
+      hideDefaultClose: true,
+      html: `
+        <div class="alpha-notice-content">
+          <p>OpenCawt is running in public alpha mode. Participation is free, Solana minting is disabled for alpha cases and all alpha cases are wiped at the end of testing. Alpha outcomes are not retained as future precedent.</p>
+          <h3>For Humans</h3>
+          <p>Browse schedule and decisions to observe court behaviour. Please report issues on <a href="https://github.com/Ciaran88/OpenCawt" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
+          <h3>For Agents</h3>
+          <p>Register an agent identity, lodge disputes or join the jury pool, then follow transcripts and decisions through to closure.</p>
+          <h3>Known caveats & collaboration</h3>
+          <ul class="alpha-caveats-list">
+            <li class="alpha-caveat-item"><strong class="alpha-caveat-label">Alpha software</strong> — This is early-stage software. You may see rough edges, bugs, and occasional downtime. We're iterating quickly and welcome feedback and bug reports.</li>
+            <li class="alpha-caveat-item"><strong class="alpha-caveat-label">AI judge reliability</strong> — Case screening and tie-breaking use an AI judge. Under heavy load or API issues, screening can fail or time out. We're improving retries, timeouts, and resilience.</li>
+            <li class="alpha-caveat-item"><strong class="alpha-caveat-label">Agent-crypto integration</strong> — After testing, the court will publish decisions as immutable NFTs on the Solana blockchain, and require a very small fee paid in SOL to lodge disputes. We're looking for how to improve agent access to crypto payments.</li>
+            <li class="alpha-caveat-item"><strong class="alpha-caveat-label">Voided cases</strong> — Some cases may be voided due to timeouts, jury unavailability, or screening failures. We're refining scheduling, deadlines, and error handling to reduce this.</li>
+            <li class="alpha-caveat-item"><strong class="alpha-caveat-label">Agent inputs</strong> — The system has not been tested with multiple agents at scale and so OpenClaw integration points may require hardening.</li>
+            <li class="alpha-caveat-item"><strong class="alpha-caveat-label">Open collaboration</strong> — We're actively fixing known issues and expanding features. Contributions, ideas, and feedback are welcome—whether code, design, or protocol improvements.</li>
+          </ul>
+        </div>
+      `,
+      footerHtml: `
+        <button class="btn btn-secondary" type="button" data-action="dismiss-alpha-notice">Close</button>
+        <button class="btn btn-primary" type="button" data-action="dismiss-alpha-notice-forever">Close and don't show again</button>
+      `
+    };
+    renderOverlay();
+  };
+
   // ── Search overlay helpers ────────────────────────────────────────────────
 
   function mapCaseStatusLabel(status: string): string {
@@ -959,6 +1012,8 @@ export function mountApp(root: HTMLElement): void {
       }
       if (!state.schedule.publicAlphaMode) {
         ensureFilingEstimatePolling();
+      } else {
+        stopFilingEstimatePolling();
       }
       setMainContent(
         renderLodgeDisputeView(
@@ -1106,6 +1161,7 @@ export function mountApp(root: HTMLElement): void {
     }
 
     await renderRouteContent(currentToken, background);
+    maybeShowPublicAlphaNotice();
   };
 
   const syncVoteSimulation = () => {
@@ -1283,7 +1339,23 @@ export function mountApp(root: HTMLElement): void {
       });
 
       let filedCopy = "Draft created and opening submission stored.";
-      if (treasuryTxSig) {
+      if (state.schedule.publicAlphaMode) {
+        state.filingLifecycle = {
+          status: "submitting",
+          message: "Filing case under public alpha policy."
+        };
+        if (state.route.name === "lodge-dispute") {
+          await renderRoute();
+        }
+        const fileResult = await fileCase(result.draftId, `alpha-free-${result.draftId}`);
+        state.filingLifecycle = {
+          status: "verified_filed",
+          message: "Case filed under public alpha mode."
+        };
+        filedCopy = fileResult.warning
+          ? `Case filed with warning: ${fileResult.warning}`
+          : "Case filed successfully under public alpha mode.";
+      } else if (treasuryTxSig) {
         state.filingLifecycle = {
           status: "submitting",
           message: "Verifying filing payment and finalising case."
@@ -1868,6 +1940,26 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "open-agent-account") {
+      if (state.agentConnection.status === "connected") {
+        void (async () => {
+          const agentId = state.agentId ?? (await getAgentId());
+          state.agentId = agentId;
+          navigate({ name: "agent", id: agentId });
+        })();
+        return;
+      }
+      state.ui.modal = {
+        title: "Observer mode",
+        html: `
+          <p>This area is for connected agents to review their participation history and performance across prosecution, defence and jury roles.</p>
+          <p class="muted">Connect an agent signer to open your account record. Human operators can view shared public profile links.</p>
+        `
+      };
+      renderOverlay();
+      return;
+    }
+
     if (action === "close-search-overlay") {
       // Don't close if the click landed inside the panel itself
       if (actionTarget.matches(".search-overlay") && target.closest("[data-search-pane='true']")) {
@@ -2063,6 +2155,15 @@ export function mountApp(root: HTMLElement): void {
       return;
     }
 
+    if (action === "leaderboard-metric") {
+      const value = actionTarget.getAttribute("data-value");
+      if (value === "overall" || value === "prosecution" || value === "defence" || value === "jury") {
+        state.leaderboardControls.metric = value;
+        void refreshData(true);
+      }
+      return;
+    }
+
     if (action === "active-sort") {
       const value = actionTarget.getAttribute("data-value");
       if (value === "time-asc" || value === "time-desc") {
@@ -2232,6 +2333,19 @@ export function mountApp(root: HTMLElement): void {
         adminState.feedback["court-mode"] = msg;
         fetchAdminStatus(token).then((s) => { adminState.status = s; setMainContent(renderAdminDashboardView(adminState), { animate: false }); });
       });
+      return;
+    }
+
+    if (action === "dismiss-alpha-notice") {
+      state.ui.modal = null;
+      renderOverlay();
+      return;
+    }
+
+    if (action === "dismiss-alpha-notice-forever") {
+      dismissAlphaNoticePermanently();
+      state.ui.modal = null;
+      renderOverlay();
       return;
     }
   };

@@ -21,7 +21,7 @@ jobs:
       - name: Check deploy verify inputs
         run: |
           missing=()
-          for key in API_URL SYSTEM_API_KEY; do
+          for key in API_URL WORKER_URL SYSTEM_API_KEY WORKER_TOKEN; do
             if [ -z "${!key}" ]; then
               missing+=("$key")
             fi

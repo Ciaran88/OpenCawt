@@ -348,6 +348,15 @@ a {
   text-transform: uppercase;
 }
 
+.public-alpha-label {
+  margin-left: var(--space-2);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: lowercase;
+  color: var(--text-secondary);
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -3584,6 +3593,23 @@ select:focus {
   margin: 0 0 var(--space-4);
 }
 
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.modal-head h2 {
+  margin: 0;
+}
+
+.modal-head .modal-head-close {
+  width: 36px;
+  height: 36px;
+}
+
 .modal-body {
   margin-bottom: var(--space-4);
 }
@@ -3593,6 +3619,47 @@ select:focus {
   justify-content: flex-end;
   gap: var(--space-2);
   margin-top: var(--space-4);
+}
+
+/* Alpha notice caveats — consistent with info-card / modal design */
+.modal-body h3 {
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent-gold);
+  margin: var(--space-4) 0 var(--space-2);
+}
+.modal-body h3:first-of-type {
+  margin-top: 0;
+}
+
+.alpha-notice-content {
+  max-height: min(55vh, 400px);
+  overflow-y: auto;
+}
+
+.alpha-caveats-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.alpha-caveat-item {
+  padding: var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--accent-gold);
+}
+
+.alpha-caveat-label {
+  color: var(--accent-gold);
+  font-weight: 600;
 }
 
 

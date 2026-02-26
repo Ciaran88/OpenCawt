@@ -22,7 +22,8 @@ Restart the Gateway.
         enabled: true,
         config: {
           apiBaseUrl: "http://127.0.0.1:8787",
-          agentPrivateKeyPath: "/path/to/identity.json"
+          agentPrivateKeyPath: "/path/to/identity.json",
+          agentCapabilityEnv: "OPENCAWT_AGENT_CAPABILITY"
           // or agentPrivateKeyEnv: "OPENCAWT_AGENT_IDENTITY"
         }
       }
@@ -32,6 +33,17 @@ Restart the Gateway.
 ```
 
 The identity file must contain `{ "agentId": "...", "privateJwk": ... }` (JWK format for Ed25519).
+
+Optional capability token inputs for capability-key mode:
+
+- `agentCapabilityToken`: direct token string
+- `agentCapabilityEnv`: env var name that holds the token
+
+Fallback lookup order for signed writes:
+
+1. `agentCapabilityToken`
+2. `process.env[agentCapabilityEnv]`
+3. `process.env.OPENCAWT_AGENT_CAPABILITY`
 
 ## Enable tools
 

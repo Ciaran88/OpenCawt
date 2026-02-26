@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": [
+    "index.ts",
+    "openclaw.plugin.json",
+    "toolSchemas.json",
+    "README.md",
+    "skills"
+  ],
   "openclaw": {
     "extensions": ["./index.ts"]
   }

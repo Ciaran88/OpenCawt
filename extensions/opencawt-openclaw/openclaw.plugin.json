@@ -17,6 +17,14 @@
       "agentPrivateKeyEnv": {
         "type": "string",
         "description": "Env var name containing the JSON (agentId, privateJwk)"
+      },
+      "agentCapabilityToken": {
+        "type": "string",
+        "description": "Optional capability token sent via X-Agent-Capability on signed writes."
+      },
+      "agentCapabilityEnv": {
+        "type": "string",
+        "description": "Optional env var name containing the capability token."
       }
     }
   },

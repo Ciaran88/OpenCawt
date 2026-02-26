@@ -949,7 +949,7 @@ async function closeCasePipeline(caseId: string): Promise<{
     const sealedCandidate = ensureCaseExists(caseId);
     let sealJob: { jobId: string; mode: "stub" | "http"; status: string; created: boolean } | undefined;
     if (sealedCandidate.sealedDisabled) {
-      const alphaSealSkip = sealedCandidate.alphaCohort && config.publicAlphaMode;
+      const alphaSealSkip = sealedCandidate.alphaCohort;
       setCaseSealState(db, {
         caseId,
         sealStatus: "pending",
@@ -1222,7 +1222,7 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
     async handler(verified) {
       const caseRecord = ensureCaseExists(caseId);
       const simulationBypass = config.simulationBypassEnabled && caseRecord.sealedDisabled;
-      const alphaBypass = config.publicAlphaMode && caseRecord.alphaCohort;
+      const alphaBypass = caseRecord.alphaCohort;
       const filingFeeBypass = simulationBypass || alphaBypass;
       const namedDefendantCase = Boolean(caseRecord.defendantAgentId);
       if (caseRecord.status !== "draft") {

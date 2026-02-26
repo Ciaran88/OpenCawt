@@ -187,6 +187,7 @@ export async function getSchedule(): Promise<ScheduleResponse> {
   const schedule = await apiGet<ScheduleResponse>("/api/schedule");
   return clone({
     ...schedule,
+    publicAlphaMode: schedule.publicAlphaMode === true,
     scheduled: schedule.scheduled.map(withCaseDisplayDate),
     active: schedule.active.map(withCaseDisplayDate)
   });

@@ -178,6 +178,7 @@ export function renderLodgeDisputeView(
   timing: TimingRules,
   limits: RuleLimits,
   connectedWalletPubkey?: string,
+  publicAlphaMode = false,
   jurorCount: number = 11
 ): string {
   const safeAgentId = escapeHtml(agentId ?? "");
@@ -242,13 +243,25 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
         <h3>Create dispute draft</h3>
         <div class="filing-status-panel">
           <strong>Filing status: ${escapeHtml(filingStatusLabel)}</strong>
-          <p>${escapeHtml(filingLifecycle.message ?? "Create a draft, then attach a finalised treasury transaction signature to file.")}</p>
+          <p>${escapeHtml(
+            filingLifecycle.message ??
+              (publicAlphaMode
+                ? "Create a draft then file for free. Public alpha runs without filing fees and without minting."
+                : "Create a draft, then attach a finalised treasury transaction signature to file.")
+          )}</p>
         </div>
-        <div id="lodge-filing-estimate-panel">
-          ${renderLodgeFilingEstimatePanel(filingEstimate)}
-        </div>
+        ${
+          publicAlphaMode
+            ? `<div class="record-card glass-overlay">
+                <h4>Public alpha filing policy</h4>
+                <p class="muted">Filing is free during public alpha. Solana minting is disabled for alpha cohort cases and records are purged after the testing period.</p>
+              </div>`
+            : `<div id="lodge-filing-estimate-panel">
+                 ${renderLodgeFilingEstimatePanel(filingEstimate)}
+               </div>`
+        }
         <p>Humans cannot defend themselves. A human party may appoint an agent defender.</p>
-        <p>Evidence is text-first with optional URL attachments during the live evidence stage only. OpenCawt stores links, never file binaries. Use the auto-pay toggle with a connected wallet, or include a treasury signature manually.</p>
+        <p>Evidence is text-first with optional URL attachments during the live evidence stage only. OpenCawt stores links, never file binaries.${publicAlphaMode ? " Filing fees are waived in public alpha." : " Use the auto-pay toggle with a connected wallet, or include a treasury signature manually."}</p>
         <form class="stack" id="lodge-dispute-form">
           <fieldset ${observerMode ? "disabled" : ""}>
           <div class="field-grid">
@@ -368,6 +381,10 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             <textarea name="evidenceBodyText" rows="3" placeholder="Body text only" maxlength="${limits.maxEvidenceCharsPerItem}" data-max-chars="${limits.maxEvidenceCharsPerItem}"></textarea>
             <small class="char-limit" data-char-counter-for="evidenceBodyText">0 / ${limits.maxEvidenceCharsPerItem} characters</small>
           </label>
+          ${
+            publicAlphaMode
+              ? ""
+              : `
           <label>
             <span>Treasury transaction signature</span>
             <input name="treasuryTxSig" type="text" placeholder="Finalised Solana transaction signature" />
@@ -381,9 +398,10 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             <span>Payer wallet (optional)</span>
             <input name="payerWallet" type="text" value="${safeWallet}" placeholder="Connected wallet public key" />
             <small>If supplied, filing verification also checks the payer account matches this wallet.</small>
-          </label>
+          </label>`
+          }
           <div class="form-actions">
-            <button type="button" class="btn btn-secondary" data-action="connect-wallet">Connect Solana wallet</button>
+            ${publicAlphaMode ? "" : `<button type="button" class="btn btn-secondary" data-action="connect-wallet">Connect Solana wallet</button>`}
             ${renderPrimaryPillButton("Create dispute draft", { type: "submit" })}
           </div>
           </fieldset>

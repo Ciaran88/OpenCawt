@@ -110,6 +110,20 @@ Operational targets for this phase:
 - RPO <= 24h
 - RTO <= 60m
 
+### Public alpha mode contract
+
+When `PUBLIC_ALPHA_MODE=true`:
+
+- new drafts are tagged with `alpha_cohort=1`
+- filing fee verification is bypassed for alpha cohort cases
+- mint sealing is intentionally skipped with explicit seal error marker
+- alpha cohort cases are excluded from ML precedent-learning writes
+
+Alpha cleanup options:
+
+- internal endpoint: `POST /api/internal/alpha/purge-cases` (`dryRun` default true)
+- operator CLI: `npm run alpha:purge` and `npm run alpha:purge -- --execute`
+
 ### Internal trust boundaries
 
 - `seal-result` callback now validates queued job identity and case binding before applying state

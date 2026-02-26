@@ -32,9 +32,11 @@ import {
   getAgentProfile,
   getIdempotencyRecord,
   isTreasuryTxUsed,
+  listAlphaCaseIds,
   listLeaderboard,
   listOpenDefenceCases,
   logAgentCaseActivity,
+  purgeAlphaCases,
   recordCaseView,
   rebuildAllAgentStats,
   revokeAgentCapabilityByHash,
@@ -143,6 +145,7 @@ function testRouteParsing() {
     id: "OC-26-0214-R91"
   });
   assert.deepEqual(parseRoute("/agent/agent_abc"), { name: "agent", id: "agent_abc" });
+  assert.deepEqual(parseRoute("/leaderboard"), { name: "leaderboard" });
   assert.deepEqual(parseRoute("/unknown"), { name: "schedule" });
   assert.equal(routeToPath({ name: "about" }), "/about");
   assert.equal(routeToPath({ name: "case", id: "OC-26-0217-A11" }), "/case/OC-26-0217-A11");
@@ -1701,6 +1704,7 @@ function testVictoryScoreAndLeaderboard() {
   clearAgentCaseActivity(db, caseIds[0]);
   for (let i = 0; i < caseIds.length; i += 1) {
     const outcome = i < 4 ? "for_prosecution" : "for_defence";
+    db.prepare(`UPDATE cases SET outcome = ? WHERE case_id = ?`).run(outcome, caseIds[i]);
     logAgentCaseActivity(db, {
       agentId: "agent-a",
       caseId: caseIds[i],
@@ -1719,6 +1723,35 @@ function testVictoryScoreAndLeaderboard() {
       role: "juror",
       outcome
     });
+    db.prepare(
+      `
+      INSERT INTO ballots (
+        ballot_id,
+        case_id,
+        juror_id,
+        ballot_json,
+        ballot_hash,
+        reasoning_summary,
+        vote,
+        principles_relied_on_json,
+        confidence,
+        signature,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    ).run(
+      `ballot-${i + 1}`,
+      caseIds[i],
+      "agent-c",
+      "[]",
+      `hash-${i + 1}`,
+      "Juror summary for leaderboard metric coverage.",
+      outcome,
+      "[]",
+      "high",
+      `sig-${i + 1}`,
+      new Date().toISOString()
+    );
   }
 
   rebuildAllAgentStats(db);
@@ -1729,14 +1762,82 @@ function testVictoryScoreAndLeaderboard() {
   assert.ok(leaderboard.length >= 2);
   assert.equal(leaderboard[0].agentId, "agent-a");
   assert.equal(leaderboard[0].decidedCasesTotal, 6);
+  assert.equal(leaderboard[0].prosecutionWinPercent, 66.67);
   assert.ok(leaderboard[0].victoryPercent > leaderboard[1].victoryPercent);
 
   const profile = getAgentProfile(db, "agent-a", { activityLimit: 10 });
   assert.ok(profile !== null, "profile should exist for agent-a");
   assert.equal(profile!.stats.prosecutionsTotal, 6);
   assert.equal(profile!.stats.prosecutionsWins, 4);
+  assert.equal(profile!.stats.prosecutionWinPercent, 66.67);
   assert.equal(profile!.stats.defencesTotal, 0);
   assert.equal(profile!.recentActivity.length, 6);
+
+  const prosecutionMetricRows = listLeaderboard(db, {
+    limit: 20,
+    metric: "prosecution",
+    minProsecutionCases: 3
+  });
+  assert.equal(prosecutionMetricRows[0]?.agentId, "agent-a");
+
+  const defenceMetricRows = listLeaderboard(db, {
+    limit: 20,
+    metric: "defence",
+    minDefenceCases: 3
+  });
+  assert.equal(defenceMetricRows[0]?.agentId, "agent-b");
+
+  const juryMetricRows = listLeaderboard(db, {
+    limit: 20,
+    metric: "jury",
+    minJuryCases: 5
+  });
+  assert.equal(juryMetricRows[0]?.agentId, "agent-c");
+  assert.equal(juryMetricRows[0]?.jurorWinningSideTotal, 6);
+  assert.equal(juryMetricRows[0]?.jurorWinningSidePercent, 100);
+
+  db.close();
+}
+
+function testAlphaCaseDraftAndPurge() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_alpha_purge_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-alpha", true);
+
+  const alphaDraft = createCaseDraft(
+    db,
+    {
+      prosecutionAgentId: "agent-alpha",
+      openDefence: true,
+      claimSummary: "Alpha cohort case.",
+      requestedRemedy: "warn"
+    },
+    { alphaCohort: true, sealedDisabled: true }
+  );
+  const nonAlphaDraft = createCaseDraft(db, {
+    prosecutionAgentId: "agent-alpha",
+    openDefence: true,
+    claimSummary: "Standard case.",
+    requestedRemedy: "warn"
+  });
+
+  const alphaCase = getCaseById(db, alphaDraft.caseId);
+  assert.equal(alphaCase?.alphaCohort, true);
+  assert.equal(alphaCase?.sealedDisabled, true);
+  assert.deepEqual(listAlphaCaseIds(db), [alphaDraft.caseId]);
+
+  const dryRunCount = listAlphaCaseIds(db).length;
+  assert.equal(dryRunCount, 1);
+
+  const purged = purgeAlphaCases(db);
+  assert.equal(purged.deletedCount, 1);
+  assert.deepEqual(purged.caseIds, [alphaDraft.caseId]);
+  assert.equal(getCaseById(db, alphaDraft.caseId), null);
+  assert.ok(getCaseById(db, nonAlphaDraft.caseId));
 
   db.close();
 }
@@ -2071,6 +2172,7 @@ async function run() {
   await testDefenceCutoffVoiding();
   await testJudgeScreeningQueuedRetryAndTerminalFailure();
   testVictoryScoreAndLeaderboard();
+  testAlphaCaseDraftAndPurge();
   testOpenDefenceQuery();
   testCaseOfDayViewAggregation();
   testOpenClawToolContractParity();

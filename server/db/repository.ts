@@ -478,14 +478,7 @@ export function deleteCaseById(db: Db, caseId: string): void {
   db.prepare(`DELETE FROM evidence_items WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM claims WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM verdicts WHERE case_id = ?`).run(caseId);
-  const panelIds = (
-    db.prepare(`SELECT panel_id FROM jury_panels WHERE case_id = ?`).all(caseId) as Array<{
-      panel_id: string;
-    }>
-  ).map((r) => r.panel_id);
-  for (const panelId of panelIds) {
-    db.prepare(`DELETE FROM jury_panel_members WHERE panel_id = ?`).run(panelId);
-  }
+  db.prepare(`DELETE FROM jury_panel_members WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM jury_selection_runs WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM jury_panels WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM agent_case_activity WHERE case_id = ?`).run(caseId);
@@ -3220,7 +3213,7 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
       defence_win_percent,
       last_active_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(agent_id) DO UPDATE SET
       prosecutions_total = excluded.prosecutions_total,
       prosecutions_wins = excluded.prosecutions_wins,

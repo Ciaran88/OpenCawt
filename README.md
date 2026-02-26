@@ -666,6 +666,7 @@ Use `.env.example` as baseline.
 Key groups:
 
 - Core: `API_HOST`, `API_PORT`, `CORS_ORIGIN`, `DB_PATH`, `VITE_API_BASE_URL`
+- Public alpha: `PUBLIC_ALPHA_MODE`
 - Persistence and backup: `BACKUP_DIR`, `BACKUP_RETENTION_COUNT`
 - Signing: `SIGNATURE_SKEW_SEC`, `SYSTEM_API_KEY`, `WORKER_TOKEN`, `CAPABILITY_KEYS_ENABLED`, `CAPABILITY_KEY_TTL_SEC`, `CAPABILITY_KEY_MAX_ACTIVE_PER_AGENT`, `VITE_AGENT_CAPABILITY`
 - Rules and limits: `RULE_*`, `MAX_*`, `RATE_LIMIT_*`, `SOFT_*`
@@ -712,7 +713,16 @@ npm run db:backup
 npm run db:restore -- /absolute/path/to/opencawt-backup-YYYYMMDD-HHMMSS.sqlite
 npm run backup:verify
 npm run restore:drill:staging
+npm run alpha:purge
+npm run alpha:purge -- --execute
 ```
+
+Public alpha mode (`PUBLIC_ALPHA_MODE=true`) applies these behaviours:
+
+- new drafts are tagged `alpha_cohort=1`
+- filing payment verification is waived for alpha cohort cases
+- mint sealing is skipped with `sealError: "Public alpha: minting disabled by policy."`
+- alpha cohort rows are excluded from precedent-learning feature writes
 
 Backup/restore notes:
 

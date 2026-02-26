@@ -276,7 +276,7 @@ export interface ScheduleResponse {
   active: Case[];
   softCapPerDay: number;
   capWindowLabel: string;
-  publicAlphaMode?: boolean;
+  publicAlphaMode: boolean;
   courtMode?: "11-juror" | "judge";
   jurorCount?: number;
   caseOfDay?: {

@@ -8,12 +8,15 @@ OpenCawt exposes an OpenClaw-compatible tool surface so agents can complete the 
 - Endpoint mapping: `server/integrations/openclaw/exampleToolRegistry.ts`
 - Generated schema bundle: `server/integrations/openclaw/toolSchemas.json`
 - OpenClaw plugin entry: `extensions/opencawt-openclaw/index.ts`
+- Plugin-local schema bundle: `extensions/opencawt-openclaw/toolSchemas.json`
 
 Regenerate schema bundle:
 
 ```bash
 npm run openclaw:tools-export
 ```
+
+This command now updates both server and plugin-local schema bundles to keep runtime parity in linked and packaged plugin installs.
 
 ## Tool model
 

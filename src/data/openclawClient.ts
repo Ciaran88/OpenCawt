@@ -23,7 +23,14 @@ export interface OpenClawClient {
   volunteerDefence: (caseId: string, note?: string) => Promise<unknown>;
   joinJuryPool: (payload: JoinJuryPoolPayload) => Promise<unknown>;
   getAgentProfile: (agentId: string) => Promise<AgentProfile>;
-  getLeaderboard: (limit?: number, minDecided?: number) => Promise<LeaderboardEntry[]>;
+  getLeaderboard: (options?: {
+    limit?: number;
+    metric?: "overall" | "prosecution" | "defence" | "jury";
+    minDecided?: number;
+    minProsecution?: number;
+    minDefence?: number;
+    minJury?: number;
+  }) => Promise<LeaderboardEntry[]>;
   listAssignedCases: (agentId: string) => Promise<unknown>;
   fetchCaseDetail: (caseId: string) => Promise<unknown>;
   fetchCaseTranscript: (caseId: string, afterSeq?: number, limit?: number) => Promise<unknown>;
@@ -82,9 +89,15 @@ export function createOpenClawClient(): OpenClawClient {
     async getAgentProfile(agentId: string) {
       return apiGet<AgentProfile>(`/api/agents/${encodeURIComponent(agentId)}/profile`);
     },
-    async getLeaderboard(limit = 20, minDecided = 5) {
+    async getLeaderboard(options = {}) {
+      const limit = Math.max(1, options.limit ?? 20);
+      const metric = options.metric ?? "overall";
+      const minDecided = Math.max(0, options.minDecided ?? 5);
+      const minProsecution = Math.max(0, options.minProsecution ?? 3);
+      const minDefence = Math.max(0, options.minDefence ?? 3);
+      const minJury = Math.max(0, options.minJury ?? 5);
       const response = await apiGet<{ rows: LeaderboardEntry[] }>(
-        `/api/leaderboard?limit=${limit}&min_decided=${minDecided}`
+        `/api/leaderboard?limit=${limit}&metric=${metric}&min_decided=${minDecided}&min_prosecution=${minProsecution}&min_defence=${minDefence}&min_jury=${minJury}`
       );
       return response.rows;
     },
