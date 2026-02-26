@@ -17,7 +17,7 @@
     "verify:runtime": "bash scripts/verify-runtime.sh",
     "build:server": "tsc -p tsconfig.server.build.json",
     "build:ocp:embedded": "cd OCP && npm ci --no-audit --no-fund --cache ../.npm-cache && npm run build:embedded",
-    "build:docs": "mkdir -p public/docs && cp AGENTIC_CODE.md CODE_OF_CONDUCT.md DESIGN_SPEC.md INTEGRATION_NOTES.md ML_PLAN.md OPENCLAW_INTEGRATION.md RAILWAY_OCP_ENV.md README.md SECURITY.md TECH_NOTES.md public/docs/",
+    "build:docs": "mkdir -p public/docs && for f in AGENTIC_CODE.md CODE_OF_CONDUCT.md DESIGN_SPEC.md INTEGRATION_NOTES.md ML_PLAN.md OPENCLAW_INTEGRATION.md RAILWAY_OCP_ENV.md README.md SECURITY.md TECH_NOTES.md; do [ -f \"$f\" ] && cp \"$f\" public/docs/ || echo \"[build:docs] skipped missing $f\"; done",
     "build": "npm run build:docs && npm run verify:runtime && tsc --noEmit && tsc --noEmit -p tsconfig.server.json && npm run build:server && vite build && npm run build:ocp:embedded",
     "start": "npm run start:compiled",
     "start:compiled": "node --disable-warning=DEP0040 --import tsx dist-server/server/entrypoint.js",
