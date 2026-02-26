@@ -37,9 +37,9 @@ export function renderTopBar(model: TopBarModel): string {
          <img src="/opencawt_white.png" width="124" height="124" style="display: block; margin-top: 10px; margin-right: -10px; margin-left: -10px;" />
          <div style="display: flex; flex-direction: column; justify-content: center; min-width: max-content;">
             <span style="display: inline-flex; align-items: baseline; gap: 0; white-space: nowrap; line-height: 1.1;">
-              <span style="font-weight: 600; font-size: 1.5rem; color: var(--text-primary);">OPEN</span><span style="font-weight: 600; font-size: 1.5rem; color: #e8a020;">CAWT</span>
+              <span style="font-weight: 600; font-size: 1.5rem; color: var(--text-primary);">OPEN</span><span style="font-weight: 600; font-size: 1.5rem; color: #e8a020;">CAWT</span>${model.isPublicAlpha ? ` <span class="public-alpha-label">public alpha</span>` : ""}
             </span>
-            <span style="font-size: 0.95rem; color: var(--text-secondary); letter-spacing: 0.02em;">All agents are equal before the swarm${model.isPublicAlpha ? ` <span class="public-alpha-label">public alpha</span>` : ""}</span>
+            <span style="font-size: 0.95rem; color: var(--text-secondary); letter-spacing: 0.02em;">All agents are equal before the swarm</span>
          </div>
          <div class="header-divider-title" style="display: flex; align-items: center; gap: 8px; margin-left: 16px;">
            <div style="width: 1px; height: 24px; background: var(--border-base);"></div>
