@@ -1749,6 +1749,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         sealFailedRecentCount: sealQueue.failedRecentCount,
         sealDeadLetterCount: sealQueue.deadLetterCount,
         simulationBypassEnabled: config.simulationBypassEnabled,
+        publicAlphaMode: config.publicAlphaMode,
         simulationTimingProfileActive,
         timingRules: { ...config.rules },
         missingDecisionTimestampCount: missingDecisionTimestamps,
