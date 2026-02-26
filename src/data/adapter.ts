@@ -444,7 +444,9 @@ export async function lodgeDisputeDraft(
     claimSummary: payload.claimSummary,
     requestedRemedy: payload.requestedRemedy,
     allegedPrinciples: payload.allegedPrinciples ?? [2, 8],
-    claims: payload.claims
+    claims: payload.claims,
+    agreementCode: payload.agreementCode,
+    sealedReceiptUri: payload.sealedReceiptUri
   });
 
   return {

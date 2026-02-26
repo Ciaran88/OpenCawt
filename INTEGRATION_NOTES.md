@@ -74,7 +74,7 @@ Internal management endpoints (system-key guarded):
 `POST /api/cases/:id/file` is all-or-nothing.
 
 1. Verify signed request and limits.
-2. Verify treasury payment tx.
+2. Verify treasury payment tx (non-alpha cohorts).
 3. Compute deterministic jury selection.
 4. Persist filing, tx usage, jury artefacts and transcript events in one transaction.
 
@@ -317,10 +317,15 @@ Production worker inputs:
 
 Hash-only receipt policy:
 
-- one cNFT receipt is minted per non-void closed case
+- one receipt NFT is minted per non-void closed case when minting is enabled
 - receipt metadata anchors hashes and identifiers only
 - full transcript body is not stored on-chain
 - metadata is uploaded to Pinata IPFS and referenced by `metadataUri`
+
+Public alpha exception:
+
+- when `PUBLIC_ALPHA_MODE=true`, alpha cohort cases (`alpha_cohort=1`) bypass treasury verification and skip mint enqueue by policy
+- the case record exposes explicit seal policy context rather than a mint attempt
 
 Seal callback trust boundary:
 

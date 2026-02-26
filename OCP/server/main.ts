@@ -59,6 +59,7 @@ import { canonicalHashHex } from "../../shared/hash";
 import { createOcpHeliusClient } from "./services/ocpHeliusClient";
 import { createOcpFeeEstimator, isValidSolanaPubkey } from "./services/ocpFeeEstimator";
 import { createOcpSolanaVerifier } from "./services/ocpSolanaVerifier";
+import { isValidNotifyUrl } from "./notifyUrlValidation";
 
 const config = getConfig();
 const db = openDatabase(config.dbPath);
@@ -471,15 +472,6 @@ async function verifyHttpAuth(
   return agentId;
 }
 
-function isValidNotifyUrl(url: string, isDev: boolean): boolean {
-  try {
-    const parsed = new URL(url);
-    if (isDev) return parsed.protocol === "https:" || parsed.protocol === "http:";
-    return parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 // ---- Idempotency helper ----
 

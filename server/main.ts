@@ -170,6 +170,12 @@ import { injectDemoCompletedCase } from "./scripts/injectDemoCompletedCase";
 import { injectLongHorizonCase } from "./scripts/injectLongHorizonCase";
 
 const config = getConfig();
+
+// Embedded OCP: ensure cross-registration can reach main DB when OCP_OPENCAWT_DB_PATH unset
+if (!process.env.OCP_OPENCAWT_DB_PATH && config.dbPath) {
+  process.env.OCP_OPENCAWT_DB_PATH = config.dbPath;
+}
+
 const defaultTimingRules = { ...config.rules };
 const simulationTimingProfile = {
   sessionStartsAfterSeconds: Math.max(
@@ -536,7 +542,10 @@ function safeError(error: unknown): ApiError {
     return error;
   }
   if (error instanceof Error) {
-    return new ApiError(500, "INTERNAL_ERROR", error.message);
+    const detail = config.appEnv === "production"
+      ? "An unexpected error occurred."
+      : error.message;
+    return new ApiError(500, "INTERNAL_ERROR", detail);
   }
   return new ApiError(500, "INTERNAL_ERROR", "Unexpected server error.");
 }
@@ -1691,6 +1700,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }
     }
 
+    if (method === "GET" && pathname === "/robots.txt") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("User-agent: *\nDisallow: /api/\nDisallow: /internal/\nAllow: /\n");
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/health") {
       sendJson(res, 200, {
         ok: true,
@@ -2059,6 +2074,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         ocpReady = false;
       }
 
+      let ocpCrossRegistrationConfigured = false;
+      try {
+        const ocpConfig = (await import("../OCP/server/config")).getConfig();
+        ocpCrossRegistrationConfigured = Boolean(ocpConfig.opencawtDbPath);
+      } catch {
+        ocpCrossRegistrationConfigured = false;
+      }
+
       const workflowParts: string[] = [
         "Filing fee: prosecution pays SOL to treasury.",
         "Case close: verdict computed, seal job enqueued.",
@@ -2079,7 +2102,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         railwayWorker: { ready: workerReady, mode: config.sealWorkerMode },
         helius: { ready: heliusReady, hasApiKey: Boolean(config.heliusApiKey) },
         drand: { ready: drandReady, mode: config.drandMode },
-        ocp: { ready: ocpReady },
+        ocp: { ready: ocpReady, crossRegistrationConfigured: ocpCrossRegistrationConfigured },
         softDailyCaseCap: config.softDailyCaseCap,
         softCapMode: config.softCapMode,
         jurorPanelSize: config.rules.jurorPanelSize,
@@ -2483,6 +2506,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "GET" && pathname === "/api/agents/search") {
       if (checkSearchRateLimit(req, res)) return;
       const q = url.searchParams.get("q") ?? "";
+      if (q.length < 2 || q.length > 200) {
+        sendJson(res, 400, { agents: [], error: "Query must be 2–200 characters." });
+        return;
+      }
       const limit = Number(url.searchParams.get("limit") || "10");
       try {
         const agents = searchAgents(db, {
@@ -4111,6 +4138,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 const server = createServer((req, res) => {
   void handleRequest(req, res);
 });
+server.requestTimeout = 60_000;
+server.headersTimeout = 65_000;
 
 server.listen(config.apiPort, config.apiHost, () => {
   process.stdout.write(

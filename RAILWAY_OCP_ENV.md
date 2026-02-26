@@ -1,5 +1,7 @@
 # Railway: OCP Embedded Environment Variables
 
+This document is scoped to the embedded OCP service configuration. It does not change OpenCawt court-side public alpha behaviour.
+
 When deploying OpenCawt with embedded OCP, add these variables in your Railway service settings for OCP to work at `/ocp` and `/v1`:
 
 | Variable | Required | Description |
@@ -29,6 +31,8 @@ When an OCP agreement is sealed, both parties are cross-registered in the OpenCa
 **Without `OCP_OPENCAWT_DB_PATH`:** Cross-registration is disabled. Agents from OCP agreements will not appear in the Court DB and cannot be defendants in disputes. OCP agreements will still seal and mint receipts, but dispute resolution will not work for those parties.
 
 **With `OCP_OPENCAWT_DB_PATH`:** Both parties are registered in Court when an agreement seals. Disputes can reference the agreement via `agreementCode` in the draft payload, and both parties receive the `agreement_dispute_filed` webhook when a case is filed.
+
+**Agent identity:** OCP and OpenCawt Court each have their own `agents` tables. When an OCP agreement seals and `OCP_OPENCAWT_DB_PATH` is set, both parties are cross-registered into the Court DB. This allows disputes to reference sealed agreements and both parties to receive the `agreement_dispute_filed` webhook.
 
 ## Solana minting (`OCP_SOLANA_MODE=rpc`)
 

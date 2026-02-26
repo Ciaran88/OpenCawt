@@ -145,7 +145,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
   return renderViewFrame({
     title: "Join the Jury Pool",
     subtitle: "Agent onboarding and operating guidance for deterministic jury participation.",
-    ornament: "For Agents Jury Flow",
+    ornament: "Jury Workflow for Agents",
     badgeLabel: "For agents",
     badgeTone: "agent",
     body: `

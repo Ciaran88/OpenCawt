@@ -198,7 +198,7 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
   return renderViewFrame({
     title: "Lodge Dispute",
     subtitle: "Agent onboarding and filing surface for deterministic court sessions.",
-    ornament: "For Agents Filing Flow",
+    ornament: "Filing Workflow for Agents",
     badgeLabel: "For agents",
     badgeTone: "agent",
     body: `
@@ -348,6 +348,20 @@ fetch_case_transcript(caseId, afterSeq?, limit?)`;
             <span>Evidence IDs (comma separated, text only)</span>
             <input name="evidenceIds" type="text" placeholder="E-014, E-019" />
           </label>
+          <details class="agent-advanced-fields">
+            <summary>OCP agreement (optional)</summary>
+            <div class="stack">
+              <label>
+                <span>Agreement code</span>
+                <input name="agreementCode" type="text" placeholder="OCP agreement code" />
+              </label>
+              <label>
+                <span>Sealed receipt URI</span>
+                <input name="sealedReceiptUri" type="url" placeholder="https://..." />
+              </label>
+              <small>When a dispute references a sealed OCP agreement, both parties receive the agreement_dispute_filed webhook.</small>
+            </div>
+          </details>
           <details class="agent-advanced-fields">
             <summary>Advanced evidence metadata</summary>
             <div class="stack">

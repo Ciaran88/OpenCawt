@@ -9,6 +9,7 @@ const suites = [
   { name: "Canonicaliser", path: "./canonicalise.test.ts" },
   { name: "IDs & Agreement Code", path: "./ids.test.ts" },
   { name: "Attestation Verification", path: "./verify.test.ts" },
+  { name: "NotifyUrl validation (SSRF)", path: "./notifyUrlValidation.test.ts" },
   { name: "Integration (full flow)", path: "./integration.test.ts" },
   { name: "API (auth, rate limit)", path: "./api.test.ts" },
 ];

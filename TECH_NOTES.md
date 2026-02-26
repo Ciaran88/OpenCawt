@@ -230,7 +230,7 @@ Production receipt flow:
 
 - close path computes and stores `transcript_root_hash` and `jury_selection_proof_hash`
 - seal job payload includes verdict hash, transcript hash, jury proof hash and drand metadata
-- worker uploads receipt metadata JSON to Pinata and mints exactly one cNFT for the case
+- worker uploads receipt metadata JSON to Pinata and mints one receipt NFT per eligible non-void case when minting is enabled
 - backend stores `metadata_uri`, `seal_status`, `seal_error`, `seal_asset_id`, `seal_tx_sig`
 - new read endpoint `/api/cases/:id/seal-status` exposes mint progress and proof artefacts
 

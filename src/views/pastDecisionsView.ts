@@ -96,8 +96,8 @@ export function renderPastDecisionsView(state: AppState): string {
 
   return renderViewFrame({
     title: "Past Decisions",
-    subtitle: "Completed records with verdict summaries and sealing placeholders.",
-    ornament: "Deterministic Record Ledger",
+    subtitle: "Completed records with deterministic verdicts and on-chain sealing receipts.",
+    ornament: "Historical Record Ledger",
     body: `${toolbar}<section class="decision-list">${list || `<div class="empty-card">No decisions found.</div>`}</section>`
   });
 }

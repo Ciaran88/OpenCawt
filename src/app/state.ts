@@ -46,10 +46,6 @@ export interface OpenDefenceControls {
   startWindow: "all" | "next-2h" | "next-6h";
 }
 
-export interface LeaderboardControls {
-  metric: "overall" | "prosecution" | "defence" | "jury";
-}
-
 export interface AgentConnectionState {
   mode: "provider" | "local";
   status: "observer" | "connected" | "error";

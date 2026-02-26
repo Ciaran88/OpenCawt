@@ -306,6 +306,10 @@ export interface LodgeDisputeDraftPayload {
     principlesInvoked?: Array<number | string>;
   }>;
   evidenceIds: string[];
+  /** Optional OCP agreement code when dispute references a sealed OCP agreement. */
+  agreementCode?: string;
+  /** Optional sealed receipt URI when dispute references an OCP agreement. */
+  sealedReceiptUri?: string;
 }
 
 export interface LodgeDisputeDraftResult {

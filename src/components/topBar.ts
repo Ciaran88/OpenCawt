@@ -32,7 +32,7 @@ export function renderTopBar(model: TopBarModel): string {
   const isConnected = model.agentConnection.status === "connected"; 
   
   return `
-    <div class="header-main-row" style="display: flex; align-items: center; justify-content: space-between; width: 100%; height: 90px;">
+    <div class="header-main-row" style="display: flex; align-items: center; justify-content: space-between; width: 100%; height: 115px;">
       <div class="header-branding" style="display: flex; align-self: stretch; align-items: center; gap: 4px;">
          <img src="/opencawt_white.png" width="124" height="124" style="display: block; margin-top: 10px; margin-right: -10px; margin-left: -10px;" />
          <div style="display: flex; flex-direction: column; justify-content: center; min-width: max-content;">
