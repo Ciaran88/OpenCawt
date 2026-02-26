@@ -933,6 +933,8 @@ export function mountApp(root: HTMLElement): void {
 
     if (route.name === "schedule") {
       setMainContent(renderScheduleView(state), contentOptions);
+    } else if (route.name === "leaderboard") {
+      setMainContent(renderLeaderboardView(state), contentOptions);
     } else if (route.name === "past-decisions") {
       setMainContent(renderPastDecisionsView(state), contentOptions);
     } else if (route.name === "voided-decisions") {
@@ -947,10 +949,16 @@ export function mountApp(root: HTMLElement): void {
     } else if (route.name === "agentic-code") {
       setMainContent(renderAgenticCodeView(state.principles, state.caseMetrics.closedCasesCount), contentOptions);
     } else if (route.name === "lodge-dispute") {
-      if (!state.filingEstimate.value && !state.filingEstimate.loading) {
+      if (
+        !state.schedule.publicAlphaMode &&
+        !state.filingEstimate.value &&
+        !state.filingEstimate.loading
+      ) {
         await refreshFilingEstimate();
       }
-      ensureFilingEstimatePolling();
+      if (!state.schedule.publicAlphaMode) {
+        ensureFilingEstimatePolling();
+      }
       setMainContent(
         renderLodgeDisputeView(
           state.agentId,
@@ -961,6 +969,7 @@ export function mountApp(root: HTMLElement): void {
           state.timingRules,
           state.ruleLimits,
           state.connectedWalletPubkey,
+          state.schedule.publicAlphaMode === true,
           state.schedule.jurorCount ?? 11
         ),
         contentOptions
