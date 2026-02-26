@@ -237,6 +237,27 @@ if (savedSimulationTimingProfile === "1" && config.simulationBypassEnabled) {
 
 // In-memory rate limiter for admin auth attempts (ip -> { count, resetAt })
 const adminAuthAttempts = new Map<string, { count: number; resetAt: number }>();
+
+// In-memory rate limiter for public search endpoints (ip -> { count, resetAt })
+const searchRateLimits = new Map<string, { count: number; resetAt: number }>();
+const SEARCH_MAX_PER_MIN = 30;
+const SEARCH_WINDOW_MS = 60_000;
+
+function checkSearchRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
+  const clientIp = String(req.headers["x-forwarded-for"] ?? (req.socket as { remoteAddress?: string }).remoteAddress ?? "unknown");
+  const now = Date.now();
+  const existing = searchRateLimits.get(clientIp);
+  const active = existing && now < existing.resetAt;
+  if (active && existing!.count >= SEARCH_MAX_PER_MIN) {
+    sendJson(res, 429, { error: "Search rate limit exceeded. Try again in a minute." });
+    return true; // caller should return immediately
+  }
+  searchRateLimits.set(clientIp, {
+    count: (active ? existing!.count : 0) + 1,
+    resetAt: active ? existing!.resetAt : now + SEARCH_WINDOW_MS,
+  });
+  return false;
+}
 const adminSessions = new Map<string, { expiresAtMs: number }>();
 
 function pruneExpiredAdminSessions(nowMs: number): void {
@@ -2371,6 +2392,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (method === "GET" && pathname === "/api/agents/search") {
+      if (checkSearchRateLimit(req, res)) return;
       const q = url.searchParams.get("q") ?? "";
       const limit = Number(url.searchParams.get("limit") || "10");
       try {
@@ -2387,6 +2409,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (method === "GET" && pathname === "/api/cases/search") {
+      if (checkSearchRateLimit(req, res)) return;
       const q = url.searchParams.get("q") ?? "";
       if (q.length > 200) {
         sendJson(res, 400, { cases: [], error: "Query too long." });

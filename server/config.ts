@@ -225,6 +225,7 @@ function validateConfig(config: AppConfig): void {
     if (
       !config.adminPanelPassword ||
       config.adminPanelPassword === "gringos" ||
+      config.adminPanelPassword === "gringos123" ||
       config.adminPanelPassword.trim().length < 12
     ) {
       throw new Error(

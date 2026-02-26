@@ -8,6 +8,7 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
+    "postinstall": "git config core.hooksPath .githooks || true",
     "dev": "vite",
     "dev:server": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx server/main.ts",
     "dev:worker": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx server/mint-worker/main.ts",

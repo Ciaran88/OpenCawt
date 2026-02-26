@@ -66,8 +66,8 @@ while IFS= read -r file; do
   fi
 
   # .env style accidental hardcoded secrets.
-  if [[ "$file" != ".env.example" ]]; then
-    if echo "$content" | rg -n --no-heading -e '^(OPENAI_API_KEY|JUDGE_OPENAI_API_KEY|HELIUS_API_KEY|PINATA_JWT|SYSTEM_API_KEY|WORKER_TOKEN)=([A-Za-z0-9._-]{16,}|eyJ[A-Za-z0-9._-]{20,})$' >/dev/null; then
+  if [[ "$file" != ".env.example" && "$file" != "OCP/.env.example" ]]; then
+    if echo "$content" | rg -n --no-heading -e '^(OPENAI_API_KEY|JUDGE_OPENAI_API_KEY|HELIUS_API_KEY|PINATA_JWT|SYSTEM_API_KEY|WORKER_TOKEN|ADMIN_PANEL_PASSWORD)=([A-Za-z0-9._-]{16,}|eyJ[A-Za-z0-9._-]{20,})$' >/dev/null; then
       echo "[secret-check] potential hardcoded env secret detected in $file" >&2
       failures=$((failures + 1))
     fi
