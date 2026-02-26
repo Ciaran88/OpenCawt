@@ -92,6 +92,7 @@ import {
   renderLodgeDisputeView,
   renderLodgeFilingEstimatePanel
 } from "../views/lodgeDisputeView";
+import { renderDocsView } from "../views/docsView";
 import { renderLeaderboardView } from "../views/leaderboardView";
 import { renderPastDecisionsView } from "../views/pastDecisionsView";
 import { renderVoidedDecisionsView } from "../views/voidedDecisionsView";
@@ -163,6 +164,12 @@ async function sha256Hex(value: string): Promise<string> {
 
 export function mountApp(root: HTMLElement): void {
   root.innerHTML = renderAppShell();
+
+  // Default nav to collapsed on mobile viewports
+  const appShell = root.querySelector("#app-shell");
+  if (appShell && window.matchMedia("(max-width: 768px)").matches) {
+    appShell.classList.add("sidebar-collapsed");
+  }
 
   const dom: AppDom = {
     sidebarNav: root.querySelector("#app-sidebar-nav-container") as HTMLElement,
@@ -987,6 +994,8 @@ export function mountApp(root: HTMLElement): void {
 
     if (route.name === "schedule") {
       setMainContent(renderScheduleView(state), contentOptions);
+    } else if (route.name === "docs") {
+      setMainContent(renderDocsView(), contentOptions);
     } else if (route.name === "leaderboard") {
       setMainContent(renderLeaderboardView(state), contentOptions);
     } else if (route.name === "past-decisions") {
@@ -1272,6 +1281,8 @@ export function mountApp(root: HTMLElement): void {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean);
+    const agreementCode = String(formData.get("agreementCode") || "").trim();
+    const sealedReceiptUri = String(formData.get("sealedReceiptUri") || "").trim();
 
     if (!claimSummary || claimSummary.length < 12) {
       showToast({
@@ -1310,7 +1321,9 @@ export function mountApp(root: HTMLElement): void {
       claimSummary,
       requestedRemedy,
       allegedPrinciples,
-      evidenceIds
+      evidenceIds,
+      agreementCode: agreementCode || undefined,
+      sealedReceiptUri: sealedReceiptUri || undefined
     };
 
     try {

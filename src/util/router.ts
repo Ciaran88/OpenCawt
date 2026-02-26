@@ -5,7 +5,8 @@ export type MenuRouteName =
   | "about"
   | "agentic-code"
   | "lodge-dispute"
-  | "join-jury-pool";
+  | "join-jury-pool"
+  | "docs";
 
 export type AppRoute =
   | { name: MenuRouteName }
@@ -22,7 +23,8 @@ const routePathMap: Record<MenuRouteName, string> = {
   about: "/about",
   "agentic-code": "/agentic-code",
   "lodge-dispute": "/lodge-dispute",
-  "join-jury-pool": "/join-jury-pool"
+  "join-jury-pool": "/join-jury-pool",
+  docs: "/docs"
 };
 
 function normalisePath(pathname: string): string {

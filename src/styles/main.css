@@ -3804,3 +3804,89 @@ select:focus {
   background: var(--bg-surface-hover);
   color: var(--text-primary);
 }
+
+/* ── Docs page ──────────────────────────────────────────── */
+.docs-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+.docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.docs-table th {
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-panel);
+  white-space: nowrap;
+}
+.docs-table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-light);
+  vertical-align: middle;
+  color: var(--text-primary);
+}
+.docs-table tbody tr:last-child td { border-bottom: none; }
+.docs-table tbody tr:hover td { background: var(--bg-surface-hover); }
+.docs-name    { font-weight: 500; white-space: nowrap; }
+.docs-summary { color: var(--text-secondary); min-width: 180px; }
+.docs-date    { white-space: nowrap; color: var(--text-secondary); font-size: 0.8125rem; }
+.docs-size    { white-space: nowrap; color: var(--text-secondary); font-size: 0.8125rem; text-align: right; }
+
+.file-type-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.file-type-md {
+  background: rgba(41, 98, 255, 0.12);
+  color: #6b9fff;
+  border: 1px solid rgba(41, 98, 255, 0.25);
+}
+.file-type-pdf {
+  background: rgba(220, 60, 60, 0.1);
+  color: #e07070;
+  border: 1px solid rgba(220, 60, 60, 0.2);
+}
+
+.docs-dl { text-align: right; }
+.docs-dl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+.docs-dl-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-gold);
+}
+
+.docs-agpl-notice {
+  margin-top: var(--space-5);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.7;
+  opacity: 0.75;
+}
