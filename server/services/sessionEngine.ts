@@ -236,7 +236,7 @@ async function replaceJuror(
     actorRole: "court",
     eventType: "juror_replaced",
     stage: mode === "readiness" ? "jury_readiness" : "voting",
-    messageText: `Juror ${jurorId} was replaced by ${candidate.agentId} after deadline expiry.`,
+    messageText: `I have replaced juror ${jurorId} with ${candidate.agentId} following deadline expiry.`,
     payload: {
       replacedJurorId: jurorId,
       replacementJurorId: candidate.agentId,
@@ -299,10 +299,7 @@ function setStage(
     actorRole: "court",
     eventType: "stage_started",
     stage,
-    messageText:
-      stage === "voting"
-        ? `Stage ${stage.replace(/_/g, " ")} started.`
-        : `Stage ${stage.replace(/_/g, " ")} started.`,
+    messageText: `I call the ${stage.replace(/_/g, " ")} phase to order.`,
     payload: {
       deadlineAtIso: deadlineIso,
       ...(stage === "voting" ? { votePrompt: PROSECUTION_VOTE_PROMPT } : {})
@@ -328,7 +325,7 @@ function setStage(
       actorRole: "court",
       eventType: "stage_deadline",
       stage,
-      messageText: `Stage deadline set for ${deadlineIso}.`,
+      messageText: `I set the deadline for this phase: ${deadlineIso}.`,
       payload: {
         deadlineAtIso: deadlineIso
       }
@@ -446,8 +443,8 @@ async function processCase(
         eventType: "notice",
         stage: "judge_screening",
         messageText: result.approved
-          ? `Case approved by judge screening. Title: "${caseTitle}"`
-          : `Case rejected by judge screening: ${result.reason ?? "No reason provided."}`,
+          ? `I have admitted this case for trial: ${caseTitle}.`
+          : `I have declined to admit this case: ${result.reason ?? "Insufficient merit or protocol violation."}`,
         payload: {
           screeningResult: result.approved ? "approved" : "rejected",
           caseTitle,
@@ -496,8 +493,8 @@ async function processCase(
         eventType: "notice",
         stage: "judge_screening",
         messageText: exhausted
-          ? "Judge screening failed after repeated retries. The case has been voided."
-          : `Judge screening unavailable. Retry ${attempts}/${JUDGE_SCREENING_MAX_RETRIES} queued.`,
+          ? "I am unable to complete screening after repeated attempts. This case is voided."
+          : `Screening is temporarily unavailable. I have queued retry ${attempts} of ${JUDGE_SCREENING_MAX_RETRIES}.`,
         payload: {
           attempts,
           maxRetries: JUDGE_SCREENING_MAX_RETRIES,
@@ -584,7 +581,7 @@ async function processCase(
         eventType: "notice",
         stage: "jury_readiness",
         messageText:
-          "Jury readiness check opened. Selected jurors must confirm promptly. If readiness does not converge within bounded retries, the case becomes void.",
+          "I open the jury readiness check. Selected jurors must confirm promptly. If readiness does not converge within bounded retries, I will void this case.",
         payload: {
           readinessWindowSec: deps.config.rules.jurorReadinessSeconds,
           readinessMaxWindows: JURY_READINESS_MAX_WINDOWS,
@@ -643,7 +640,7 @@ async function processCase(
         actorRole: "court",
         eventType: "stage_completed",
         stage: runtime.currentStage,
-        messageText: `Both parties submitted ${submissionPhase.replace("_", " ")} inputs.`
+        messageText: `Both parties have filed their ${submissionPhase.replace("_", " ")} submissions. This phase is complete.`
       });
 
       const next = nextSubmissionStage(runtime.currentStage);

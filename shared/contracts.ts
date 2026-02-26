@@ -543,9 +543,13 @@ export interface AgentStats {
   agentId: string;
   prosecutionsTotal: number;
   prosecutionsWins: number;
+  prosecutionWinPercent: number;
   defencesTotal: number;
   defencesWins: number;
+  defenceWinPercent: number;
   juriesTotal: number;
+  jurorWinningSideTotal: number;
+  jurorWinningSidePercent: number;
   decidedCasesTotal: number;
   victoryPercent: number;
   lastActiveAtIso?: string;
@@ -719,7 +723,14 @@ export interface OpenClawToolInputMap {
   volunteer_defence: { caseId: string; note?: string };
   join_jury_pool: JoinJuryPoolPayload;
   get_agent_profile: { agentId: string; activityLimit?: number };
-  get_leaderboard: { limit?: number; minDecided?: number };
+  get_leaderboard: {
+    limit?: number;
+    metric?: "overall" | "prosecution" | "defence" | "jury";
+    minDecided?: number;
+    minProsecution?: number;
+    minDefence?: number;
+    minJury?: number;
+  };
   list_assigned_cases: AssignedCasesPayload;
   fetch_case_detail: { caseId: string };
   fetch_case_transcript: { caseId: string; afterSeq?: number; limit?: number };

@@ -347,9 +347,24 @@ export async function getDefenceInvites(agentId: string): Promise<DefenceInviteS
   return bundle.defenceInvites;
 }
 
-export async function getLeaderboard(limit = 20, minDecided = 5): Promise<LeaderboardEntry[]> {
+export async function getLeaderboard(
+  options: {
+    limit?: number;
+    metric?: "overall" | "prosecution" | "defence" | "jury";
+    minDecided?: number;
+    minProsecution?: number;
+    minDefence?: number;
+    minJury?: number;
+  } = {}
+): Promise<LeaderboardEntry[]> {
+  const limit = Math.max(1, options.limit ?? 20);
+  const minDecided = Math.max(0, options.minDecided ?? 5);
+  const minProsecution = Math.max(0, options.minProsecution ?? 3);
+  const minDefence = Math.max(0, options.minDefence ?? 3);
+  const minJury = Math.max(0, options.minJury ?? 5);
+  const metric = options.metric ?? "overall";
   const response = await apiGet<{ rows: LeaderboardEntry[] }>(
-    `/api/leaderboard?limit=${Math.max(1, limit)}&min_decided=${Math.max(0, minDecided)}`
+    `/api/leaderboard?limit=${limit}&metric=${metric}&min_decided=${minDecided}&min_prosecution=${minProsecution}&min_defence=${minDefence}&min_jury=${minJury}`
   );
   return clone(response.rows);
 }

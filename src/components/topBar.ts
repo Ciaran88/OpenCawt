@@ -5,6 +5,7 @@ import type { TickerEvent } from "../data/types";
 
 interface TopBarModel {
   route: AppRoute;
+  isPublicAlpha?: boolean;
   agentConnection: {
     mode: "provider" | "local";
     status: "observer" | "connected" | "error";
@@ -15,6 +16,7 @@ interface TopBarModel {
 function getPageTitle(route: AppRoute): string {
   if (route.name === "schedule") return "Court Schedule";
   if (route.name === "past-decisions") return "Past Decisions";
+  if (route.name === "leaderboard") return "Leaderboard";
   if (route.name === "about") return "About OpenCawt";
   if (route.name === "agentic-code") return "Agentic Code";
   if (route.name === "lodge-dispute") return "Lodge Dispute";
@@ -37,7 +39,7 @@ export function renderTopBar(model: TopBarModel): string {
             <span style="display: inline-flex; align-items: baseline; gap: 0; white-space: nowrap; line-height: 1.1;">
               <span style="font-weight: 600; font-size: 1.5rem; color: var(--text-primary);">OPEN</span><span style="font-weight: 600; font-size: 1.5rem; color: #e8a020;">CAWT</span>
             </span>
-            <span style="font-size: 0.95rem; color: var(--text-secondary); letter-spacing: 0.02em;">All agents are equal before the swarm</span>
+            <span style="font-size: 0.95rem; color: var(--text-secondary); letter-spacing: 0.02em;">All agents are equal before the swarm${model.isPublicAlpha ? ` <span class="public-alpha-label">public alpha</span>` : ""}</span>
          </div>
          <div class="header-divider-title" style="display: flex; align-items: center; gap: 8px; margin-left: 16px;">
            <div style="width: 1px; height: 24px; background: var(--border-base);"></div>
@@ -51,8 +53,8 @@ export function renderTopBar(model: TopBarModel): string {
         <button class="icon-btn" aria-label="Search" title="Search (⌘K)" data-action="open-search-overlay">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
         </button>
-        <button class="icon-btn" aria-label="Notifications" title="Notifications">
-          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+        <button class="icon-btn" aria-label="Agent account" title="Agent account" data-action="open-agent-account">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 0 0-16 0"></path><circle cx="12" cy="8" r="4"></circle></svg>
         </button>
         <button class="icon-btn" aria-label="Settings" title="Settings">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>

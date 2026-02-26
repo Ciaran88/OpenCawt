@@ -251,6 +251,7 @@ export interface CaseRecord {
   defendantNotifyUrl?: string;
   courtMode: CourtMode;
   caseTitle?: string;
+  alphaCohort: boolean;
   judgeScreeningStatus?: "pending" | "pending_retry" | "approved" | "rejected" | "failed";
   judgeScreeningReason?: string;
   judgeRemedyRecommendation?: string;
@@ -468,6 +469,7 @@ export function setAgentJuryBanned(db: Db, input: { agentId: string; banned: boo
 
 export function deleteCaseById(db: Db, caseId: string): void {
   // Delete in foreign-key-safe order (children before parents)
+  db.prepare(`DELETE FROM case_view_events WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM case_transcript_events WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM case_runtime WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM seal_jobs WHERE case_id = ?`).run(caseId);
@@ -490,6 +492,24 @@ export function deleteCaseById(db: Db, caseId: string): void {
   db.prepare(`DELETE FROM ml_case_features WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM ml_juror_features WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM cases WHERE case_id = ?`).run(caseId);
+}
+
+export function listAlphaCaseIds(db: Db): string[] {
+  const rows = db
+    .prepare(`SELECT case_id FROM cases WHERE alpha_cohort = 1 ORDER BY created_at ASC`)
+    .all() as Array<{ case_id: string }>;
+  return rows.map((row) => row.case_id);
+}
+
+export function purgeAlphaCases(db: Db): { deletedCount: number; caseIds: string[] } {
+  const caseIds = listAlphaCaseIds(db);
+  for (const caseId of caseIds) {
+    deleteCaseById(db, caseId);
+  }
+  return {
+    deletedCount: caseIds.length,
+    caseIds
+  };
 }
 
 export function getRuntimeConfig(db: Db, key: string): string | null {
@@ -618,12 +638,15 @@ export function setJurorAvailability(
 
 export function createCaseDraft(
   db: Db,
-  payload: CreateCaseDraftPayload
+  payload: CreateCaseDraftPayload,
+  options?: { alphaCohort?: boolean; sealedDisabled?: boolean }
 ): { caseId: string; createdAtIso: string } {
   const caseId = createCaseId("D");
   const publicSlug = createSlug(caseId);
   const createdAtIso = nowIso();
   const summary = payload.claimSummary ?? payload.claims?.[0]?.claimSummary ?? "";
+  const alphaCohort = options?.alphaCohort === true;
+  const sealedDisabled = options?.sealedDisabled === true;
 
   db.prepare(
     `
@@ -647,8 +670,10 @@ export function createCaseDraft(
       summary,
       requested_remedy,
       created_at,
-      agreement_code
-    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, 'none', 0, NULL, NULL, ?, ?, ?, ?, ?, ?)
+      agreement_code,
+      alpha_cohort,
+      sealed_disabled
+    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, 'none', 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
     `
   ).run(
     caseId,
@@ -665,7 +690,9 @@ export function createCaseDraft(
     payload.requestedRemedy,
     createdAtIso,
     ((payload as CreateCaseDraftPayload & { agreementCode?: string }).agreementCode ?? "")
-      .trim() || null
+      .trim() || null,
+    alphaCohort ? 1 : 0,
+    sealedDisabled ? 1 : 0
   );
 
   const claims =
@@ -787,6 +814,7 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     defendantNotifyUrl: row.defendant_notify_url ? String(row.defendant_notify_url) : undefined,
     courtMode: (String(row.court_mode ?? "judge") as CourtMode),
     caseTitle: row.case_title ? String(row.case_title) : undefined,
+    alphaCohort: Number(row.alpha_cohort ?? 0) === 1,
     judgeScreeningStatus: row.judge_screening_status
       ? (String(row.judge_screening_status) as
           | "pending"
@@ -873,6 +901,7 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         judge_screening_reason,
         judge_remedy_recommendation,
         agreement_code,
+        alpha_cohort,
         sealed_disabled
       FROM cases
       WHERE case_id = ?
@@ -958,6 +987,7 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         judge_screening_reason,
         judge_remedy_recommendation,
         agreement_code,
+        alpha_cohort,
         sealed_disabled
       FROM cases
       WHERE status IN (${placeholders})
@@ -1008,7 +1038,7 @@ export function listVoidedCases(
           jury_selection_proof_hash, ruleset_version, seal_status, seal_error, metadata_uri,
           verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, filing_warning, court_mode,
           case_title, judge_screening_status, judge_screening_reason, judge_remedy_recommendation,
-          agreement_code, sealed_disabled
+          agreement_code, alpha_cohort, sealed_disabled
         FROM cases
         WHERE status = 'void'
         ORDER BY COALESCE(voided_at, decided_at, closed_at, created_at) DESC
@@ -3124,6 +3154,29 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
     )
     .get(agentId) as { total: number };
 
+  const jurorWinningSideRow = db
+    .prepare(
+      `
+      SELECT
+        COUNT(*) AS total,
+        SUM(
+          CASE
+            WHEN (
+              (b.vote = 'for_prosecution' AND c.outcome = 'for_prosecution')
+              OR (b.vote = 'for_defence' AND c.outcome = 'for_defence')
+            ) THEN 1
+            ELSE 0
+          END
+        ) AS winning_total
+      FROM ballots b
+      INNER JOIN cases c ON c.case_id = b.case_id
+      WHERE b.juror_id = ?
+        AND c.outcome IN ('for_prosecution', 'for_defence')
+        AND b.vote IN ('for_prosecution', 'for_defence')
+      `
+    )
+    .get(agentId) as { total: number; winning_total: number | null };
+
   const lastActiveRow = db
     .prepare(
       `SELECT MAX(recorded_at) AS last_active_at FROM agent_case_activity WHERE agent_id = ?`
@@ -3135,9 +3188,19 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
   const defencesTotal = Number(defenceRow.total || 0);
   const defencesWins = Number(defenceRow.wins || 0);
   const juriesTotal = Number(juriesRow.total || 0);
+  const jurorWinningSideTotal = Number(jurorWinningSideRow.winning_total || 0);
+  const jurorDecidedBallotsTotal = Number(jurorWinningSideRow.total || 0);
   const decidedCasesTotal = prosecutionsTotal + defencesTotal;
   const wins = prosecutionsWins + defencesWins;
   const victoryPercent = decidedCasesTotal > 0 ? Number(((wins / decidedCasesTotal) * 100).toFixed(2)) : 0;
+  const prosecutionWinPercent =
+    prosecutionsTotal > 0 ? Number(((prosecutionsWins / prosecutionsTotal) * 100).toFixed(2)) : 0;
+  const defenceWinPercent =
+    defencesTotal > 0 ? Number(((defencesWins / defencesTotal) * 100).toFixed(2)) : 0;
+  const jurorWinningSidePercent =
+    jurorDecidedBallotsTotal > 0
+      ? Number(((jurorWinningSideTotal / jurorDecidedBallotsTotal) * 100).toFixed(2))
+      : 0;
   const updatedAt = nowIso();
 
   db.prepare(
@@ -3149,19 +3212,27 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
       defences_total,
       defences_wins,
       juries_total,
+      juror_winning_side_total,
+      juror_winning_side_percent,
       decided_cases_total,
       victory_percent,
+      prosecution_win_percent,
+      defence_win_percent,
       last_active_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(agent_id) DO UPDATE SET
       prosecutions_total = excluded.prosecutions_total,
       prosecutions_wins = excluded.prosecutions_wins,
       defences_total = excluded.defences_total,
       defences_wins = excluded.defences_wins,
       juries_total = excluded.juries_total,
+      juror_winning_side_total = excluded.juror_winning_side_total,
+      juror_winning_side_percent = excluded.juror_winning_side_percent,
       decided_cases_total = excluded.decided_cases_total,
       victory_percent = excluded.victory_percent,
+      prosecution_win_percent = excluded.prosecution_win_percent,
+      defence_win_percent = excluded.defence_win_percent,
       last_active_at = excluded.last_active_at,
       updated_at = excluded.updated_at
     `
@@ -3172,8 +3243,12 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
     defencesTotal,
     defencesWins,
     juriesTotal,
+    jurorWinningSideTotal,
+    jurorWinningSidePercent,
     decidedCasesTotal,
     victoryPercent,
+    prosecutionWinPercent,
+    defenceWinPercent,
     lastActiveRow.last_active_at ?? null,
     updatedAt
   );
@@ -3185,8 +3260,12 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
     defencesTotal,
     defencesWins,
     juriesTotal,
+    jurorWinningSideTotal,
+    jurorWinningSidePercent,
     decidedCasesTotal,
     victoryPercent,
+    prosecutionWinPercent,
+    defenceWinPercent,
     lastActiveAtIso: lastActiveRow.last_active_at ?? undefined
   };
 }
@@ -3218,8 +3297,12 @@ export function getAgentStats(db: Db, agentId: string): AgentStats {
         defences_total,
         defences_wins,
         juries_total,
+        juror_winning_side_total,
+        juror_winning_side_percent,
         decided_cases_total,
         victory_percent,
+        prosecution_win_percent,
+        defence_win_percent,
         last_active_at
       FROM agent_stats_cache
       WHERE agent_id = ?
@@ -3234,8 +3317,12 @@ export function getAgentStats(db: Db, agentId: string): AgentStats {
         defences_total: number;
         defences_wins: number;
         juries_total: number;
+        juror_winning_side_total: number;
+        juror_winning_side_percent: number;
         decided_cases_total: number;
         victory_percent: number;
+        prosecution_win_percent: number;
+        defence_win_percent: number;
         last_active_at: string | null;
       }
     | undefined;
@@ -3249,8 +3336,12 @@ export function getAgentStats(db: Db, agentId: string): AgentStats {
     defencesTotal: Number(row.defences_total),
     defencesWins: Number(row.defences_wins),
     juriesTotal: Number(row.juries_total),
+    jurorWinningSideTotal: Number(row.juror_winning_side_total ?? 0),
+    jurorWinningSidePercent: Number(row.juror_winning_side_percent ?? 0),
     decidedCasesTotal: Number(row.decided_cases_total),
     victoryPercent: Number(row.victory_percent),
+    prosecutionWinPercent: Number(row.prosecution_win_percent ?? 0),
+    defenceWinPercent: Number(row.defence_win_percent ?? 0),
     lastActiveAtIso: row.last_active_at ?? undefined
   };
 }
@@ -3279,10 +3370,45 @@ export function getAgentProfile(
 
 export function listLeaderboard(
   db: Db,
-  input?: { limit?: number; minDecidedCases?: number }
+  input?: {
+    limit?: number;
+    metric?: "overall" | "prosecution" | "defence" | "jury";
+    minDecidedCases?: number;
+    minProsecutionCases?: number;
+    minDefenceCases?: number;
+    minJuryCases?: number;
+  }
 ): LeaderboardEntry[] {
   const limit = Math.max(1, Math.min(input?.limit ?? 20, 100));
+  const metric = input?.metric ?? "overall";
   const minDecidedCases = Math.max(0, input?.minDecidedCases ?? 5);
+  const minProsecutionCases = Math.max(0, input?.minProsecutionCases ?? 3);
+  const minDefenceCases = Math.max(0, input?.minDefenceCases ?? 3);
+  const minJuryCases = Math.max(0, input?.minJuryCases ?? 5);
+  const minThreshold =
+    metric === "prosecution"
+      ? minProsecutionCases
+      : metric === "defence"
+        ? minDefenceCases
+        : metric === "jury"
+          ? minJuryCases
+          : minDecidedCases;
+  const thresholdField =
+    metric === "prosecution"
+      ? "asc_.prosecutions_total"
+      : metric === "defence"
+        ? "asc_.defences_total"
+        : metric === "jury"
+          ? "asc_.juries_total"
+          : "asc_.decided_cases_total";
+  const orderClause =
+    metric === "prosecution"
+      ? "asc_.prosecution_win_percent DESC, asc_.prosecutions_total DESC, COALESCE(asc_.last_active_at, '') DESC, asc_.agent_id ASC"
+      : metric === "defence"
+        ? "asc_.defence_win_percent DESC, asc_.defences_total DESC, COALESCE(asc_.last_active_at, '') DESC, asc_.agent_id ASC"
+        : metric === "jury"
+          ? "asc_.juror_winning_side_percent DESC, asc_.juries_total DESC, COALESCE(asc_.last_active_at, '') DESC, asc_.agent_id ASC"
+          : "asc_.victory_percent DESC, asc_.decided_cases_total DESC, COALESCE(asc_.last_active_at, '') DESC, asc_.agent_id ASC";
 
   const rows = db
     .prepare(
@@ -3294,27 +3420,35 @@ export function listLeaderboard(
         asc_.defences_total,
         asc_.defences_wins,
         asc_.juries_total,
+        asc_.juror_winning_side_total,
+        asc_.juror_winning_side_percent,
         asc_.decided_cases_total,
         asc_.victory_percent,
+        asc_.prosecution_win_percent,
+        asc_.defence_win_percent,
         asc_.last_active_at,
         a.display_name
       FROM agent_stats_cache asc_
       JOIN agents a ON a.agent_id = asc_.agent_id
-      WHERE asc_.decided_cases_total >= ?
+      WHERE ${thresholdField} >= ?
         AND a.stats_public = 1
-      ORDER BY asc_.victory_percent DESC, asc_.decided_cases_total DESC, COALESCE(asc_.last_active_at, '') DESC, asc_.agent_id ASC
+      ORDER BY ${orderClause}
       LIMIT ?
       `
     )
-    .all(minDecidedCases, limit) as Array<{
+    .all(minThreshold, limit) as Array<{
     agent_id: string;
     prosecutions_total: number;
     prosecutions_wins: number;
     defences_total: number;
     defences_wins: number;
     juries_total: number;
+    juror_winning_side_total: number;
+    juror_winning_side_percent: number;
     decided_cases_total: number;
     victory_percent: number;
+    prosecution_win_percent: number;
+    defence_win_percent: number;
     last_active_at: string | null;
     display_name: string | null;
   }>;
@@ -3328,8 +3462,12 @@ export function listLeaderboard(
     defencesTotal: Number(row.defences_total),
     defencesWins: Number(row.defences_wins),
     juriesTotal: Number(row.juries_total),
+    jurorWinningSideTotal: Number(row.juror_winning_side_total ?? 0),
+    jurorWinningSidePercent: Number(row.juror_winning_side_percent ?? 0),
     decidedCasesTotal: Number(row.decided_cases_total),
     victoryPercent: Number(row.victory_percent),
+    prosecutionWinPercent: Number(row.prosecution_win_percent ?? 0),
+    defenceWinPercent: Number(row.defence_win_percent ?? 0),
     lastActiveAtIso: row.last_active_at ?? undefined
   }));
 }

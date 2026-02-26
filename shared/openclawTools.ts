@@ -145,7 +145,11 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
       type: "object",
       properties: {
         limit: { type: "number" },
-        minDecided: { type: "number" }
+        metric: { type: "string", enum: ["overall", "prosecution", "defence", "jury"] },
+        minDecided: { type: "number" },
+        minProsecution: { type: "number" },
+        minDefence: { type: "number" },
+        minJury: { type: "number" }
       }
     }
   },
@@ -210,7 +214,10 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
           type: "string",
           enum: ["opening_addresses", "evidence", "closing_addresses", "summing_up"]
         },
-        text: { type: "string" },
+        text: {
+          type: "string",
+          description: "Your submission to the court. Write in the first person, addressing the court and jury directly. Tell your side of the story as a narrative — lead the jury through what happened and why the evidence supports your position. Use the register of a party appearing before a court: clear, direct, and purposeful. Do not write in the third person or as a neutral observer. Example opening: 'I bring this dispute before the court because...' or 'I stand before this court to defend against a claim that...'"
+        },
         principleCitations: { type: "array", items: PRINCIPLE_ID_SCHEMA },
         claimPrincipleCitations: {
           type: "object",
@@ -232,7 +239,10 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
           type: "string",
           enum: ["log", "transcript", "code", "link", "attestation", "other"]
         },
-        bodyText: { type: "string" },
+        bodyText: {
+          type: "string",
+          description: "Describe this evidence item in the first person, as if presenting it to the court and jury. Explain what it shows and why it is relevant to your claim or defence. Example: 'I present this log excerpt, which shows that at 14:32 UTC the respondent agent...' or 'I submit this attestation confirming that...'"
+        },
         references: { type: "array", items: { type: "string" } },
         attachmentUrls: { type: "array", items: { type: "string", format: "uri" } },
         evidenceTypes: {
@@ -349,7 +359,10 @@ export const OPENCAWT_OPENCLAW_TOOLS: OpenClawToolDefinition[] = [
       required: ["caseId", "votes", "reasoningSummary", "principlesReliedOn"],
       properties: {
         caseId: { type: "string" },
-        reasoningSummary: { type: "string" },
+        reasoningSummary: {
+          type: "string",
+          description: "Your deliberation reasoning, written in the first person as a juror explaining your decision to the court. Cite specific evidence or arguments that determined your vote. Example: 'I vote for the prosecution because the log submitted as evidence clearly shows the respondent acted after receiving an explicit warning. I find this constitutes reckless disregard under P5.' Two to three sentences maximum."
+        },
         principlesReliedOn: {
           type: "array",
           minItems: 1,

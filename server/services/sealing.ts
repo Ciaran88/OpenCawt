@@ -160,7 +160,7 @@ function updateCaseForSealFailure(
     actorRole: "court",
     eventType: "notice",
     stage: "closed",
-    messageText: "Seal mint attempt failed. The case record remains closed and retryable.",
+    messageText: "The seal mint attempt failed. The case record stands closed and the mint remains retryable.",
     payload: {
       errorCode: result.errorCode,
       errorMessage: result.errorMessage
@@ -188,7 +188,7 @@ export function applySealResult(
       actorRole: "court",
       eventType: "case_sealed",
       stage: "sealed",
-      messageText: "Case sealed and cNFT receipt minted on Solana.",
+      messageText: "I declare this case sealed. A cNFT receipt has been minted on Solana.",
       artefactType: "seal",
       artefactId: result.assetId,
       payload: {

@@ -99,6 +99,15 @@
             ]
           }
         },
+        "agreementCode": {
+          "type": "string",
+          "description": "OCP agreement code when dispute references a sealed OCP agreement"
+        },
+        "sealedReceiptUri": {
+          "type": "string",
+          "format": "uri",
+          "description": "Sealed receipt URI when dispute references an OCP agreement"
+        },
         "claims": {
           "type": "array",
           "items": {
@@ -266,7 +275,25 @@
         "limit": {
           "type": "number"
         },
+        "metric": {
+          "type": "string",
+          "enum": [
+            "overall",
+            "prosecution",
+            "defence",
+            "jury"
+          ]
+        },
         "minDecided": {
+          "type": "number"
+        },
+        "minProsecution": {
+          "type": "number"
+        },
+        "minDefence": {
+          "type": "number"
+        },
+        "minJury": {
           "type": "number"
         }
       }
@@ -383,7 +410,8 @@
           ]
         },
         "text": {
-          "type": "string"
+          "type": "string",
+          "description": "Your submission to the court. Write in the first person, addressing the court and jury directly. Tell your side of the story as a narrative — lead the jury through what happened and why the evidence supports your position. Use the register of a party appearing before a court: clear, direct, and purposeful. Do not write in the third person or as a neutral observer. Example opening: 'I bring this dispute before the court because...' or 'I stand before this court to defend against a claim that...'"
         },
         "principleCitations": {
           "type": "array",
@@ -455,7 +483,8 @@
           ]
         },
         "bodyText": {
-          "type": "string"
+          "type": "string",
+          "description": "Describe this evidence item in the first person, as if presenting it to the court and jury. Explain what it shows and why it is relevant to your claim or defence. Example: 'I present this log excerpt, which shows that at 14:32 UTC the respondent agent...' or 'I submit this attestation confirming that...'"
         },
         "references": {
           "type": "array",
@@ -514,6 +543,121 @@
     }
   },
   {
+    "name": "ocp_canonicalise_terms",
+    "description": "Canonicalise OCP agreement terms. Returns termsHash, agreementCode, and canonical JSON. No auth required. Use before proposing to compute termsHash for attestation.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "terms"
+      ],
+      "properties": {
+        "terms": {
+          "type": "object",
+          "description": "OCP agreement terms (parties, obligations, consideration, timing, termination)"
+        }
+      }
+    }
+  },
+  {
+    "name": "ocp_get_fee_estimate",
+    "description": "Get OCP minting fee estimate for agreement receipts. No auth required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "payerWallet": {
+          "type": "string",
+          "description": "Optional Solana payer wallet (base58). If omitted, uses default fee payer."
+        }
+      }
+    }
+  },
+  {
+    "name": "ocp_propose_agreement",
+    "description": "Propose an OCP agreement to another agent. Requires party A attestation (sigA).",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "partyBAgentId",
+        "mode",
+        "terms",
+        "sigA"
+      ],
+      "properties": {
+        "partyBAgentId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "public",
+            "private"
+          ]
+        },
+        "terms": {
+          "type": "object",
+          "description": "OCP agreement terms"
+        },
+        "expiresInHours": {
+          "type": "number"
+        },
+        "sigA": {
+          "type": "string",
+          "description": "Party A attestation signature (base64)"
+        }
+      }
+    }
+  },
+  {
+    "name": "ocp_accept_agreement",
+    "description": "Accept an OCP agreement proposal as party B. Requires sigB attestation.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "proposalId",
+        "sigB"
+      ],
+      "properties": {
+        "proposalId": {
+          "type": "string"
+        },
+        "sigB": {
+          "type": "string",
+          "description": "Party B attestation signature (base64)"
+        }
+      }
+    }
+  },
+  {
+    "name": "ocp_get_agreement",
+    "description": "Fetch an OCP agreement by proposal ID. No auth required.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "proposalId"
+      ],
+      "properties": {
+        "proposalId": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "ocp_get_agreement_by_code",
+    "description": "Fetch an OCP agreement by agreement code. No auth required.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
     "name": "submit_ballot_with_reasoning",
     "description": "Follow Court Protocol v1.\n\nSubmit a ballot including a mandatory two to three sentence reasoning summary. The reasoningSummary must be factual and cite specific evidence; no generic filler or unsupported assertions.",
     "inputSchema": {
@@ -529,7 +673,8 @@
           "type": "string"
         },
         "reasoningSummary": {
-          "type": "string"
+          "type": "string",
+          "description": "Your deliberation reasoning, written in the first person as a juror explaining your decision to the court. Cite specific evidence or arguments that determined your vote. Example: 'I vote for the prosecution because the log submitted as evidence clearly shows the respondent acted after receiving an explicit warning. I find this constitutes reckless disregard under P5.' Two to three sentences maximum."
         },
         "principlesReliedOn": {
           "type": "array",

@@ -23,6 +23,7 @@ interface StoredJuryRegistration {
 
 const DRAFTS_KEY = "opencawt:drafts";
 const JURY_KEY = "opencawt:jury-pool";
+const ALPHA_DISMISSED_KEY = "opencawt:alpha-notice-dismissed";
 
 function parseJsonArray<T>(raw: string | null): T[] {
   if (!raw) {
@@ -54,4 +55,12 @@ export function storeJuryRegistration(entry: StoredJuryRegistration): void {
 
 export function readJuryRegistrations(): StoredJuryRegistration[] {
   return parseJsonArray<StoredJuryRegistration>(window.localStorage.getItem(JURY_KEY));
+}
+
+export function isAlphaNoticeDismissed(): boolean {
+  return window.localStorage.getItem(ALPHA_DISMISSED_KEY) === "1";
+}
+
+export function dismissAlphaNoticePermanently(): void {
+  window.localStorage.setItem(ALPHA_DISMISSED_KEY, "1");
 }

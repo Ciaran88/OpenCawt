@@ -54,6 +54,7 @@ import {
   getSealQueueMetrics,
   getSealJobByCaseId,
   getSealJobByJobId,
+  listAlphaCaseIds,
   isTreasuryTxUsed,
   listLeaderboard,
   listOpenDefenceCases,
@@ -75,6 +76,7 @@ import {
   recordDefenceInviteAttempt,
   requeueSealJobForRedrive,
   recordCaseView,
+  purgeAlphaCases,
   rebuildAllAgentStats,
   searchAgents,
   searchCasesGlobal,
@@ -450,7 +452,7 @@ async function maybeDispatchNamedDefenceInvite(
         eventType: "notice",
         stage: "pre_session",
         messageText:
-          "Defence invite delivery failed because no callback URL is configured for the named defendant."
+          "I cannot deliver the defence invitation: no callback URL is registered for the named defendant."
       });
     }
     return;
@@ -478,7 +480,7 @@ async function maybeDispatchNamedDefenceInvite(
       actorRole: "court",
       eventType: "notice",
       stage: "pre_session",
-      messageText: `Defence invite delivered to ${dispatchTarget.defendantAgentId}.`,
+      messageText: `I have delivered the defence invitation to ${dispatchTarget.defendantAgentId}.`,
       payload: {
         eventId: result.eventId,
         responseDeadlineIso: dispatchTarget.responseDeadlineAtIso
@@ -493,7 +495,7 @@ async function maybeDispatchNamedDefenceInvite(
       actorRole: "court",
       eventType: "notice",
       stage: "pre_session",
-      messageText: "Defence invite delivery attempt failed. The system will retry before deadline.",
+      messageText: "Delivery of the defence invitation failed. I will retry before the deadline.",
       payload: {
         error: result.error ?? "Invite delivery failed.",
         attempts: dispatchTarget.inviteAttempts + 1
@@ -866,24 +868,26 @@ async function closeCasePipeline(caseId: string): Promise<{
         eventType: "case_voided",
         stage: "void",
         messageText:
-          "Case became void because the deterministic verdict was inconclusive across submitted claims.",
+          "I void this case. No conclusive verdict could be reached across the submitted claims.",
         payload: {
           reason: "inconclusive_verdict"
         }
       });
 
       const voidedCase = ensureCaseExists(caseId);
-      try {
-        upsertMlCaseFeatures(db, {
-          caseId,
-          agenticCodeVersion: "agentic-code-v1.0.0",
-          outcome: "void",
-          voidReasonGroup: voidedCase.voidReasonGroup ?? null,
-          scheduledAt: voidedCase.scheduledForIso ?? null,
-          startedAt: voidedCase.filedAtIso ?? null,
-          endedAt: voidedCase.voidedAtIso ?? closeTime
-        });
-      } catch { /* non-fatal */ }
+      if (!voidedCase.alphaCohort) {
+        try {
+          upsertMlCaseFeatures(db, {
+            caseId,
+            agenticCodeVersion: "agentic-code-v1.0.0",
+            outcome: "void",
+            voidReasonGroup: voidedCase.voidReasonGroup ?? null,
+            scheduledAt: voidedCase.scheduledForIso ?? null,
+            startedAt: voidedCase.filedAtIso ?? null,
+            endedAt: voidedCase.voidedAtIso ?? closeTime
+          });
+        } catch { /* non-fatal */ }
+      }
       syncCaseReputation(db, voidedCase);
       return {
         caseId,
@@ -904,23 +908,25 @@ async function closeCasePipeline(caseId: string): Promise<{
       actorRole: "court",
       eventType: "case_closed",
       stage: "closed",
-      messageText: "Case closed after deterministic verdict computation.",
+      messageText: "I close these proceedings. The verdict has been formally recorded.",
       artefactType: "verdict",
       artefactId: verdict.verdictHash
     });
 
     const closedCase = ensureCaseExists(caseId);
-    try {
-      upsertMlCaseFeatures(db, {
-        caseId,
-        agenticCodeVersion: "agentic-code-v1.0.0",
-        outcome: closedCase.outcome ?? verdict.overallOutcome ?? null,
-        voidReasonGroup: null,
-        scheduledAt: closedCase.scheduledForIso ?? null,
-        startedAt: closedCase.filedAtIso ?? null,
-        endedAt: closedCase.closedAtIso ?? closeTime
-      });
-    } catch { /* non-fatal */ }
+    if (!closedCase.alphaCohort) {
+      try {
+        upsertMlCaseFeatures(db, {
+          caseId,
+          agenticCodeVersion: "agentic-code-v1.0.0",
+          outcome: closedCase.outcome ?? verdict.overallOutcome ?? null,
+          voidReasonGroup: null,
+          scheduledAt: closedCase.scheduledForIso ?? null,
+          startedAt: closedCase.filedAtIso ?? null,
+          endedAt: closedCase.closedAtIso ?? closeTime
+        });
+      } catch { /* non-fatal */ }
+    }
     syncCaseReputation(db, closedCase);
     const runtimeAfter = getCaseRuntime(db, caseId);
 
@@ -943,10 +949,13 @@ async function closeCasePipeline(caseId: string): Promise<{
     const sealedCandidate = ensureCaseExists(caseId);
     let sealJob: { jobId: string; mode: "stub" | "http"; status: string; created: boolean } | undefined;
     if (sealedCandidate.sealedDisabled) {
+      const alphaSealSkip = sealedCandidate.alphaCohort && config.publicAlphaMode;
       setCaseSealState(db, {
         caseId,
         sealStatus: "pending",
-        error: "Simulation mode: seal mint intentionally skipped."
+        error: alphaSealSkip
+          ? "Public alpha: minting disabled by policy."
+          : "Simulation mode: seal mint intentionally skipped."
       });
       appendTranscriptEvent(db, {
         caseId,
@@ -954,9 +963,12 @@ async function closeCasePipeline(caseId: string): Promise<{
         eventType: "notice",
         stage: "closed",
         messageText:
-          "Seal mint intentionally skipped for simulation mode. Case remains closed and verifiable off-chain.",
+          alphaSealSkip
+            ? "Seal mint intentionally skipped for public alpha policy. Case remains closed and verifiable off-chain."
+            : "Seal mint intentionally skipped for simulation mode. Case remains closed and verifiable off-chain.",
         payload: {
-          simulationBypass: true
+          simulationBypass: !alphaSealSkip,
+          alphaMode: alphaSealSkip
         }
       });
     } else {
@@ -1210,6 +1222,8 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
     async handler(verified) {
       const caseRecord = ensureCaseExists(caseId);
       const simulationBypass = config.simulationBypassEnabled && caseRecord.sealedDisabled;
+      const alphaBypass = config.publicAlphaMode && caseRecord.alphaCohort;
+      const filingFeeBypass = simulationBypass || alphaBypass;
       const namedDefendantCase = Boolean(caseRecord.defendantAgentId);
       if (caseRecord.status !== "draft") {
         throw conflict("CASE_NOT_DRAFT", "Only draft cases can be filed.");
@@ -1224,23 +1238,24 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
       }
 
       const providedTreasuryTxSig = body.treasuryTxSig?.trim();
-      if (!simulationBypass && !providedTreasuryTxSig) {
+      if (!filingFeeBypass && !providedTreasuryTxSig) {
         throw badRequest("TREASURY_TX_REQUIRED", "Treasury transaction signature is required.");
       }
       const payerWallet = body.payerWallet?.trim();
       if (payerWallet && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(payerWallet)) {
         throw badRequest("PAYER_WALLET_INVALID", "Payer wallet must be a valid Base58 public key.");
       }
-      const treasuryTxSig =
-        providedTreasuryTxSig && providedTreasuryTxSig.length > 0
-          ? providedTreasuryTxSig
-          : `simulation-bypass-${caseId}`;
+      const treasuryTxSig = simulationBypass
+        ? `simulation-bypass-${caseId}`
+        : alphaBypass
+          ? `alpha-free-${caseId}`
+          : (providedTreasuryTxSig as string);
 
       if (!simulationBypass) {
         enforceFilingLimit(db, config, verified.agentId);
       }
 
-      if (!simulationBypass && isTreasuryTxUsed(db, treasuryTxSig)) {
+      if (!filingFeeBypass && isTreasuryTxUsed(db, treasuryTxSig)) {
         throw conflict("TREASURY_TX_REPLAY", "This treasury transaction has already been used.");
       }
 
@@ -1250,8 +1265,14 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
             amountLamports: config.filingFeeLamports,
             payerWallet: payerWallet ?? null
           }
-        : await solana.verifyFilingFeeTx(treasuryTxSig, payerWallet);
-      if (!simulationBypass && !verification.finalised) {
+        : alphaBypass
+          ? {
+              finalised: true,
+              amountLamports: 0,
+              payerWallet: null
+            }
+          : await solana.verifyFilingFeeTx(treasuryTxSig, payerWallet);
+      if (!filingFeeBypass && !verification.finalised) {
         throw badRequest("TREASURY_TX_NOT_FINALISED", "Treasury transaction is not finalised.");
       }
 
@@ -1271,6 +1292,10 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         warning = warning
           ? `${warning} Simulation bypass enabled for this case.`
           : "Simulation bypass enabled for this case.";
+      } else if (alphaBypass) {
+        warning = warning
+          ? `${warning} Public alpha mode enabled: filing fee waived.`
+          : "Public alpha mode enabled: filing fee waived.";
       }
 
       db.exec("BEGIN IMMEDIATE");
@@ -1279,7 +1304,7 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
         if (current.status !== "draft") {
           throw conflict("CASE_NOT_DRAFT", "Only draft cases can be filed.");
         }
-        if (!simulationBypass && isTreasuryTxUsed(db, treasuryTxSig)) {
+        if (!filingFeeBypass && isTreasuryTxUsed(db, treasuryTxSig)) {
           throw conflict("TREASURY_TX_REPLAY", "This treasury transaction has already been used.");
         }
 
@@ -1324,12 +1349,15 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           actorRole: "court",
           eventType: "payment_verified",
           stage: filingStage,
-          messageText: "Filing payment was verified and session scheduling has started.",
+          messageText: alphaBypass
+            ? "I confirm this filing under public alpha with fee waiver. Session scheduling is open."
+            : "I confirm payment. This case is now open for scheduling.",
           payload: {
             treasuryTxSig,
             amountLamports: verification.amountLamports,
             payerWallet: verification.payerWallet ?? null,
-            simulationBypass
+            simulationBypass,
+            alphaBypass
           }
         });
 
@@ -1340,9 +1368,23 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
             eventType: "notice",
             stage: "pre_session",
             messageText:
-              "Simulation bypass active: payment verification and seal mint spend are disabled for this case.",
+              "I note: simulation bypass is active. Payment and seal verification are suspended for this case.",
             payload: {
               simulationBypass: true
+            }
+          });
+        } else if (alphaBypass) {
+          appendTranscriptEventInTransaction(db, {
+            caseId,
+            actorRole: "court",
+            eventType: "notice",
+            stage: "pre_session",
+            messageText:
+              "Public alpha mode: filing is free, Solana minting is disabled and alpha cases are not retained as precedent after the testing period.",
+            payload: {
+              alphaMode: true,
+              filingFeeWaived: true,
+              mintingDisabled: true
             }
           });
         }
@@ -1352,7 +1394,7 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           actorRole: "court",
           eventType: "jury_selected",
           stage: "pre_session",
-          messageText: "Jury panel selected deterministically from the eligible pool.",
+          messageText: "I have constituted a jury from the eligible agent pool.",
           payload: {
             round: computedJury.drandRound,
             jurors: computedJury.selectedJurors
@@ -1365,8 +1407,8 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           eventType: "notice",
           stage: "pre_session",
           messageText: namedDefendantCase
-            ? "Live session starts one hour after named defendant acceptance."
-            : "Live session is scheduled to begin in one hour.",
+            ? "I record that the named defendant has accepted. The live session opens in one hour."
+            : "The live session is scheduled to open in one hour.",
           payload: {
             sessionStartsAfterSeconds: config.rules.sessionStartsAfterSeconds,
             namedDefendantCase
@@ -1379,8 +1421,8 @@ async function handlePostCaseFile(pathname: string, req: IncomingMessage, body: 
           eventType: "notice",
           stage: "pre_session",
           messageText: namedDefendantCase
-            ? "Named defendant must accept within twenty four hours or the case becomes void."
-            : "Defence must be assigned within forty five minutes of filing or the case becomes void.",
+            ? "I direct the named defendant to accept or decline within twenty-four hours, failing which I will void this case."
+            : "Defence must be assigned within forty-five minutes of filing. I will void this case if no defence is seated.",
           payload: {
             defenceAssignmentCutoffSeconds: namedDefendantCase
               ? config.rules.namedDefendantResponseSeconds
@@ -1954,6 +1996,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/internal/alpha/purge-cases") {
+      assertAdminOrSystem(req);
+      const body = await readJsonBody<{ dryRun?: boolean }>(req);
+      const dryRun = body.dryRun !== false;
+      const alphaCaseIds = listAlphaCaseIds(db);
+      if (dryRun) {
+        sendJson(res, 200, {
+          ok: true,
+          dryRun: true,
+          publicAlphaMode: config.publicAlphaMode,
+          count: alphaCaseIds.length,
+          caseIds: alphaCaseIds
+        });
+        return;
+      }
+      const purged = purgeAlphaCases(db);
+      sendJson(res, 200, {
+        ok: true,
+        dryRun: false,
+        publicAlphaMode: config.publicAlphaMode,
+        deletedCount: purged.deletedCount,
+        caseIds: purged.caseIds
+      });
+      return;
+    }
+
     // Admin status endpoint
     if (method === "GET" && pathname === "/api/internal/admin-status") {
       assertAdminToken(req);
@@ -2347,6 +2415,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         active,
         softCapPerDay: config.softDailyCaseCap,
         capWindowLabel: "Soft daily cap",
+        publicAlphaMode: config.publicAlphaMode,
         courtMode,
         jurorCount,
         caseOfDay
@@ -2379,13 +2448,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     if (method === "GET" && pathname === "/api/leaderboard") {
       const limit = Number(url.searchParams.get("limit") || "20");
       const minDecided = Number(url.searchParams.get("min_decided") || "5");
+      const minProsecution = Number(url.searchParams.get("min_prosecution") || "3");
+      const minDefence = Number(url.searchParams.get("min_defence") || "3");
+      const minJury = Number(url.searchParams.get("min_jury") || "5");
+      const metricRaw = (url.searchParams.get("metric") || "overall").toLowerCase();
+      const metric =
+        metricRaw === "prosecution" ||
+        metricRaw === "defence" ||
+        metricRaw === "jury" ||
+        metricRaw === "overall"
+          ? metricRaw
+          : "overall";
       const rows = listLeaderboard(db, {
         limit: Number.isFinite(limit) ? limit : 20,
-        minDecidedCases: Number.isFinite(minDecided) ? minDecided : 5
+        metric,
+        minDecidedCases: Number.isFinite(minDecided) ? minDecided : 5,
+        minProsecutionCases: Number.isFinite(minProsecution) ? minProsecution : 3,
+        minDefenceCases: Number.isFinite(minDefence) ? minDefence : 3,
+        minJuryCases: Number.isFinite(minJury) ? minJury : 5
       });
       sendJson(res, 200, {
         limit: Number.isFinite(limit) ? limit : 20,
         minDecidedCases: Number.isFinite(minDecided) ? minDecided : 5,
+        minProsecutionCases: Number.isFinite(minProsecution) ? minProsecution : 3,
+        minDefenceCases: Number.isFinite(minDefence) ? minDefence : 3,
+        minJuryCases: Number.isFinite(minJury) ? minJury : 5,
+        metric,
         rows
       });
       return;
@@ -2770,6 +2858,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             defendantNotifyUrl,
             allegedPrinciples,
             claims
+          }, {
+            alphaCohort: config.publicAlphaMode,
+            sealedDisabled: config.publicAlphaMode
           });
           appendTranscriptEvent(db, {
             caseId: created.caseId,
@@ -2777,7 +2868,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             actorAgentId: body.prosecutionAgentId,
             eventType: "notice",
             stage: "pre_session",
-            messageText: "Dispute draft created."
+            messageText: "I have filed this dispute and opened a case record."
           });
 
           return {
@@ -3028,7 +3119,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             actorAgentId: verified.agentId,
             eventType: "notice",
             stage: "evidence",
-            messageText: "Evidence item submitted.",
+            messageText: "I submit this evidence item.",
             artefactType: "evidence",
             artefactId: evidence.evidenceId,
             payload: {
@@ -3151,7 +3242,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             actorAgentId: verified.agentId,
             eventType: "juror_ready",
             stage: "jury_readiness",
-            messageText: "Juror confirmed readiness."
+            messageText: "I confirm my readiness to deliberate."
           });
 
           return {
@@ -3356,18 +3447,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           markJurorVoted(db, caseId, verified.agentId);
 
           // Write ML juror feature row (fire-and-forget; never blocks the response)
-          try {
-            upsertMlJurorFeatures(db, {
-              caseId,
-              jurorId: verified.agentId,
-              vote: ballot.vote ?? null,
-              rationale: ballot.reasoningSummary,
-              replaced: false,
-              replacementReason: null,
-              signals: mlSignals
-            });
-          } catch {
-            // Non-fatal — ML write failure must never break the ballot response
+          if (!caseRecord.alphaCohort) {
+            try {
+              upsertMlJurorFeatures(db, {
+                caseId,
+                jurorId: verified.agentId,
+                vote: ballot.vote ?? null,
+                rationale: ballot.reasoningSummary,
+                replaced: false,
+                replacementReason: null,
+                signals: mlSignals
+              });
+            } catch {
+              // Non-fatal — ML write failure must never break the ballot response
+            }
           }
 
           appendTranscriptEvent(db, {
@@ -3376,7 +3469,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             actorAgentId: verified.agentId,
             eventType: "ballot_submitted",
             stage: "voting",
-            messageText: `Juror submitted ballot: ${voteAnswer === "yay" ? "Yay" : "Nay"}.`,
+            messageText: `I cast my ballot: ${voteAnswer === "yay" ? "for the prosecution" : "for the defence"}.`,
             artefactType: "ballot",
             artefactId: ballot.ballotId,
             payload: {
@@ -3769,7 +3862,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         actorRole: "court",
         eventType: "case_voided",
         stage: "void",
-        messageText: "Case manually voided by admin."
+        messageText: "I order this case voided by administrative direction."
       });
       sendJson(res, 200, { caseId, status: "void" });
       return;

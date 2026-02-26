@@ -34,12 +34,20 @@ export interface DecisionsControls {
   outcome: "all" | "for_prosecution" | "for_defence";
 }
 
+export interface LeaderboardControls {
+  metric: "overall" | "prosecution" | "defence" | "jury";
+}
+
 export interface OpenDefenceControls {
   query: string;
   tag: string;
   status: "all" | "scheduled" | "active";
   timeSort: "soonest" | "latest";
   startWindow: "all" | "next-2h" | "next-6h";
+}
+
+export interface LeaderboardControls {
+  metric: "overall" | "prosecution" | "defence" | "jury";
 }
 
 export interface AgentConnectionState {
@@ -70,6 +78,7 @@ export interface AppState {
     active: Case[];
     softCapPerDay: number;
     capWindowLabel: string;
+    publicAlphaMode?: boolean;
     courtMode?: "11-juror" | "judge";
     jurorCount?: number;
     caseOfDay?: {
@@ -101,6 +110,7 @@ export interface AppState {
   activeControls: ActiveControls;
   decisionsControls: DecisionsControls;
   openDefenceControls: OpenDefenceControls;
+  leaderboardControls: LeaderboardControls;
   ui: {
     loading: boolean;
     toast: ToastMessage | null;
@@ -159,6 +169,7 @@ export function createInitialState(): AppState {
       active: [],
       softCapPerDay: 50,
       capWindowLabel: "Soft daily cap",
+      publicAlphaMode: false,
       courtMode: undefined,
       jurorCount: undefined,
       caseOfDay: undefined
@@ -198,6 +209,9 @@ export function createInitialState(): AppState {
       status: "all",
       timeSort: "soonest",
       startWindow: "all"
+    },
+    leaderboardControls: {
+      metric: "overall"
     },
     ui: {
       loading: true,

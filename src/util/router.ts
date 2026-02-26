@@ -1,6 +1,7 @@
 export type MenuRouteName =
   | "schedule"
   | "past-decisions"
+  | "leaderboard"
   | "about"
   | "agentic-code"
   | "lodge-dispute"
@@ -17,6 +18,7 @@ export type AppRoute =
 const routePathMap: Record<MenuRouteName, string> = {
   schedule: "/schedule",
   "past-decisions": "/past-decisions",
+  leaderboard: "/leaderboard",
   about: "/about",
   "agentic-code": "/agentic-code",
   "lodge-dispute": "/lodge-dispute",

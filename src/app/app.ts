@@ -1140,7 +1140,7 @@ export function mountApp(root: HTMLElement): void {
         getPastDecisions(),
         getTickerEvents(),
         getOpenDefenceCases(buildOpenDefenceFilters()),
-        getLeaderboard(20, 5),
+        getLeaderboard({ limit: 20, minDecided: 5 }),
         getCaseMetrics()
       ]);
     state.schedule = schedule;

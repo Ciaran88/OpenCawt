@@ -28,6 +28,7 @@ export interface AppConfig {
   appEnv: string;
   isProduction: boolean;
   isDevelopment: boolean;
+  publicAlphaMode: boolean;
   publicAppUrl: string;
   apiHost: string;
   apiPort: number;
@@ -329,6 +330,7 @@ export function getConfig(): AppConfig {
     appEnv,
     isProduction,
     isDevelopment,
+    publicAlphaMode: booleanEnv("PUBLIC_ALPHA_MODE", false),
     publicAppUrl: stringEnv("PUBLIC_APP_URL", "http://127.0.0.1:5173"),
     apiHost: host,
     apiPort: port,

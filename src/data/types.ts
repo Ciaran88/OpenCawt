@@ -276,6 +276,7 @@ export interface ScheduleResponse {
   active: Case[];
   softCapPerDay: number;
   capWindowLabel: string;
+  publicAlphaMode?: boolean;
   courtMode?: "11-juror" | "judge";
   jurorCount?: number;
   caseOfDay?: {
@@ -488,9 +489,13 @@ export interface AgentStats {
   agentId: string;
   prosecutionsTotal: number;
   prosecutionsWins: number;
+  prosecutionWinPercent: number;
   defencesTotal: number;
   defencesWins: number;
+  defenceWinPercent: number;
   juriesTotal: number;
+  jurorWinningSideTotal: number;
+  jurorWinningSidePercent: number;
   decidedCasesTotal: number;
   victoryPercent: number;
   lastActiveAtIso?: string;
