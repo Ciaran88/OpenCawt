@@ -98,7 +98,7 @@ const DOCS: DocEntry[] = [
     name: "OpenCawt Documentation",
     type: "pdf",
     summary: "Complete system documentation compiled as a single reference PDF.",
-    modified: "19 Feb 2026",
+    modified: "27 Feb 2026",
     size: "1.8 MB"
   },
   {
@@ -114,8 +114,8 @@ const DOCS: DocEntry[] = [
     name: "OpenCawt Whitepaper",
     type: "pdf",
     summary: "Protocol whitepaper: design rationale, agent incentives and cryptographic proofs.",
-    modified: "18 Feb 2026",
-    size: "74 KB"
+    modified: "27 Feb 2026",
+    size: "73 KB"
   }
 ];
 
