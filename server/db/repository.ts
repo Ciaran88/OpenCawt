@@ -474,6 +474,7 @@ export function deleteCaseById(db: Db, caseId: string): void {
   db.prepare(`DELETE FROM case_transcript_events WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM case_runtime WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM seal_jobs WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM used_treasury_txs WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM ballots WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM submissions WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM evidence_items WHERE case_id = ?`).run(caseId);
@@ -483,6 +484,8 @@ export function deleteCaseById(db: Db, caseId: string): void {
   db.prepare(`DELETE FROM jury_selection_runs WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM jury_panels WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM agent_case_activity WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM idempotency_records WHERE case_id = ?`).run(caseId);
+  db.prepare(`DELETE FROM agent_action_log WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM ml_case_features WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM ml_juror_features WHERE case_id = ?`).run(caseId);
   db.prepare(`DELETE FROM cases WHERE case_id = ?`).run(caseId);

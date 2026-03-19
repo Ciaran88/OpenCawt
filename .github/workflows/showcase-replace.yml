@@ -26,16 +26,18 @@ jobs:
       - name: Fetch current production decisions
         run: |
           curl -fsS "$API_URL/api/decisions" > decisions-before.json
-          jq '{count:length, ids:[.[].caseId], sampleCount:([.[] | select(.sampleCase == true)] | length)}' decisions-before.json
-          count="$(jq 'length' decisions-before.json)"
-          if [ "$count" -ne 7 ]; then
-            echo "Expected exactly 7 production decisions to replace, found $count." >&2
+          jq '{count:length, ids:[.[].caseId], sampleCount:([.[] | select(.sampleCase == true)] | length), legacyCount:([.[] | select(.sampleCase != true)] | length)}' decisions-before.json
+          legacy_count="$(jq '[.[] | select(.sampleCase != true)] | length' decisions-before.json)"
+          if [ "$legacy_count" -ne 7 ]; then
+            echo "Expected exactly 7 visible legacy non-sample decisions to replace, found $legacy_count." >&2
             exit 1
           fi
+          jq '[.[] | select(.sampleCase != true) | .caseId]' decisions-before.json > legacy-delete-ids.json
+          jq '[.[] | select(.sampleCase == true) | .caseId]' decisions-before.json > showcase-before-ids.json
 
       - name: Dry run showcase replacement
         run: |
-          delete_ids_json="$(jq '[.[].caseId]' decisions-before.json)"
+          delete_ids_json="$(cat legacy-delete-ids.json)"
           jq -n --argjson deleteCaseIds "$delete_ids_json" '{dryRun:true, deleteCaseIds:$deleteCaseIds}' > showcase-dry-run.json
           curl -fsS "$API_URL/api/internal/showcase/replace-cases" \
             -H "Content-Type: application/json" \
@@ -45,7 +47,7 @@ jobs:
 
       - name: Execute showcase replacement
         run: |
-          delete_ids_json="$(jq '[.[].caseId]' decisions-before.json)"
+          delete_ids_json="$(cat legacy-delete-ids.json)"
           jq -n --argjson deleteCaseIds "$delete_ids_json" '{dryRun:false, backupFirst:true, deleteCaseIds:$deleteCaseIds}' > showcase-replace.json
           curl -fsS "$API_URL/api/internal/showcase/replace-cases" \
             -H "Content-Type: application/json" \
@@ -57,9 +59,9 @@ jobs:
         run: |
           curl -fsS "$API_URL/api/decisions" > decisions-after.json
           jq '{count:length, ids:[.[].caseId], sampleCount:([.[] | select(.sampleCase == true)] | length), latest:(.[0] // null | {caseId,caseTitle,closedAtIso})}' decisions-after.json
-          jq -e 'length == 7' decisions-after.json >/dev/null
-          jq -e 'all(.[]; .sampleCase == true)' decisions-after.json >/dev/null
-          jq -e 'all(.[]; (.caseTitle // "") | length > 0)' decisions-after.json >/dev/null
+          jq -e 'all(.[] | select(.sampleCase == true); (.caseTitle // "") | length > 0)' decisions-after.json >/dev/null
+          jq -e --slurpfile removed legacy-delete-ids.json '[.[] | .caseId] as $current | all($removed[0][]; $current | index(.) | not)' decisions-after.json >/dev/null
+          jq -e --slurpfile showcase showcase-before-ids.json '[.[] | select(.sampleCase == true) | .caseId] as $current | all($showcase[0][]; $current | index(.))' decisions-after.json >/dev/null
           newest_case_id="$(jq -r '.[0].caseId' decisions-after.json)"
           curl -fsS "$API_URL/api/cases/${newest_case_id}/transcript" > transcript-check.json
           jq -e '.events | length > 0' transcript-check.json >/dev/null

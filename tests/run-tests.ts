@@ -26,6 +26,7 @@ import {
   clearAgentCaseActivity,
   createAgentCapability,
   createCaseDraft,
+  deleteCaseById,
   getCaseById,
   listClaims,
   listDecisions,
@@ -2092,6 +2093,76 @@ async function testShowcaseReplacementFunction() {
   db.close();
 }
 
+function testDeleteCaseRemovesTreasuryAndAuxiliaryRefs() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_delete_case_cleanup.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "cleanup-p", true);
+  upsertAgent(db, "cleanup-d", true);
+
+  const draft = createCaseDraft(db, {
+    prosecutionAgentId: "cleanup-p",
+    defendantAgentId: "cleanup-d",
+    openDefence: false,
+    claimSummary: "Cleanup test case.",
+    requestedRemedy: "warn"
+  });
+
+  setCaseFiled(db, {
+    caseId: draft.caseId,
+    txSig: "cleanup-test-tx",
+    warning: undefined,
+    scheduleDelaySec: 30,
+    defenceCutoffSec: 300
+  });
+  saveUsedTreasuryTx(db, {
+    txSig: "cleanup-test-tx",
+    caseId: draft.caseId,
+    agentId: "cleanup-p",
+    amountLamports: 500000
+  });
+  saveIdempotencyRecord(db, {
+    agentId: "cleanup-p",
+    method: "POST",
+    path: "/api/cases/file",
+    caseId: draft.caseId,
+    idempotencyKey: "cleanup-idempotency",
+    requestHash: "cleanup-hash",
+    responseStatus: 200,
+    responseJson: "{}",
+    ttlSec: 60
+  });
+  db.prepare(
+    `INSERT INTO agent_action_log (agent_id, action_type, case_id, signature, timestamp_sec, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run("cleanup-p", "file_case", draft.caseId, "cleanup-signature", 1_700_000_000, new Date().toISOString());
+
+  deleteCaseById(db, draft.caseId);
+
+  const usedTxCount = Number(
+    (db.prepare(`SELECT COUNT(*) AS count FROM used_treasury_txs WHERE case_id = ?`).get(draft.caseId) as { count: number })
+      .count
+  );
+  const idempotencyCount = Number(
+    (db.prepare(`SELECT COUNT(*) AS count FROM idempotency_records WHERE case_id = ?`).get(draft.caseId) as { count: number })
+      .count
+  );
+  const actionLogCount = Number(
+    (db.prepare(`SELECT COUNT(*) AS count FROM agent_action_log WHERE case_id = ?`).get(draft.caseId) as { count: number })
+      .count
+  );
+
+  assert.equal(getCaseById(db, draft.caseId), null);
+  assert.equal(usedTxCount, 0);
+  assert.equal(idempotencyCount, 0);
+  assert.equal(actionLogCount, 0);
+
+  db.close();
+}
+
 function testOpenDefenceQuery() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase41_open_defence_test.sqlite";
@@ -2425,6 +2496,7 @@ async function run() {
   testAlphaCaseDraftAndPurge();
   testShowcaseCaseSegregationAndPresentation();
   await testShowcaseReplacementFunction();
+  testDeleteCaseRemovesTreasuryAndAuxiliaryRefs();
   testOpenDefenceQuery();
   testCaseOfDayViewAggregation();
   testOpenClawToolContractParity();
