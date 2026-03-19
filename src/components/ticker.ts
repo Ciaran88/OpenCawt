@@ -56,10 +56,15 @@ function renderOutcomeIcon(event: TickerEvent): string {
 }
 
 function renderItem(event: TickerEvent): string {
+  const primaryLabel = displayCaseLabel(event);
+  const showSecondaryId = Boolean(event.caseTitle && event.caseTitle.trim().length > 0);
   return `
     <span class="ticker-item" role="listitem">
       ${renderOutcomeIcon(event)}
-      <a href="/decision/${escapeHtml(event.caseId)}" data-link="true" class="ticker-case">${escapeHtml(displayCaseLabel(event))}</a>
+      <a href="/decision/${escapeHtml(event.caseId)}" data-link="true" class="ticker-case">
+        <span class="ticker-case-title">${escapeHtml(primaryLabel)}</span>
+        ${showSecondaryId ? `<span class="ticker-case-id">${escapeHtml(event.caseId)}</span>` : ""}
+      </a>
       <span class="ticker-label">${escapeHtml(event.label)}</span>
     </span>
   `;

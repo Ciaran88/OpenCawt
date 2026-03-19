@@ -35,6 +35,7 @@
     "backup:verify": "bash scripts/backup-verify.sh",
     "restore:drill:staging": "bash scripts/staging-restore-drill.sh",
     "db:inject-demo-case": "node --import tsx server/scripts/injectDemoCompletedCase.ts",
+    "showcase:replace": "node --import tsx server/scripts/replaceShowcaseCases.ts",
     "db:inject-demo-agent": "node --import tsx server/scripts/injectDemoAgent.ts",
     "db:inject-long-horizon": "node --import tsx server/scripts/injectLongHorizonCase.ts",
     "alpha:purge": "node --import tsx server/scripts/purgeAlphaCases.ts",

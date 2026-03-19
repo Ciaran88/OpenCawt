@@ -27,6 +27,8 @@ import {
   createAgentCapability,
   createCaseDraft,
   getCaseById,
+  listClaims,
+  listDecisions,
   getMostViewedCaseLast24h,
   getCaseRuntime,
   getAgentProfile,
@@ -35,8 +37,10 @@ import {
   listAlphaCaseIds,
   listLeaderboard,
   listOpenDefenceCases,
+  listShowcaseCaseIds,
   logAgentCaseActivity,
   purgeAlphaCases,
+  purgeShowcaseCases,
   recordCaseView,
   rebuildAllAgentStats,
   revokeAgentCapabilityByHash,
@@ -63,6 +67,7 @@ import {
   validateStakeLevel
 } from "../server/services/validation";
 import { hashJurySelectionProof, hashTranscriptProjection } from "../server/services/sealHashes";
+import { toUiCase, toUiDecision } from "../server/services/presenters";
 import {
   computeCountdownState,
   computeRingDashOffset,
@@ -229,7 +234,13 @@ function testTranscriptVoteMapping() {
 
 function testTickerOutcomeMapping() {
   const events: TickerEvent[] = [
-    { id: "1", caseId: "OC-TICK-001", outcome: "for_prosecution", label: "Closed" },
+    {
+      id: "1",
+      caseId: "OC-TICK-001",
+      caseTitle: "Model copied weights from rival",
+      outcome: "for_prosecution",
+      label: "Closed"
+    },
     { id: "2", caseId: "OC-TICK-002", outcome: "for_defence", label: "Closed" },
     { id: "3", caseId: "OC-TICK-003", outcome: "void", label: "Closed" },
     // Legacy/variant values that should still render thumbs.
@@ -247,6 +258,9 @@ function testTickerOutcomeMapping() {
   assert.match(html, /class="ticker-icon icon-up"/);
   assert.match(html, /class="ticker-icon icon-down"/);
   assert.match(html, /class="ticker-icon icon-void"/);
+  assert.match(html, /Model copied weights from rival/);
+  assert.match(html, /class="ticker-case-id">OC-TICK-001</);
+  assert.match(html, /class="ticker-case-title">OC-TICK-002</);
 
   const upCount = (html.match(/class="ticker-icon icon-up"/g) ?? []).length;
   const downCount = (html.match(/class="ticker-icon icon-down"/g) ?? []).length;
@@ -1842,6 +1856,191 @@ function testAlphaCaseDraftAndPurge() {
   db.close();
 }
 
+function testShowcaseCaseSegregationAndPresentation() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_phase41_showcase_case_test.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-showcase-p", true);
+  upsertAgent(db, "agent-showcase-d", true);
+  upsertAgent(db, "agent-showcase-j", true);
+
+  const regularDraft = createCaseDraft(db, {
+    prosecutionAgentId: "agent-showcase-p",
+    defendantAgentId: "agent-showcase-d",
+    openDefence: false,
+    claimSummary: "Regular case for showcase segregation coverage.",
+    requestedRemedy: "warn"
+  });
+  const showcaseDraft = createCaseDraft(
+    db,
+    {
+      prosecutionAgentId: "agent-showcase-p",
+      defendantAgentId: "agent-showcase-d",
+      openDefence: false,
+      claimSummary: "Showcase sample case for segregation coverage.",
+      requestedRemedy: "warn"
+    },
+    {
+      showcaseSample: true,
+      sealedDisabled: true
+    }
+  );
+
+  const verdictJson = JSON.stringify({
+    overall: { outcome: "for_prosecution" },
+    claims: []
+  });
+  const closedAtIso = new Date().toISOString();
+  db.prepare(
+    `UPDATE cases
+     SET status = 'closed',
+         outcome = 'for_prosecution',
+         closed_at = ?,
+         decided_at = ?,
+         case_title = ?,
+         verdict_bundle_json = ?,
+         verdict_hash = ?
+     WHERE case_id = ?`
+  ).run(
+    closedAtIso,
+    closedAtIso,
+    "Regular Segregation Case",
+    verdictJson,
+    "hash-regular",
+    regularDraft.caseId
+  );
+  db.prepare(
+    `UPDATE cases
+     SET status = 'closed',
+         outcome = 'for_prosecution',
+         closed_at = ?,
+         decided_at = ?,
+         case_title = ?,
+         verdict_bundle_json = ?,
+         verdict_hash = ?
+     WHERE case_id = ?`
+  ).run(
+    closedAtIso,
+    closedAtIso,
+    "Sample Segregation Case",
+    verdictJson,
+    "hash-showcase",
+    showcaseDraft.caseId
+  );
+
+  for (const caseId of [regularDraft.caseId, showcaseDraft.caseId]) {
+    logAgentCaseActivity(db, {
+      agentId: "agent-showcase-p",
+      caseId,
+      role: "prosecution",
+      outcome: "for_prosecution",
+      recordedAtIso: closedAtIso
+    });
+    logAgentCaseActivity(db, {
+      agentId: "agent-showcase-d",
+      caseId,
+      role: "defence",
+      outcome: "for_prosecution",
+      recordedAtIso: closedAtIso
+    });
+    logAgentCaseActivity(db, {
+      agentId: "agent-showcase-j",
+      caseId,
+      role: "juror",
+      outcome: "for_prosecution",
+      recordedAtIso: closedAtIso
+    });
+    db.prepare(
+      `
+      INSERT INTO ballots (
+        ballot_id,
+        case_id,
+        juror_id,
+        ballot_json,
+        ballot_hash,
+        reasoning_summary,
+        vote,
+        principles_relied_on_json,
+        confidence,
+        signature,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    ).run(
+      `ballot-${caseId}`,
+      caseId,
+      "agent-showcase-j",
+      "[]",
+      `hash-${caseId}`,
+      "Showcase segregation test ballot.",
+      "for_prosecution",
+      "[]",
+      "high",
+      `sig-${caseId}`,
+      closedAtIso
+    );
+  }
+
+  rebuildAllAgentStats(db);
+
+  const prosecutionProfile = getAgentProfile(db, "agent-showcase-p", { activityLimit: 10 });
+  assert.ok(prosecutionProfile);
+  assert.equal(prosecutionProfile!.stats.prosecutionsTotal, 1);
+  assert.equal(prosecutionProfile!.recentActivity.length, 1);
+  assert.equal(prosecutionProfile!.recentActivity[0]?.caseId, regularDraft.caseId);
+
+  const jurorProfile = getAgentProfile(db, "agent-showcase-j", { activityLimit: 10 });
+  assert.ok(jurorProfile);
+  assert.equal(jurorProfile!.stats.juriesTotal, 1);
+  assert.equal(jurorProfile!.recentActivity.length, 1);
+  assert.equal(jurorProfile!.recentActivity[0]?.caseId, regularDraft.caseId);
+
+  const leaderboard = listLeaderboard(db, {
+    limit: 20,
+    minDecidedCases: 1,
+    minJuryCases: 1,
+    minProsecutionCases: 1,
+    minDefenceCases: 1
+  });
+  const prosecutionRow = leaderboard.find((row) => row.agentId === "agent-showcase-p");
+  assert.ok(prosecutionRow);
+  assert.equal(prosecutionRow!.decidedCasesTotal, 1);
+
+  const decisions = listDecisions(db);
+  const sampleDecision = decisions.find((row) => row.caseId === showcaseDraft.caseId);
+  const regularDecision = decisions.find((row) => row.caseId === regularDraft.caseId);
+  assert.equal(sampleDecision?.sampleCase, true);
+  assert.equal(regularDecision?.sampleCase, false);
+
+  const showcaseRecord = getCaseById(db, showcaseDraft.caseId);
+  assert.ok(showcaseRecord);
+  const showcaseUiCase = toUiCase({
+    caseRecord: showcaseRecord!,
+    claims: listClaims(db, showcaseDraft.caseId),
+    evidence: [],
+    submissions: [],
+    ballots: []
+  });
+  const showcaseUiDecision = toUiDecision({
+    caseRecord: showcaseRecord!,
+    claims: listClaims(db, showcaseDraft.caseId),
+    evidence: [],
+    ballots: []
+  });
+  assert.equal(showcaseUiCase.sampleCase, true);
+  assert.equal(showcaseUiDecision.sampleCase, true);
+
+  assert.deepEqual(listShowcaseCaseIds(db), [showcaseDraft.caseId]);
+  const purgeResult = purgeShowcaseCases(db);
+  assert.equal(purgeResult.deletedCount, 1);
+  assert.equal(getCaseById(db, showcaseDraft.caseId), null);
+
+  db.close();
+}
+
 function testOpenDefenceQuery() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase41_open_defence_test.sqlite";
@@ -2173,6 +2372,7 @@ async function run() {
   await testJudgeScreeningQueuedRetryAndTerminalFailure();
   testVictoryScoreAndLeaderboard();
   testAlphaCaseDraftAndPurge();
+  testShowcaseCaseSegregationAndPresentation();
   testOpenDefenceQuery();
   testCaseOfDayViewAggregation();
   testOpenClawToolContractParity();

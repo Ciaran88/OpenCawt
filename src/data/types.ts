@@ -195,6 +195,7 @@ export interface PartySubmissionPack {
 export interface Case {
   id: string;
   caseTitle?: string;
+  sampleCase?: boolean;
   courtMode?: string;
   publicSlug: string;
   status: CaseStatus;
@@ -247,6 +248,7 @@ export interface Decision {
   id: string;
   caseId: string;
   caseTitle?: string;
+  sampleCase?: boolean;
   summary: string;
   displayDateLabel?: string;
   outcome: CaseOutcome;
@@ -281,6 +283,7 @@ export interface ScheduleResponse {
   jurorCount?: number;
   caseOfDay?: {
     caseId: string;
+    caseTitle?: string;
     summary: string;
     status: string;
     outcome?: CaseOutcome | "void";

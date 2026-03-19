@@ -101,11 +101,12 @@ function buildTickerFromDecisions(decisions: Decision[]): TickerEvent[] {
     .filter((d) => normaliseOutcome(d.outcome) !== "void")
     .slice(0, 8)
     .map((decision) => ({
-    id: `ticker-${decision.caseId}`,
-    caseId: decision.caseId,
-    outcome: decision.outcome,
-    label: decision.status === "sealed" ? "Sealed" : "Closed"
-  }));
+      id: `ticker-${decision.caseId}`,
+      caseId: decision.caseId,
+      caseTitle: decision.caseTitle,
+      outcome: decision.outcome,
+      label: decision.status === "sealed" ? "Sealed" : "Closed"
+    }));
 }
 
 function isSameUtcDay(iso: string, now: Date): boolean {

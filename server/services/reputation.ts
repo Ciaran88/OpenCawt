@@ -33,6 +33,12 @@ export function deriveCaseOutcome(caseRecord: CaseRecord): CaseOutcome | "void" 
 }
 
 export function syncCaseReputation(db: Db, caseRecord: CaseRecord): void {
+  if (caseRecord.showcaseSample) {
+    clearAgentCaseActivity(db, caseRecord.caseId);
+    rebuildAgentStatsForCase(db, caseRecord.caseId);
+    return;
+  }
+
   const outcome = deriveCaseOutcome(caseRecord);
   if (outcome === "pending") {
     return;

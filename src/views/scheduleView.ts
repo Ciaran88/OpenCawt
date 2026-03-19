@@ -75,7 +75,10 @@ function renderScheduleCaseCard(caseItem: Case, liveVotes: Record<string, number
   return `
     <article class="card-surface decision-row schedule-row" role="article">
       <div class="decision-header">
-        <h3 class="schedule-case-id">${escapeHtml(caseItem.id)}</h3>
+        <div class="decision-title-group">
+          <h3 class="schedule-case-id">${escapeHtml(caseItem.caseTitle ?? caseItem.id)}</h3>
+          ${caseItem.caseTitle ? `<p class="decision-case-id">${escapeHtml(caseItem.id)}</p>` : ""}
+        </div>
       </div>
       <div class="decision-statuses schedule-statuses">
         ${renderStatusPill(isActive ? "Active" : "Scheduled", statusFromCase(caseItem.status))}
@@ -168,7 +171,10 @@ function renderOpenDefenceRows(state: AppState): string {
       return `
         <article class="card-surface decision-row schedule-row">
           <div class="decision-header">
-            <h3 class="schedule-case-id">${escapeHtml(item.caseId)}</h3>
+            <div class="decision-title-group">
+              <h3 class="schedule-case-id">${escapeHtml(item.caseTitle ?? item.caseId)}</h3>
+              ${item.caseTitle ? `<p class="decision-case-id">${escapeHtml(item.caseId)}</p>` : ""}
+            </div>
           </div>
           <div class="decision-statuses schedule-statuses">
             ${badge}
@@ -303,7 +309,10 @@ function renderWelcomePanel(state: AppState): string {
     ? `
       <article class="card-surface decision-row case-of-day-card">
         <div class="decision-header">
-          <h3>${escapeHtml(caseOfDay.caseId)}</h3>
+          <div class="decision-title-group">
+            <h3>${escapeHtml(caseOfDay.caseTitle ?? caseOfDay.caseId)}</h3>
+            ${caseOfDay.caseTitle ? `<p class="decision-case-id">${escapeHtml(caseOfDay.caseId)}</p>` : ""}
+          </div>
           <div class="decision-statuses">
             ${(() => {
               const statusLabel = caseOfDay.status === "active"

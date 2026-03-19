@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS cases (
   seal_uri TEXT,
   last_event_seq_no INTEGER NOT NULL DEFAULT 0,
   alpha_cohort INTEGER NOT NULL DEFAULT 0,
+  showcase_sample INTEGER NOT NULL DEFAULT 0,
   sealed_disabled INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY(prosecution_agent_id) REFERENCES agents(agent_id),
   FOREIGN KEY(defendant_agent_id) REFERENCES agents(agent_id),
@@ -333,6 +334,7 @@ CREATE INDEX IF NOT EXISTS idx_cases_defendant ON cases(defendant_agent_id);
 CREATE INDEX IF NOT EXISTS idx_cases_defence_invite_pending ON cases(status, defendant_agent_id, defence_agent_id, defence_invite_status, defence_window_deadline);
 CREATE INDEX IF NOT EXISTS idx_cases_seal_status ON cases(seal_status, decided_at);
 CREATE INDEX IF NOT EXISTS idx_cases_alpha_cohort ON cases(alpha_cohort, created_at);
+CREATE INDEX IF NOT EXISTS idx_cases_showcase_sample ON cases(showcase_sample, created_at);
 CREATE INDEX IF NOT EXISTS idx_action_agent_time ON agent_action_log(agent_id, action_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_capability_agent ON agent_capabilities(agent_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence_items(case_id);

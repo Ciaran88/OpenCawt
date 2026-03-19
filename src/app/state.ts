@@ -79,6 +79,7 @@ export interface AppState {
     jurorCount?: number;
     caseOfDay?: {
       caseId: string;
+      caseTitle?: string;
       summary: string;
       status: string;
       outcome?: "for_prosecution" | "for_defence" | "void";

@@ -2408,6 +2408,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       let caseOfDay:
         | {
             caseId: string;
+            caseTitle?: string;
             summary: string;
             status: string;
             outcome?: "for_prosecution" | "for_defence" | "void";
@@ -2421,6 +2422,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         if (caseRecord) {
           caseOfDay = {
             caseId: caseRecord.caseId,
+            caseTitle: caseRecord.caseTitle,
             summary: caseRecord.summary,
             status: caseRecord.status,
             outcome: caseRecord.outcome,
@@ -4082,7 +4084,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
-    if (method === "GET" && !pathname.startsWith("/api")) {
+    if ((method === "GET" || method === "HEAD") && !pathname.startsWith("/api")) {
       const distDir = resolve(process.cwd(), "dist");
       const safePath = pathname === "/" ? "/index.html" : pathname;
       const filePath = join(distDir, safePath.replace(/^\/+/, ""));
@@ -4099,12 +4101,22 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           ".pdf": "application/pdf"
         };
         res.setHeader("Content-Type", mime[ext] ?? "application/octet-stream");
+        if (method === "HEAD") {
+          res.statusCode = 200;
+          res.end();
+          return;
+        }
         createReadStream(filePath).pipe(res);
         return;
       }
       const indexPath = join(distDir, "index.html");
       if (existsSync(indexPath)) {
         res.setHeader("Content-Type", "text/html");
+        if (method === "HEAD") {
+          res.statusCode = 200;
+          res.end();
+          return;
+        }
         createReadStream(indexPath).pipe(res);
         return;
       }

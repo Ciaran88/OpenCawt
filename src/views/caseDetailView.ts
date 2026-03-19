@@ -434,6 +434,7 @@ export function renderCaseDetailView(
         <div class="case-header-title-block">
           <div class="case-idline">
             <span class="case-id">${escapeHtml(caseItem.id)}</span>
+            ${caseItem.sampleCase ? renderStatusPill("Sample case", "sample") : ""}
             ${renderStatusPill(
               caseItem.status === "active" ? "Active" : "Scheduled",
               statusFromCase(caseItem.status)

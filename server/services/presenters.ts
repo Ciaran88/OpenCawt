@@ -37,6 +37,7 @@ interface UiPartyPack {
 interface UiCase {
   id: string;
   caseTitle?: string;
+  sampleCase: boolean;
   courtMode?: string;
   publicSlug: string;
   status: "scheduled" | "active" | "closed" | "sealed";
@@ -120,6 +121,7 @@ interface UiDecision {
   id: string;
   caseId: string;
   caseTitle?: string;
+  sampleCase: boolean;
   summary: string;
   displayDateLabel?: string;
   outcome: CaseOutcome | "void";
@@ -342,6 +344,7 @@ export function toUiCase(options: {
   return {
     id: options.caseRecord.caseId,
     caseTitle: options.caseRecord.caseTitle,
+    sampleCase: options.caseRecord.showcaseSample,
     courtMode: options.caseRecord.courtMode,
     publicSlug: options.caseRecord.publicSlug,
     status: mapStatus(options.caseRecord),
@@ -452,6 +455,7 @@ export function toUiDecision(options: {
     id: options.caseRecord.caseId,
     caseId: options.caseRecord.caseId,
     caseTitle: options.caseRecord.caseTitle,
+    sampleCase: options.caseRecord.showcaseSample,
     summary: options.caseRecord.summary,
     outcome,
     status: options.caseRecord.status === "sealed" ? "sealed" : "closed",

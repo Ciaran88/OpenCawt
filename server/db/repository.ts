@@ -252,6 +252,7 @@ export interface CaseRecord {
   courtMode: CourtMode;
   caseTitle?: string;
   alphaCohort: boolean;
+  showcaseSample: boolean;
   judgeScreeningStatus?: "pending" | "pending_retry" | "approved" | "rejected" | "failed";
   judgeScreeningReason?: string;
   judgeRemedyRecommendation?: string;
@@ -494,6 +495,24 @@ export function listAlphaCaseIds(db: Db): string[] {
   return rows.map((row) => row.case_id);
 }
 
+export function listShowcaseCaseIds(db: Db): string[] {
+  const rows = db
+    .prepare(`SELECT case_id FROM cases WHERE showcase_sample = 1 ORDER BY created_at ASC`)
+    .all() as Array<{ case_id: string }>;
+  return rows.map((row) => row.case_id);
+}
+
+export function purgeShowcaseCases(db: Db): { deletedCount: number; caseIds: string[] } {
+  const caseIds = listShowcaseCaseIds(db);
+  for (const caseId of caseIds) {
+    deleteCaseById(db, caseId);
+  }
+  return {
+    deletedCount: caseIds.length,
+    caseIds
+  };
+}
+
 export function purgeAlphaCases(db: Db): { deletedCount: number; caseIds: string[] } {
   const caseIds = listAlphaCaseIds(db);
   for (const caseId of caseIds) {
@@ -632,7 +651,7 @@ export function setJurorAvailability(
 export function createCaseDraft(
   db: Db,
   payload: CreateCaseDraftPayload,
-  options?: { alphaCohort?: boolean; sealedDisabled?: boolean }
+  options?: { alphaCohort?: boolean; sealedDisabled?: boolean; showcaseSample?: boolean }
 ): { caseId: string; createdAtIso: string } {
   const caseId = createCaseId("D");
   const publicSlug = createSlug(caseId);
@@ -640,6 +659,7 @@ export function createCaseDraft(
   const summary = payload.claimSummary ?? payload.claims?.[0]?.claimSummary ?? "";
   const alphaCohort = options?.alphaCohort === true;
   const sealedDisabled = options?.sealedDisabled === true;
+  const showcaseSample = options?.showcaseSample === true;
 
   db.prepare(
     `
@@ -662,11 +682,12 @@ export function createCaseDraft(
       stake_level,
       summary,
       requested_remedy,
-      created_at,
-      agreement_code,
-      alpha_cohort,
-      sealed_disabled
-    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, 'none', 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+          created_at,
+          agreement_code,
+          alpha_cohort,
+          showcase_sample,
+          sealed_disabled
+    ) VALUES (?, ?, 'draft', 'pre_session', ?, ?, ?, ?, ?, ?, 'none', 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
   ).run(
     caseId,
@@ -685,6 +706,7 @@ export function createCaseDraft(
     ((payload as CreateCaseDraftPayload & { agreementCode?: string }).agreementCode ?? "")
       .trim() || null,
     alphaCohort ? 1 : 0,
+    showcaseSample ? 1 : 0,
     sealedDisabled ? 1 : 0
   );
 
@@ -808,6 +830,7 @@ function mapCaseRow(row: Record<string, unknown>): CaseRecord {
     courtMode: (String(row.court_mode ?? "judge") as CourtMode),
     caseTitle: row.case_title ? String(row.case_title) : undefined,
     alphaCohort: Number(row.alpha_cohort ?? 0) === 1,
+    showcaseSample: Number(row.showcase_sample ?? 0) === 1,
     judgeScreeningStatus: row.judge_screening_status
       ? (String(row.judge_screening_status) as
           | "pending"
@@ -895,6 +918,7 @@ export function getCaseById(db: Db, caseId: string): CaseRecord | null {
         judge_remedy_recommendation,
         agreement_code,
         alpha_cohort,
+        showcase_sample,
         sealed_disabled
       FROM cases
       WHERE case_id = ?
@@ -981,6 +1005,7 @@ export function listCasesByStatuses(db: Db, statuses: string[]): CaseRecord[] {
         judge_remedy_recommendation,
         agreement_code,
         alpha_cohort,
+        showcase_sample,
         sealed_disabled
       FROM cases
       WHERE status IN (${placeholders})
@@ -1031,7 +1056,7 @@ export function listVoidedCases(
           jury_selection_proof_hash, ruleset_version, seal_status, seal_error, metadata_uri,
           verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, filing_warning, court_mode,
           case_title, judge_screening_status, judge_screening_reason, judge_remedy_recommendation,
-          agreement_code, alpha_cohort, sealed_disabled
+          agreement_code, alpha_cohort, showcase_sample, sealed_disabled
         FROM cases
         WHERE status = 'void'
         ORDER BY COALESCE(voided_at, decided_at, closed_at, created_at) DESC
@@ -1474,7 +1499,8 @@ export function claimDefenceAssignment(
           case_title,
           judge_screening_status,
           judge_screening_reason,
-          judge_remedy_recommendation
+          judge_remedy_recommendation,
+          showcase_sample
         FROM cases
         WHERE case_id = ?
         LIMIT 1
@@ -3004,7 +3030,8 @@ export function listOpenDefenceCases(
         case_title,
         judge_screening_status,
         judge_screening_reason,
-        judge_remedy_recommendation
+        judge_remedy_recommendation,
+        showcase_sample
       FROM cases
       WHERE ${where.join(" AND ")}
       ORDER BY COALESCE(scheduled_for, created_at) ASC
@@ -3088,6 +3115,7 @@ export function listAgentActivity(db: Db, agentId: string, limit = 20): AgentAct
       FROM agent_case_activity a
       LEFT JOIN cases c ON c.case_id = a.case_id
       WHERE a.agent_id = ?
+        AND COALESCE(c.showcase_sample, 0) = 0
       ORDER BY a.recorded_at DESC
       LIMIT ?
       `
@@ -3118,9 +3146,13 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
       `
       SELECT
         COUNT(*) AS total,
-        SUM(CASE WHEN outcome = 'for_prosecution' THEN 1 ELSE 0 END) AS wins
-      FROM agent_case_activity
-      WHERE agent_id = ? AND role = 'prosecution' AND outcome IN ('for_prosecution','for_defence')
+        SUM(CASE WHEN a.outcome = 'for_prosecution' THEN 1 ELSE 0 END) AS wins
+      FROM agent_case_activity a
+      INNER JOIN cases c ON c.case_id = a.case_id
+      WHERE a.agent_id = ?
+        AND a.role = 'prosecution'
+        AND a.outcome IN ('for_prosecution','for_defence')
+        AND COALESCE(c.showcase_sample, 0) = 0
       `
     )
     .get(agentId) as { total: number; wins: number | null };
@@ -3130,9 +3162,13 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
       `
       SELECT
         COUNT(*) AS total,
-        SUM(CASE WHEN outcome = 'for_defence' THEN 1 ELSE 0 END) AS wins
-      FROM agent_case_activity
-      WHERE agent_id = ? AND role = 'defence' AND outcome IN ('for_prosecution','for_defence')
+        SUM(CASE WHEN a.outcome = 'for_defence' THEN 1 ELSE 0 END) AS wins
+      FROM agent_case_activity a
+      INNER JOIN cases c ON c.case_id = a.case_id
+      WHERE a.agent_id = ?
+        AND a.role = 'defence'
+        AND a.outcome IN ('for_prosecution','for_defence')
+        AND COALESCE(c.showcase_sample, 0) = 0
       `
     )
     .get(agentId) as { total: number; wins: number | null };
@@ -3141,8 +3177,12 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
     .prepare(
       `
       SELECT COUNT(*) AS total
-      FROM agent_case_activity
-      WHERE agent_id = ? AND role = 'juror' AND outcome != 'pending'
+      FROM agent_case_activity a
+      INNER JOIN cases c ON c.case_id = a.case_id
+      WHERE a.agent_id = ?
+        AND a.role = 'juror'
+        AND a.outcome != 'pending'
+        AND COALESCE(c.showcase_sample, 0) = 0
       `
     )
     .get(agentId) as { total: number };
@@ -3166,13 +3206,20 @@ function rebuildAgentStatsForAgent(db: Db, agentId: string): AgentStats {
       WHERE b.juror_id = ?
         AND c.outcome IN ('for_prosecution', 'for_defence')
         AND b.vote IN ('for_prosecution', 'for_defence')
+        AND COALESCE(c.showcase_sample, 0) = 0
       `
     )
     .get(agentId) as { total: number; winning_total: number | null };
 
   const lastActiveRow = db
     .prepare(
-      `SELECT MAX(recorded_at) AS last_active_at FROM agent_case_activity WHERE agent_id = ?`
+      `
+      SELECT MAX(a.recorded_at) AS last_active_at
+      FROM agent_case_activity a
+      INNER JOIN cases c ON c.case_id = a.case_id
+      WHERE a.agent_id = ?
+        AND COALESCE(c.showcase_sample, 0) = 0
+      `
     )
     .get(agentId) as { last_active_at: string | null };
 
@@ -3727,6 +3774,7 @@ export function saveIdempotencyRecord(
 export function listDecisions(db: Db): Array<{
   caseId: string;
   caseTitle?: string;
+  sampleCase: boolean;
   summary: string;
   status: "closed" | "sealed" | "void";
   outcome: "for_prosecution" | "for_defence" | "void";
@@ -3740,7 +3788,7 @@ export function listDecisions(db: Db): Array<{
   const rows = db
     .prepare(
       `
-      SELECT case_id, case_title, summary, status, closed_at, decided_at, outcome, verdict_hash, verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, void_reason, created_at, voided_at
+      SELECT case_id, case_title, showcase_sample, summary, status, closed_at, decided_at, outcome, verdict_hash, verdict_bundle_json, seal_asset_id, seal_tx_sig, seal_uri, void_reason, created_at, voided_at
       FROM cases
       WHERE status IN ('closed', 'sealed', 'void')
       ORDER BY COALESCE(decided_at, closed_at, voided_at, created_at) DESC
@@ -3749,6 +3797,7 @@ export function listDecisions(db: Db): Array<{
     .all() as Array<{
     case_id: string;
     case_title: string | null;
+    showcase_sample: number | null;
     summary: string;
     status: "closed" | "sealed" | "void";
     closed_at: string | null;
@@ -3775,11 +3824,12 @@ export function listDecisions(db: Db): Array<{
       (row.status === "void"
         ? "void"
         : ((bundle.overall?.outcome as "for_prosecution" | "for_defence" | undefined) ?? "void"));
-    return {
-      caseId: row.case_id,
-      caseTitle: row.case_title ?? undefined,
-      summary: row.summary,
-      status: row.status,
+      return {
+        caseId: row.case_id,
+        caseTitle: row.case_title ?? undefined,
+        sampleCase: Number(row.showcase_sample ?? 0) === 1,
+        summary: row.summary,
+        status: row.status,
       outcome,
       closedAtIso: row.decided_at ?? row.closed_at ?? row.voided_at ?? row.created_at,
       verdictHash: row.verdict_hash ?? "",

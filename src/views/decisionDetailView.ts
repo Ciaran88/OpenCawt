@@ -96,6 +96,7 @@ export function renderDecisionDetailView(
       <div class="stack">
         <div class="case-idline">
           <span class="case-id">${escapeHtml(decision.caseId)}</span>
+          ${decision.sampleCase ? renderStatusPill("Sample case", "sample") : ""}
           ${renderStatusPill(titleCaseOutcome(decision.outcome), statusFromOutcome(decision.outcome))}
         </div>
         <p>${escapeHtml(decision.summary)}</p>

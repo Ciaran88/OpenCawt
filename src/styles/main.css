@@ -947,16 +947,33 @@ label > span {
   gap: var(--space-3);
 }
 
-.decision-row h3 {
-  margin: 0;
+.decision-title-group {
+  display: flex;
   flex: 1;
   min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.decision-row h3 {
+  margin: 0;
   font-size: 1rem;
   font-weight: 600;
   color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.decision-case-id {
+  margin: 0;
+  font-size: 0.73rem;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
 }
 
 .decision-statuses {
@@ -1312,7 +1329,7 @@ label > span {
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
-  word-break: break-all;
+  word-break: break-word;
   line-height: 1.35;
 }
 
@@ -1562,6 +1579,12 @@ select:focus {
   background-color: rgba(255, 61, 0, 0.15);
   color: #ff8a65;
   border-color: rgba(255, 61, 0, 0.3);
+}
+
+.status-sample {
+  background-color: rgba(255, 215, 0, 0.12);
+  color: var(--accent-gold);
+  border-color: rgba(255, 215, 0, 0.28);
 }
 
 /* Utility */
@@ -3344,10 +3367,27 @@ select:focus {
 }
 
 .ticker-case {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
   font-weight: 600;
   color: var(--text-primary);
   margin-right: var(--space-2);
   text-decoration: none;
+}
+
+.ticker-case-title {
+  min-width: 0;
+}
+
+.ticker-case-id {
+  font-size: 0.72rem;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  font-weight: 600;
 }
 
 .ticker-case:hover {

@@ -79,8 +79,12 @@ export function renderPastDecisionsView(state: AppState): string {
       return `
         <a href="/decision/${encodeURIComponent(decision.caseId)}" class="card-surface decision-row">
           <div class="decision-header">
-            <h3>${escapeHtml(decision.caseId)}</h3>
+            <div class="decision-title-group">
+              <h3>${escapeHtml(decision.caseTitle ?? decision.caseId)}</h3>
+              ${decision.caseTitle ? `<p class="decision-case-id">${escapeHtml(decision.caseId)}</p>` : ""}
+            </div>
             <div class="decision-statuses">
+              ${decision.sampleCase ? renderStatusPill("Sample case", "sample") : ""}
               ${renderStatusPill(titleCaseOutcome(normalisedOutcome), statusFromOutcome(normalisedOutcome))}
               ${renderStatusPill(decision.status === "sealed" ? "Sealed" : "Closed", decision.status)}
             </div>

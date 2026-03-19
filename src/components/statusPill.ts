@@ -8,7 +8,8 @@ export type StatusPillVariant =
   | "closed"
   | "void"
   | "prosecution"
-  | "defence";
+  | "defence"
+  | "sample";
 
 export function renderStatusPill(label: string, variant: StatusPillVariant): string {
   return `<span class="status-pill status-${variant}">${escapeHtml(label)}</span>`;
