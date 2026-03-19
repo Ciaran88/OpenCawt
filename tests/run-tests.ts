@@ -57,6 +57,7 @@ import {
 import { createJudgeService } from "../server/services/judge";
 import { createLogger } from "../server/services/observability";
 import { createDrandClient } from "../server/services/drand";
+import { replaceShowcaseCases } from "../server/scripts/replaceShowcaseCases";
 import {
   normalisePrincipleIds,
   truncateCaseTitle,
@@ -2041,6 +2042,56 @@ function testShowcaseCaseSegregationAndPresentation() {
   db.close();
 }
 
+async function testShowcaseReplacementFunction() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_showcase_replace_function.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "legacy-p", true);
+  upsertAgent(db, "legacy-d", true);
+
+  const legacyDraft = createCaseDraft(db, {
+    prosecutionAgentId: "legacy-p",
+    defendantAgentId: "legacy-d",
+    openDefence: false,
+    claimSummary: "Legacy demo decision to be removed by showcase replacement.",
+    requestedRemedy: "warn"
+  });
+
+  const closedAtIso = new Date().toISOString();
+  db.prepare(
+    `UPDATE cases
+     SET status = 'closed',
+         outcome = 'for_prosecution',
+         closed_at = ?,
+         decided_at = ?,
+         case_title = ?
+     WHERE case_id = ?`
+  ).run(closedAtIso, closedAtIso, "Legacy Demo Case", legacyDraft.caseId);
+
+  const dryRun = await replaceShowcaseCases(db, {
+    dryRun: true,
+    deleteCaseIds: [legacyDraft.caseId]
+  });
+  assert.equal(dryRun.dryRun, true);
+  assert.equal(dryRun.beforeDecisionCount, 1);
+  assert.deepEqual(dryRun.explicitDeleteCaseIds, [legacyDraft.caseId]);
+  assert.equal(dryRun.scenarios?.length, 7);
+
+  const replaced = await replaceShowcaseCases(db, {
+    deleteCaseIds: [legacyDraft.caseId]
+  });
+  assert.equal(replaced.dryRun, false);
+  assert.deepEqual(replaced.deletedExplicitCaseIds, [legacyDraft.caseId]);
+  assert.equal(replaced.inserted?.length, 7);
+  assert.equal(listShowcaseCaseIds(db).length, 7);
+  assert.equal(listDecisions(db).length, 7);
+
+  db.close();
+}
+
 function testOpenDefenceQuery() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase41_open_defence_test.sqlite";
@@ -2373,6 +2424,7 @@ async function run() {
   testVictoryScoreAndLeaderboard();
   testAlphaCaseDraftAndPurge();
   testShowcaseCaseSegregationAndPresentation();
+  await testShowcaseReplacementFunction();
   testOpenDefenceQuery();
   testCaseOfDayViewAggregation();
   testOpenClawToolContractParity();

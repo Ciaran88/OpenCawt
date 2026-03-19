@@ -4,6 +4,15 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { getConfig } from "../config";
 
+export interface BackupResult {
+  ok: true;
+  dbPath: string;
+  backupPath: string;
+  checksum: string;
+  retentionCount: number;
+  pruned: number;
+}
+
 function timestampStamp(date = new Date()): string {
   const yyyy = String(date.getUTCFullYear());
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
@@ -42,8 +51,7 @@ function pruneBackups(backupDir: string, retentionCount: number): number {
   return extra.length;
 }
 
-async function run(): Promise<void> {
-  const config = getConfig();
+export async function createDatabaseBackup(config = getConfig()): Promise<BackupResult> {
   mkdirSync(config.backupDir, { recursive: true });
 
   const filename = `opencawt-backup-${timestampStamp()}.sqlite`;
@@ -63,20 +71,19 @@ async function run(): Promise<void> {
   writeFileSync(checksumFile, `${checksum}  ${basename(backupPath)}\n`, "utf8");
 
   const pruned = pruneBackups(config.backupDir, config.backupRetentionCount);
-  process.stdout.write(
-    JSON.stringify(
-      {
-        ok: true,
-        dbPath: config.dbPath,
-        backupPath,
-        checksum,
-        retentionCount: config.backupRetentionCount,
-        pruned
-      },
-      null,
-      2
-    ) + "\n"
-  );
+  return {
+    ok: true,
+    dbPath: config.dbPath,
+    backupPath,
+    checksum,
+    retentionCount: config.backupRetentionCount,
+    pruned
+  };
+}
+
+async function run(): Promise<void> {
+  const result = await createDatabaseBackup();
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
 run().catch((error) => {

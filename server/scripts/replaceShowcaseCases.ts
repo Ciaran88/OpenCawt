@@ -58,6 +58,25 @@ interface CliOptions {
   dryRun: boolean;
 }
 
+export interface ShowcaseReplaceOptions {
+  deleteCaseIds?: string[];
+  dryRun?: boolean;
+}
+
+export interface ShowcaseReplaceResult {
+  dryRun: boolean;
+  beforeDecisionCount: number;
+  existingShowcaseCaseIds?: string[];
+  explicitDeleteCaseIds: string[];
+  missingExplicitDeleteCaseIds: string[];
+  scenarios?: Array<{ id: string; title: string; expectedOutcome: CaseOutcome }>;
+  deletedShowcaseCount?: number;
+  deletedShowcaseCaseIds?: string[];
+  deletedExplicitCaseIds?: string[];
+  inserted?: Array<{ caseId: string; title: string }>;
+  afterDecisionCount?: number;
+}
+
 interface Chronology {
   draftAtIso: string;
   filedAtIso: string;
@@ -1116,68 +1135,67 @@ async function seedScenario(
   };
 }
 
+export async function replaceShowcaseCases(
+  db: ReturnType<typeof openDatabase>,
+  options: ShowcaseReplaceOptions = {}
+): Promise<ShowcaseReplaceResult> {
+  const deleteCaseIds = [...new Set((options.deleteCaseIds ?? []).filter(Boolean))];
+  const dryRun = options.dryRun === true;
+  const existingDecisionIds = listDecisions(db).map((row) => row.caseId);
+  const existingDeleteIds = deleteCaseIds.filter((caseId) => existingDecisionIds.includes(caseId));
+  const missingDeleteIds = deleteCaseIds.filter((caseId) => !existingDecisionIds.includes(caseId));
+  const existingShowcaseCaseIds = listShowcaseCaseIds(db);
+
+  if (dryRun) {
+    return {
+      dryRun: true,
+      beforeDecisionCount: existingDecisionIds.length,
+      existingShowcaseCaseIds,
+      explicitDeleteCaseIds: existingDeleteIds,
+      missingExplicitDeleteCaseIds: missingDeleteIds,
+      scenarios: SHOWCASE_SCENARIOS.map((scenario) => ({
+        id: scenario.id,
+        title: scenario.title,
+        expectedOutcome: scenario.expectedOutcome
+      }))
+    };
+  }
+
+  const deletedShowcase = purgeShowcaseCases(db);
+
+  for (const caseId of existingDeleteIds) {
+    deleteCaseById(db, caseId);
+  }
+
+  const jurorIds = await ensureShowcaseAgents(db);
+  const inserted: Array<{ caseId: string; title: string }> = [];
+  for (const [index, scenario] of SHOWCASE_SCENARIOS.entries()) {
+    inserted.push(await seedScenario(db, scenario, index, jurorIds));
+  }
+
+  rebuildAllAgentStats(db);
+  const afterDecisionCount = listDecisions(db).length;
+  return {
+    dryRun: false,
+    beforeDecisionCount: existingDecisionIds.length,
+    explicitDeleteCaseIds: existingDeleteIds,
+    missingExplicitDeleteCaseIds: missingDeleteIds,
+    deletedShowcaseCount: deletedShowcase.deletedCount,
+    deletedShowcaseCaseIds: deletedShowcase.caseIds,
+    deletedExplicitCaseIds: existingDeleteIds,
+    inserted,
+    afterDecisionCount
+  };
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const config = getConfig();
   const db = openDatabase(config);
 
   try {
-    const existingDecisionIds = listDecisions(db).map((row) => row.caseId);
-    const existingDeleteIds = options.deleteCaseIds.filter((caseId) => existingDecisionIds.includes(caseId));
-    const missingDeleteIds = options.deleteCaseIds.filter((caseId) => !existingDecisionIds.includes(caseId));
-    const existingShowcaseCaseIds = listShowcaseCaseIds(db);
-
-    if (options.dryRun) {
-      process.stdout.write(
-        `${JSON.stringify(
-          {
-            dryRun: true,
-            beforeDecisionCount: existingDecisionIds.length,
-            existingShowcaseCaseIds,
-            explicitDeleteCaseIds: existingDeleteIds,
-            missingExplicitDeleteCaseIds: missingDeleteIds,
-            scenarios: SHOWCASE_SCENARIOS.map((scenario) => ({
-              id: scenario.id,
-              title: scenario.title,
-              expectedOutcome: scenario.expectedOutcome
-            }))
-          },
-          null,
-          2
-        )}\n`
-      );
-      return;
-    }
-
-    const deletedShowcase = purgeShowcaseCases(db);
-
-    for (const caseId of existingDeleteIds) {
-      deleteCaseById(db, caseId);
-    }
-
-    const jurorIds = await ensureShowcaseAgents(db);
-    const inserted: Array<{ caseId: string; title: string }> = [];
-    for (const [index, scenario] of SHOWCASE_SCENARIOS.entries()) {
-      inserted.push(await seedScenario(db, scenario, index, jurorIds));
-    }
-
-    rebuildAllAgentStats(db);
-    const afterDecisionCount = listDecisions(db).length;
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          dryRun: false,
-          deletedShowcaseCount: deletedShowcase.deletedCount,
-          deletedShowcaseCaseIds: deletedShowcase.caseIds,
-          deletedExplicitCaseIds: existingDeleteIds,
-          missingExplicitDeleteCaseIds: missingDeleteIds,
-          inserted,
-          afterDecisionCount
-        },
-        null,
-        2
-      )}\n`
-    );
+    const result = await replaceShowcaseCases(db, options);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } finally {
     db.close();
   }

@@ -1,0 +1,67 @@
+name: showcase-replace
+
+on:
+  workflow_dispatch:
+
+jobs:
+  replace-showcase:
+    runs-on: ubuntu-latest
+    env:
+      API_URL: ${{ secrets.PRODUCTION_API_URL }}
+      SYSTEM_API_KEY: ${{ secrets.PRODUCTION_SYSTEM_API_KEY }}
+    steps:
+      - name: Check showcase replace inputs
+        run: |
+          missing=()
+          for key in API_URL SYSTEM_API_KEY; do
+            if [ -z "${!key}" ]; then
+              missing+=("$key")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required showcase replace vars: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Fetch current production decisions
+        run: |
+          curl -fsS "$API_URL/api/decisions" > decisions-before.json
+          jq '{count:length, ids:[.[].caseId], sampleCount:([.[] | select(.sampleCase == true)] | length)}' decisions-before.json
+          count="$(jq 'length' decisions-before.json)"
+          if [ "$count" -ne 7 ]; then
+            echo "Expected exactly 7 production decisions to replace, found $count." >&2
+            exit 1
+          fi
+
+      - name: Dry run showcase replacement
+        run: |
+          delete_ids_json="$(jq '[.[].caseId]' decisions-before.json)"
+          jq -n --argjson deleteCaseIds "$delete_ids_json" '{dryRun:true, deleteCaseIds:$deleteCaseIds}' > showcase-dry-run.json
+          curl -fsS "$API_URL/api/internal/showcase/replace-cases" \
+            -H "Content-Type: application/json" \
+            -H "X-System-Key: $SYSTEM_API_KEY" \
+            --data @showcase-dry-run.json > showcase-dry-run-response.json
+          jq . showcase-dry-run-response.json
+
+      - name: Execute showcase replacement
+        run: |
+          delete_ids_json="$(jq '[.[].caseId]' decisions-before.json)"
+          jq -n --argjson deleteCaseIds "$delete_ids_json" '{dryRun:false, backupFirst:true, deleteCaseIds:$deleteCaseIds}' > showcase-replace.json
+          curl -fsS "$API_URL/api/internal/showcase/replace-cases" \
+            -H "Content-Type: application/json" \
+            -H "X-System-Key: $SYSTEM_API_KEY" \
+            --data @showcase-replace.json > showcase-replace-response.json
+          jq . showcase-replace-response.json
+
+      - name: Verify replacement data
+        run: |
+          curl -fsS "$API_URL/api/decisions" > decisions-after.json
+          jq '{count:length, ids:[.[].caseId], sampleCount:([.[] | select(.sampleCase == true)] | length), latest:(.[0] // null | {caseId,caseTitle,closedAtIso})}' decisions-after.json
+          jq -e 'length == 7' decisions-after.json >/dev/null
+          jq -e 'all(.[]; .sampleCase == true)' decisions-after.json >/dev/null
+          jq -e 'all(.[]; (.caseTitle // "") | length > 0)' decisions-after.json >/dev/null
+          newest_case_id="$(jq -r '.[0].caseId' decisions-after.json)"
+          curl -fsS "$API_URL/api/cases/${newest_case_id}/transcript" > transcript-check.json
+          jq -e '.events | length > 0' transcript-check.json >/dev/null
+          jq -e '[.events[].messageText] | any(test("I hereby vote:"))' transcript-check.json >/dev/null
+          jq -e '[.events[].messageText] | all(contains("Evidence item submitted.") | not)' transcript-check.json >/dev/null

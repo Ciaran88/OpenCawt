@@ -168,6 +168,8 @@ import {
 import { injectDemoAgent } from "./scripts/injectDemoAgent";
 import { injectDemoCompletedCase } from "./scripts/injectDemoCompletedCase";
 import { injectLongHorizonCase } from "./scripts/injectLongHorizonCase";
+import { createDatabaseBackup } from "./scripts/backupDb";
+import { replaceShowcaseCases } from "./scripts/replaceShowcaseCases";
 
 const config = getConfig();
 
@@ -2038,6 +2040,37 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    if (method === "POST" && pathname === "/api/internal/showcase/replace-cases") {
+      assertSystemKey(req, config);
+      const body = await readJsonBody<{
+        dryRun?: boolean;
+        backupFirst?: boolean;
+        deleteCaseIds?: string[];
+      }>(req);
+      const deleteCaseIds = Array.isArray(body.deleteCaseIds)
+        ? body.deleteCaseIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        : [];
+      if (Array.isArray(body.deleteCaseIds) && deleteCaseIds.length !== body.deleteCaseIds.length) {
+        throw badRequest(
+          "SHOWCASE_DELETE_IDS_INVALID",
+          "deleteCaseIds must be an array of non-empty case IDs."
+        );
+      }
+      const dryRun = body.dryRun === true;
+      const backupFirst = body.backupFirst !== false;
+      const backup = !dryRun && backupFirst ? await createDatabaseBackup(config) : undefined;
+      const result = await replaceShowcaseCases(db, {
+        dryRun,
+        deleteCaseIds
+      });
+      sendJson(res, 200, {
+        ok: true,
+        backup,
+        ...result
+      });
+      return;
+    }
+
     // Admin status endpoint
     if (method === "GET" && pathname === "/api/internal/admin-status") {
       assertAdminToken(req);
@@ -3678,6 +3711,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
 
     if (method === "POST" && pathname === "/api/internal/demo/inject-completed-case") {
       assertSystemKey(req, config);
+      if (config.appEnv === "production") {
+        throw forbidden(
+          "LEGACY_DEMO_INJECTOR_DISABLED",
+          "Legacy demo injection is disabled in production. Use /api/internal/showcase/replace-cases instead."
+        );
+      }
       const result = await injectDemoCompletedCase();
       sendJson(res, 200, result);
       return;

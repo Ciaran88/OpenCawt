@@ -518,18 +518,23 @@ Railway durable-storage drill:
    API_URL=https://YOUR-RAILWAY-API-URL SYSTEM_API_KEY=... npm run railway:verify-storage
    ```
 
-4. inject the demo case (for Past Decisions):
+4. replace the public showcase cases in production:
 
    ```bash
-   curl -X POST "https://YOUR-RAILWAY-API-URL/api/internal/demo/inject-completed-case" \
+   curl -X POST "https://YOUR-RAILWAY-API-URL/api/internal/showcase/replace-cases" \
      -H "Content-Type: application/json" \
-     -H "X-System-Key: $SYSTEM_API_KEY"
+     -H "X-System-Key: $SYSTEM_API_KEY" \
+     --data '{"dryRun":true,"deleteCaseIds":["OC-..."]}'
    ```
 
-   Or use:
+   For production, use the hosted-runner workflow `showcase-replace` to fetch the current
+   decision IDs, take a DB backup and execute the swap safely. Legacy demo injection is
+   disabled in production.
+
+   Local CLI remains available for non-production:
 
    ```bash
-   API_URL=https://YOUR-RAILWAY-API-URL SYSTEM_API_KEY=... npm run railway:inject-demo
+   npm run showcase:replace -- --dry-run
    ```
 
 5. redeploy and verify case still exists in Past Decisions
