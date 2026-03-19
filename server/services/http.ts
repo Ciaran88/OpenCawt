@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { isIP } from "node:net";
+import type { AppConfig } from "../config";
 import { ApiError } from "./errors";
 
 export interface RequestContext {
@@ -50,6 +52,55 @@ export function sendApiError(res: ServerResponse, error: ApiError): void {
       retry_after_s: error.retryAfterSec
     }
   });
+}
+
+function normaliseIpCandidate(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const withoutZone = trimmed.replace(/%.+$/, "");
+  if (isIP(withoutZone) === 4) {
+    return withoutZone;
+  }
+  if (withoutZone.startsWith("::ffff:")) {
+    const mapped = withoutZone.slice(7);
+    if (isIP(mapped) === 4) {
+      return mapped;
+    }
+  }
+  if (isIP(withoutZone) === 6) {
+    return withoutZone;
+  }
+  return null;
+}
+
+export function getClientIp(req: IncomingMessage, config: Pick<AppConfig, "trustProxyHops">): string {
+  const remote =
+    normaliseIpCandidate((req.socket as { remoteAddress?: string }).remoteAddress) ?? "unknown";
+  if (config.trustProxyHops <= 0) {
+    return remote;
+  }
+
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded !== "string") {
+    return remote;
+  }
+
+  const forwardedChain = forwarded
+    .split(",")
+    .map((part) => normaliseIpCandidate(part))
+    .filter((part): part is string => Boolean(part));
+  if (!forwardedChain.length) {
+    return remote;
+  }
+
+  const fullChain = [...forwardedChain, remote];
+  const clientIndex = fullChain.length - config.trustProxyHops - 1;
+  if (clientIndex < 0) {
+    return remote;
+  }
+  return fullChain[clientIndex] ?? remote;
 }
 
 /**

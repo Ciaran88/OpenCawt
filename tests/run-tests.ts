@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { rmSync } from "node:fs";
 import Database from "better-sqlite3";
 import { canonicalJson } from "../shared/canonicalJson";
@@ -12,7 +12,7 @@ import { computeDeterministicVerdict } from "../server/services/verdict";
 import { getConfig } from "../server/config";
 import { openDatabase, resetDatabase } from "../server/db/sqlite";
 import { hashCapabilityToken, verifySignedMutation } from "../server/services/auth";
-import { setSecurityHeaders } from "../server/services/http";
+import { getClientIp, setSecurityHeaders } from "../server/services/http";
 import { createSolanaProvider } from "../server/services/solanaProvider";
 import {
   clampComputeUnitLimit,
@@ -128,6 +128,44 @@ function withEnv<T>(
     restore();
     throw error;
   }
+}
+
+async function waitForServerReady(
+  baseUrl: string,
+  proc: ReturnType<typeof spawn>,
+  timeoutMs = 10_000
+): Promise<void> {
+  const start = Date.now();
+  let stderr = "";
+  proc.stderr?.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  while (Date.now() - start < timeoutMs) {
+    if (proc.exitCode !== null) {
+      throw new Error(`Server exited early: ${stderr || proc.exitCode}`);
+    }
+    try {
+      const res = await fetch(`${baseUrl}/api/health`);
+      if (res.ok) {
+        return;
+      }
+    } catch {
+      // Wait and retry until timeout.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error(`Server did not become ready in time: ${stderr}`);
+}
+
+async function stopServer(proc: ReturnType<typeof spawn>): Promise<void> {
+  if (proc.exitCode !== null) {
+    return;
+  }
+  proc.kill("SIGTERM");
+  await new Promise<void>((resolve) => {
+    proc.once("exit", () => resolve());
+    setTimeout(() => resolve(), 5_000).unref();
+  });
 }
 
 async function testCountdownMaths() {
@@ -1097,6 +1135,133 @@ function testConfigFailFastGuards() {
     throw new Error("Expected synchronous config load.");
   }
   assert.equal(cfg.adminSessionTtlSec, 1200);
+  assert.equal(cfg.trustProxyHops, 1);
+
+  const devCfg = withEnv(
+    {
+      APP_ENV: "development",
+      TRUST_PROXY_HOPS: undefined
+    },
+    () => getConfig()
+  );
+  if (devCfg instanceof Promise) {
+    throw new Error("Expected synchronous config load.");
+  }
+  assert.equal(devCfg.trustProxyHops, 0);
+}
+
+function testClientIpResolution() {
+  const remoteOnlyReq = {
+    headers: { "x-forwarded-for": "198.51.100.8" },
+    socket: { remoteAddress: "::ffff:203.0.113.10" }
+  } as unknown as Parameters<typeof getClientIp>[0];
+  assert.equal(getClientIp(remoteOnlyReq, { trustProxyHops: 0 }), "203.0.113.10");
+
+  const singleProxyReq = {
+    headers: { "x-forwarded-for": "198.51.100.8" },
+    socket: { remoteAddress: "10.0.0.9" }
+  } as unknown as Parameters<typeof getClientIp>[0];
+  assert.equal(getClientIp(singleProxyReq, { trustProxyHops: 1 }), "198.51.100.8");
+
+  const multiProxyReq = {
+    headers: { "x-forwarded-for": "198.51.100.8, 203.0.113.4" },
+    socket: { remoteAddress: "10.0.0.9" }
+  } as unknown as Parameters<typeof getClientIp>[0];
+  assert.equal(getClientIp(multiProxyReq, { trustProxyHops: 1 }), "203.0.113.4");
+
+  const malformedReq = {
+    headers: { "x-forwarded-for": "garbage, nope" },
+    socket: { remoteAddress: "::1" }
+  } as unknown as Parameters<typeof getClientIp>[0];
+  assert.equal(getClientIp(malformedReq, { trustProxyHops: 1 }), "::1");
+}
+
+async function testInternalAdminRouteClassification() {
+  const port = 19000 + Math.floor(Math.random() * 1000);
+  const dbPath = `/tmp/opencawt_internal_admin_${port}.sqlite`;
+  rmSync(dbPath, { force: true });
+  const proc = spawn("node", ["--import", "tsx", "server/main.ts"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      APP_ENV: "development",
+      API_HOST: "127.0.0.1",
+      API_PORT: String(port),
+      PUBLIC_APP_URL: `http://127.0.0.1:${port}`,
+      CORS_ORIGIN: `http://127.0.0.1:${port}`,
+      DB_PATH: dbPath,
+      BACKUP_DIR: `/tmp/opencawt_internal_admin_backups_${port}`,
+      SYSTEM_API_KEY: "system-route-test-token",
+      WORKER_TOKEN: "worker-route-test-token",
+      ADMIN_PANEL_PASSWORD: "admin-panel-secret-strong",
+      DEFENCE_INVITE_SIGNING_KEY: "defence-invite-signing-key-stage-strong-5678",
+      SIMULATION_BYPASS_ENABLED: "true",
+      TRUST_PROXY_HOPS: "0",
+      COURT_MODE: "11-juror",
+      SOLANA_MODE: "stub",
+      DRAND_MODE: "stub",
+      SEAL_WORKER_MODE: "stub",
+      HELIUS_WEBHOOK_ENABLED: "false"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  const baseUrl = `http://127.0.0.1:${port}`;
+  try {
+    await waitForServerReady(baseUrl, proc);
+
+    const authRes = await fetch(`${baseUrl}/api/internal/admin-auth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "admin-panel-secret-strong" })
+    });
+    assert.equal(authRes.status, 200);
+    const authJson = (await authRes.json()) as { token: string };
+    assert.ok(authJson.token);
+
+    const purgeAdmin = await fetch(`${baseUrl}/api/internal/alpha/purge-cases`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Admin-Token": authJson.token
+      },
+      body: JSON.stringify({ dryRun: true })
+    });
+    assert.equal(purgeAdmin.status, 200);
+
+    const purgeSystem = await fetch(`${baseUrl}/api/internal/alpha/purge-cases`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-System-Key": "system-route-test-token"
+      },
+      body: JSON.stringify({ dryRun: true })
+    });
+    assert.equal(purgeSystem.status, 401);
+
+    const issueAdmin = await fetch(`${baseUrl}/api/internal/capabilities/issue`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Admin-Token": authJson.token
+      },
+      body: JSON.stringify({ agentId: "agent-route-test" })
+    });
+    assert.equal(issueAdmin.status, 401);
+
+    const issueSystem = await fetch(`${baseUrl}/api/internal/capabilities/issue`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-System-Key": "system-route-test-token"
+      },
+      body: JSON.stringify({ agentId: "agent-route-test" })
+    });
+    assert.equal(issueSystem.status, 201);
+  } finally {
+    await stopServer(proc);
+    rmSync(dbPath, { force: true });
+  }
 }
 
 function testSecurityHeadersPresence() {
@@ -2711,6 +2876,7 @@ async function run() {
   await testPaymentEstimatorStubShape();
   testPayerWalletValidation();
   testConfigFailFastGuards();
+  testClientIpResolution();
   testSecurityHeadersPresence();
   await testRpcPayerMismatchGuard();
   testTreasuryReplayPrevention();
@@ -2731,6 +2897,7 @@ async function run() {
   testDeleteCaseRemovesTreasuryAndAuxiliaryRefs();
   testOpenDefenceQuery();
   testCaseOfDayViewAggregation();
+  await testInternalAdminRouteClassification();
   testOpenClawToolContractParity();
   testMlSignalValidation();
   await testJudgeStageAdvisoryStub();

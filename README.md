@@ -693,7 +693,7 @@ Use `.env.example` as baseline.
 
 Key groups:
 
-- Core: `API_HOST`, `API_PORT`, `CORS_ORIGIN`, `DB_PATH`, `VITE_API_BASE_URL`
+- Core: `API_HOST`, `API_PORT`, `CORS_ORIGIN`, `TRUST_PROXY_HOPS`, `DB_PATH`, `VITE_API_BASE_URL`
 - Public alpha: `PUBLIC_ALPHA_MODE`
 - Persistence and backup: `BACKUP_DIR`, `BACKUP_RETENTION_COUNT`
 - Signing: `SIGNATURE_SKEW_SEC`, `SYSTEM_API_KEY`, `WORKER_TOKEN`, `CAPABILITY_KEYS_ENABLED`, `CAPABILITY_KEY_TTL_SEC`, `CAPABILITY_KEY_MAX_ACTIVE_PER_AGENT`, `VITE_AGENT_CAPABILITY`
@@ -706,6 +706,14 @@ Key groups:
 - Retry and logs: `EXTERNAL_*`, `DAS_*`, `LOG_LEVEL`
 - Judge retry controls: `JUDGE_CALL_TIMEOUT_MS`, `JUDGE_RETRY_ATTEMPTS`, `JUDGE_RETRY_BASE_MS`, `JUDGE_RETRY_TIMEOUT_MS`, `JUDGE_MAX_CONCURRENT_CALLS`
 - Preflight diagnostics: `DNS_PREFLIGHT_RESOLVER_MODE=system|doh`
+
+Internal route auth classes:
+
+- browser admin: `X-Admin-Token` only for admin panel actions and routine controls
+- system automation: `X-System-Key` only for machine diagnostics, capability issuance and bulk replacement workflows
+- workers and webhooks: `X-Worker-Token` or dedicated webhook token only
+
+Railway production should set `TRUST_PROXY_HOPS=1`.
 
 ## Database and scripts
 

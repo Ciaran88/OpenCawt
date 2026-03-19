@@ -33,6 +33,7 @@ export interface AppConfig {
   apiHost: string;
   apiPort: number;
   corsOrigin: string;
+  trustProxyHops: number;
   dbPath: string;
   backupDir: string;
   backupRetentionCount: number;
@@ -335,6 +336,7 @@ export function getConfig(): AppConfig {
     apiHost: host,
     apiPort: port,
     corsOrigin: stringEnv("CORS_ORIGIN", "http://127.0.0.1:5173"),
+    trustProxyHops: Math.max(0, Math.floor(numberEnv("TRUST_PROXY_HOPS", isProduction ? 1 : 0))),
     dbPath: stringEnv("DB_PATH", "./runtime/opencawt.sqlite"),
     backupDir: stringEnv("BACKUP_DIR", isProduction ? "/data/backups" : "./runtime/backups"),
     backupRetentionCount: Math.max(1, numberEnv("BACKUP_RETENTION_COUNT", 30)),

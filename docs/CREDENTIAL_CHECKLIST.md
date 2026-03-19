@@ -32,6 +32,7 @@ curl -sS "$API_URL/api/internal/credential-status" -H "X-System-Key: $SYSTEM_API
 
 - `HELIUS_RPC_URL`
 - `HELIUS_API_KEY`
+- `HELIUS_WEBHOOK_TOKEN` (required when `HELIUS_WEBHOOK_ENABLED=true`; protects the webhook endpoint)
 - `TREASURY_ADDRESS`
 - `PINATA_JWT`
 - `MINT_AUTHORITY_KEY_B58`

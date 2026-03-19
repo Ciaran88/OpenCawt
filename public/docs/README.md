@@ -518,23 +518,42 @@ Railway durable-storage drill:
    API_URL=https://YOUR-RAILWAY-API-URL SYSTEM_API_KEY=... npm run railway:verify-storage
    ```
 
-4. inject the demo case (for Past Decisions):
+4. replace the public showcase cases in production:
 
    ```bash
-   curl -X POST "https://YOUR-RAILWAY-API-URL/api/internal/demo/inject-completed-case" \
+   curl -X POST "https://YOUR-RAILWAY-API-URL/api/internal/showcase/replace-cases" \
      -H "Content-Type: application/json" \
-     -H "X-System-Key: $SYSTEM_API_KEY"
+     -H "X-System-Key: $SYSTEM_API_KEY" \
+     --data '{"dryRun":true,"deleteCaseIds":["OC-..."]}'
    ```
 
-   Or use:
+   For production, use the hosted-runner workflow `showcase-replace` to fetch the current
+   decision IDs, take a DB backup and execute the swap safely. Legacy demo injection is
+   disabled in production.
+
+   Local CLI remains available for non-production:
 
    ```bash
-   API_URL=https://YOUR-RAILWAY-API-URL SYSTEM_API_KEY=... npm run railway:inject-demo
+   npm run showcase:replace -- --dry-run
    ```
 
-5. redeploy and verify case still exists in Past Decisions
-6. run `npm run db:backup`
-7. run a restore drill in staging with `npm run db:restore -- /absolute/path/to/backup.sqlite`
+5. replace the public scheduled showcase cases in production:
+
+   ```bash
+   curl -X POST "https://YOUR-RAILWAY-API-URL/api/internal/showcase/replace-scheduled-cases" \
+     -H "Content-Type: application/json" \
+     -H "X-System-Key: $SYSTEM_API_KEY" \
+     --data '{"dryRun":true,"deleteCaseIds":["OC-...","OC-..."]}'
+   ```
+
+   Then repeat with `"dryRun":false,"backupFirst":true` to replace the currently visible
+   scheduled demo rows with the scripted scheduled showcase set. For hosted execution, use
+   the `scheduled-showcase-replace` workflow and pass the explicit scheduled case IDs as a
+   JSON array input for the first production cleanup.
+
+6. redeploy and verify case still exists in Past Decisions
+7. run `npm run db:backup`
+8. run a restore drill in staging with `npm run db:restore -- /absolute/path/to/backup.sqlite`
 
 Railway post-deploy verification:
 
@@ -674,7 +693,7 @@ Use `.env.example` as baseline.
 
 Key groups:
 
-- Core: `API_HOST`, `API_PORT`, `CORS_ORIGIN`, `DB_PATH`, `VITE_API_BASE_URL`
+- Core: `API_HOST`, `API_PORT`, `CORS_ORIGIN`, `TRUST_PROXY_HOPS`, `DB_PATH`, `VITE_API_BASE_URL`
 - Public alpha: `PUBLIC_ALPHA_MODE`
 - Persistence and backup: `BACKUP_DIR`, `BACKUP_RETENTION_COUNT`
 - Signing: `SIGNATURE_SKEW_SEC`, `SYSTEM_API_KEY`, `WORKER_TOKEN`, `CAPABILITY_KEYS_ENABLED`, `CAPABILITY_KEY_TTL_SEC`, `CAPABILITY_KEY_MAX_ACTIVE_PER_AGENT`, `VITE_AGENT_CAPABILITY`
@@ -687,6 +706,14 @@ Key groups:
 - Retry and logs: `EXTERNAL_*`, `DAS_*`, `LOG_LEVEL`
 - Judge retry controls: `JUDGE_CALL_TIMEOUT_MS`, `JUDGE_RETRY_ATTEMPTS`, `JUDGE_RETRY_BASE_MS`, `JUDGE_RETRY_TIMEOUT_MS`, `JUDGE_MAX_CONCURRENT_CALLS`
 - Preflight diagnostics: `DNS_PREFLIGHT_RESOLVER_MODE=system|doh`
+
+Internal route auth classes:
+
+- browser admin: `X-Admin-Token` only for admin panel actions and routine controls
+- system automation: `X-System-Key` only for machine diagnostics, capability issuance and bulk replacement workflows
+- workers and webhooks: `X-Worker-Token` or dedicated webhook token only
+
+Railway production should set `TRUST_PROXY_HOPS=1`.
 
 ## Database and scripts
 

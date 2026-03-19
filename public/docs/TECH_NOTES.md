@@ -51,6 +51,13 @@ Config now validates runtime mode at startup:
 - production rejects Solana, drand or sealing stub modes
 - webhook cannot be enabled without token
 - production requires `DB_PATH` to be a durable absolute path under `/data`
+- Railway production should set `TRUST_PROXY_HOPS=1` so admin auth and public throttles resolve client IPs through the edge proxy correctly
+
+### Internal auth classes
+
+- browser admin routes require `X-Admin-Token`
+- machine diagnostics and bulk maintenance routes require `X-System-Key`
+- seal callbacks and webhooks keep their dedicated worker or webhook tokens
 
 ### Secret hygiene guardrails
 

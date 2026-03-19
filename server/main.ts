@@ -146,6 +146,7 @@ import {
 } from "./services/validation";
 import {
   fetchJsonWithRetry,
+  getClientIp,
   getExternalFailureTelemetry,
   pathSegments,
   readJsonBody,
@@ -246,6 +247,9 @@ if (savedSimulationTimingProfile === "1" && config.simulationBypassEnabled) {
   simulationTimingProfileActive = true;
 }
 
+// Stricter body limit for admin/system mutation endpoints (small payloads)
+const ADMIN_BODY_LIMIT = 32 * 1024;
+
 // In-memory rate limiter for admin auth attempts (ip -> { count, resetAt })
 const adminAuthAttempts = new Map<string, { count: number; resetAt: number }>();
 
@@ -255,7 +259,7 @@ const SEARCH_MAX_PER_MIN = 30;
 const SEARCH_WINDOW_MS = 60_000;
 
 function checkSearchRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
-  const clientIp = String(req.headers["x-forwarded-for"] ?? (req.socket as { remoteAddress?: string }).remoteAddress ?? "unknown");
+  const clientIp = getClientIp(req, config);
   const now = Date.now();
   const existing = searchRateLimits.get(clientIp);
   const active = existing && now < existing.resetAt;
@@ -306,16 +310,6 @@ function assertAdminToken(req: IncomingMessage): void {
     adminSessions.delete(token);
     throw unauthorised("ADMIN_TOKEN_EXPIRED", "Admin token has expired.");
   }
-}
-
-function assertAdminOrSystem(req: IncomingMessage): "admin" | "system" {
-  const systemHeader = req.headers["x-system-key"];
-  if (typeof systemHeader === "string" && systemHeader.trim().length > 0) {
-    assertSystemKey(req, config);
-    return "system";
-  }
-  assertAdminToken(req);
-  return "admin";
 }
 
 function setSimulationTimingProfile(enabled: boolean): void {
@@ -1806,25 +1800,30 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     ) {
       assertSystemKey(req, config);
       const agentId = decodeURIComponent(segments[3]);
-      const body = await readJsonBody<{ banned: boolean }>(req);
+      const body = await readJsonBody<{ banned: boolean }>(req, ADMIN_BODY_LIMIT);
       if (typeof body.banned !== "boolean") {
         throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
       }
       setAgentBanned(db, { agentId, banned: body.banned });
+      logger.info("admin_audit", { action: "agent_ban", agentId, banned: body.banned, auth: "system_key" });
       sendJson(res, 200, { agentId, banned: body.banned });
       return;
     }
 
     // Admin panel authentication — returns a short-lived admin session token on success
     if (method === "POST" && pathname === "/api/internal/admin-auth") {
-      const clientIp = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "unknown");
+      const clientIp = getClientIp(req, config);
       const now = Date.now();
       const attempt = adminAuthAttempts.get(clientIp);
       if (attempt && now < attempt.resetAt && attempt.count >= 5) {
+        logger.warn("admin_auth_rate_limited", { requestId, clientIp });
         throw unauthorised("ADMIN_AUTH_RATE_LIMITED", "Too many failed attempts. Try again later.");
       }
-      const body = await readJsonBody<{ password: string }>(req);
-      const provided = String(body.password ?? "");
+      const body = await readJsonBody<{ password?: unknown }>(req, 4 * 1024);
+      if (typeof body.password !== "string") {
+        throw badRequest("ADMIN_AUTH_PAYLOAD_INVALID", "Body must include password: string.");
+      }
+      const provided = body.password;
       const expected = config.adminPanelPassword;
       const match =
         provided.length === expected.length &&
@@ -1835,10 +1834,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           count: (cur?.count ?? 0) + 1,
           resetAt: now + 15 * 60 * 1000
         });
+        logger.warn("admin_auth_failed", { requestId, clientIp });
         throw unauthorised("ADMIN_AUTH_INVALID", "Invalid admin password.");
       }
       adminAuthAttempts.delete(clientIp);
       const session = issueAdminSession(now);
+      logger.info("admin_auth_succeeded", {
+        requestId,
+        clientIp,
+        expiresAtIso: session.expiresAtIso
+      });
       sendJson(res, 200, session);
       return;
     }
@@ -1854,11 +1859,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     ) {
       assertAdminToken(req);
       const agentId = decodeURIComponent(segments[3]);
-      const body = await readJsonBody<{ banned: boolean }>(req);
+      const body = await readJsonBody<{ banned: boolean }>(req, ADMIN_BODY_LIMIT);
       if (typeof body.banned !== "boolean") {
         throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
       }
       setAgentFilingBanned(db, { agentId, banned: body.banned });
+      logger.info("admin_audit", { action: "agent_ban_filing", agentId, banned: body.banned });
       sendJson(res, 200, { agentId, bannedFromFiling: body.banned });
       return;
     }
@@ -1873,11 +1879,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     ) {
       assertAdminToken(req);
       const agentId = decodeURIComponent(segments[3]);
-      const body = await readJsonBody<{ banned: boolean }>(req);
+      const body = await readJsonBody<{ banned: boolean }>(req, ADMIN_BODY_LIMIT);
       if (typeof body.banned !== "boolean") {
         throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
       }
       setAgentDefenceBanned(db, { agentId, banned: body.banned });
+      logger.info("admin_audit", { action: "agent_ban_defence", agentId, banned: body.banned });
       sendJson(res, 200, { agentId, bannedFromDefence: body.banned });
       return;
     }
@@ -1892,11 +1899,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     ) {
       assertAdminToken(req);
       const agentId = decodeURIComponent(segments[3]);
-      const body = await readJsonBody<{ banned: boolean }>(req);
+      const body = await readJsonBody<{ banned: boolean }>(req, ADMIN_BODY_LIMIT);
       if (typeof body.banned !== "boolean") {
         throw badRequest("BAN_PAYLOAD_INVALID", "Body must include banned: boolean.");
       }
       setAgentJuryBanned(db, { agentId, banned: body.banned });
+      logger.info("admin_audit", { action: "agent_ban_jury", agentId, banned: body.banned });
       sendJson(res, 200, { agentId, bannedFromJury: body.banned });
       return;
     }
@@ -1912,6 +1920,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       assertAdminToken(req);
       const caseId = decodeURIComponent(segments[3]);
       deleteCaseById(db, caseId);
+      logger.info("admin_audit", { action: "case_delete", caseId });
       sendJson(res, 200, { caseId, deleted: true });
       return;
     }
@@ -1919,13 +1928,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     // Update daily case cap (admin)
     if (method === "POST" && pathname === "/api/internal/config/daily-cap") {
       assertAdminToken(req);
-      const body = await readJsonBody<{ cap: number }>(req);
+      const body = await readJsonBody<{ cap: number }>(req, ADMIN_BODY_LIMIT);
       const cap = Number(body.cap);
       if (!Number.isFinite(cap) || cap < 1) {
         throw badRequest("CAP_INVALID", "cap must be a positive integer.");
       }
       config.softDailyCaseCap = Math.floor(cap);
       setRuntimeConfig(db, "daily_cap", String(Math.floor(cap)));
+      logger.info("admin_audit", { action: "config_daily_cap", cap: Math.floor(cap) });
       sendJson(res, 200, { softDailyCaseCap: config.softDailyCaseCap });
       return;
     }
@@ -1933,13 +1943,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     // Update soft cap mode (admin)
     if (method === "POST" && pathname === "/api/internal/config/soft-cap-mode") {
       assertAdminToken(req);
-      const body = await readJsonBody<{ mode: "warn" | "enforce" }>(req);
+      const body = await readJsonBody<{ mode: "warn" | "enforce" }>(req, ADMIN_BODY_LIMIT);
       const mode = body.mode;
       if (mode !== "warn" && mode !== "enforce") {
         throw badRequest("MODE_INVALID", "mode must be 'warn' or 'enforce'.");
       }
       config.softCapMode = mode;
       setRuntimeConfig(db, "soft_cap_mode", mode);
+      logger.info("admin_audit", { action: "config_soft_cap_mode", mode });
       sendJson(res, 200, { softCapMode: config.softCapMode });
       return;
     }
@@ -1947,7 +1958,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     // Update court mode (admin)
     if (method === "POST" && pathname === "/api/internal/config/court-mode") {
       assertAdminToken(req);
-      const body = await readJsonBody<{ mode?: string }>(req);
+      const body = await readJsonBody<{ mode?: string }>(req, ADMIN_BODY_LIMIT);
       if (body.mode !== "11-juror" && body.mode !== "judge") {
         throw badRequest("INVALID_COURT_MODE", "Court mode must be '11-juror' or 'judge'.");
       }
@@ -1958,6 +1969,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         );
       }
       setRuntimeConfig(db, "court_mode", body.mode);
+      logger.info("admin_audit", { action: "config_court_mode", mode: body.mode });
       sendJson(res, 200, { courtMode: body.mode });
       return;
     }
@@ -1965,10 +1977,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     // Restrict jury selection to a deterministic allowlist (admin, simulation support)
     if (method === "POST" && pathname === "/api/internal/config/jury-selection-allowlist") {
       assertAdminToken(req);
-      const body = await readJsonBody<{ agentIds?: string[] | null; clear?: boolean }>(req);
+      const body = await readJsonBody<{ agentIds?: string[] | null; clear?: boolean }>(req, ADMIN_BODY_LIMIT);
       const clear = body.clear === true || body.agentIds === null;
       if (clear) {
         setRuntimeConfig(db, "jury_selection_allowlist_json", "[]");
+        logger.info("admin_audit", { action: "config_jury_allowlist", enabled: false });
         sendJson(res, 200, { enabled: false, count: 0 });
         return;
       }
@@ -1991,23 +2004,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         throw badRequest("ALLOWLIST_EMPTY", "agentIds must contain at least one agent id.");
       }
       setRuntimeConfig(db, "jury_selection_allowlist_json", JSON.stringify(cleaned));
+      logger.info("admin_audit", { action: "config_jury_allowlist", enabled: true, count: cleaned.length });
       sendJson(res, 200, { enabled: true, count: cleaned.length, agentIds: cleaned });
       return;
     }
 
     if (method === "POST" && pathname === "/api/internal/config/simulation-timing-profile") {
-      assertAdminOrSystem(req);
+      assertAdminToken(req);
       if (!config.simulationBypassEnabled) {
         throw forbidden(
           "SIMULATION_BYPASS_DISABLED",
           "Simulation timing profile can only be used when simulation bypass is enabled."
         );
       }
-      const body = await readJsonBody<{ enabled?: boolean }>(req);
+      const body = await readJsonBody<{ enabled?: boolean }>(req, ADMIN_BODY_LIMIT);
       if (typeof body.enabled !== "boolean") {
         throw badRequest("SIMULATION_TIMING_PROFILE_INVALID", "enabled must be a boolean.");
       }
       setSimulationTimingProfile(body.enabled);
+      logger.info("admin_audit", { action: "config_simulation_timing_profile", enabled: body.enabled });
       sendJson(res, 200, {
         enabled: simulationTimingProfileActive,
         rules: { ...config.rules }
@@ -2016,8 +2031,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (method === "POST" && pathname === "/api/internal/alpha/purge-cases") {
-      assertAdminOrSystem(req);
-      const body = await readJsonBody<{ dryRun?: boolean }>(req);
+      assertAdminToken(req);
+      const body = await readJsonBody<{ dryRun?: boolean }>(req, ADMIN_BODY_LIMIT);
       const dryRun = body.dryRun !== false;
       const alphaCaseIds = listAlphaCaseIds(db);
       if (dryRun) {
@@ -2031,6 +2046,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         return;
       }
       const purged = purgeAlphaCases(db);
+      logger.info("admin_audit", { action: "alpha_purge_cases", dryRun: false, deletedCount: purged.deletedCount });
       sendJson(res, 200, {
         ok: true,
         dryRun: false,
@@ -2047,7 +2063,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         dryRun?: boolean;
         backupFirst?: boolean;
         deleteCaseIds?: string[];
-      }>(req);
+      }>(req, ADMIN_BODY_LIMIT);
       const deleteCaseIds = Array.isArray(body.deleteCaseIds)
         ? body.deleteCaseIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
         : [];
@@ -2064,6 +2080,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         dryRun,
         deleteCaseIds
       });
+      logger.info("admin_audit", { action: "showcase_replace_cases", auth: "system_key", ...result });
       sendJson(res, 200, {
         ok: true,
         backup,
@@ -2078,7 +2095,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         dryRun?: boolean;
         backupFirst?: boolean;
         deleteCaseIds?: string[];
-      }>(req);
+      }>(req, ADMIN_BODY_LIMIT);
       const deleteCaseIds = Array.isArray(body.deleteCaseIds)
         ? body.deleteCaseIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
         : [];
@@ -2095,6 +2112,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         dryRun,
         deleteCaseIds
       });
+      logger.info("admin_audit", { action: "showcase_replace_scheduled_cases", auth: "system_key", ...result });
       sendJson(res, 200, {
         ok: true,
         backup,
@@ -3776,7 +3794,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[2] === "cases" &&
       segments[4] === "judge-stage-advisory"
     ) {
-      assertAdminOrSystem(req);
+      assertAdminToken(req);
       if (!judge.isAvailable()) {
         throw conflict(
           "JUDGE_MODE_UNAVAILABLE",
@@ -3891,7 +3909,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       segments[2] === "cases" &&
       segments[4] === "simulation-mode"
     ) {
-      assertAdminOrSystem(req);
+      assertAdminToken(req);
       if (!config.simulationBypassEnabled) {
         throw forbidden(
           "SIMULATION_BYPASS_DISABLED",
@@ -3943,7 +3961,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     ) {
       assertSystemKey(req, config);
       const caseId = decodeURIComponent(segments[3]);
-      const body = await readJsonBody<{ reason?: "manual_void" }>(req);
+      const body = await readJsonBody<{ reason?: "manual_void" }>(req, ADMIN_BODY_LIMIT);
       const reason = body.reason ?? "manual_void";
       if (reason !== "manual_void") {
         throw badRequest("VOID_REASON_INVALID", "Only manual_void is supported.");
@@ -3965,6 +3983,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         stage: "void",
         messageText: "I order this case voided by administrative direction."
       });
+      logger.info("admin_audit", { action: "case_void", caseId, auth: "system_key" });
       sendJson(res, 200, { caseId, status: "void" });
       return;
     }
