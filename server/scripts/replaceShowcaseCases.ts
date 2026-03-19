@@ -1201,7 +1201,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(`${String(error)}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1]?.includes("replaceShowcaseCases.ts")) {
+  main().catch((error) => {
+    process.stderr.write(`${String(error)}\n`);
+    process.exitCode = 1;
+  });
+}

@@ -29,6 +29,7 @@ import {
   deleteCaseById,
   getCaseById,
   listClaims,
+  listCasesByStatuses,
   listDecisions,
   getMostViewedCaseLast24h,
   getCaseRuntime,
@@ -59,6 +60,7 @@ import { createJudgeService } from "../server/services/judge";
 import { createLogger } from "../server/services/observability";
 import { createDrandClient } from "../server/services/drand";
 import { replaceShowcaseCases } from "../server/scripts/replaceShowcaseCases";
+import { replaceScheduledShowcaseCases } from "../server/scripts/replaceScheduledShowcaseCases";
 import {
   normalisePrincipleIds,
   truncateCaseTitle,
@@ -2093,6 +2095,124 @@ async function testShowcaseReplacementFunction() {
   db.close();
 }
 
+async function testScheduledShowcaseReplacementFunction() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_scheduled_showcase_replace.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "scheduled-legacy-p1", true);
+  upsertAgent(db, "scheduled-legacy-d1", true);
+  upsertAgent(db, "scheduled-legacy-p2", true);
+
+  const legacyNamed = createCaseDraft(db, {
+    prosecutionAgentId: "scheduled-legacy-p1",
+    defendantAgentId: "scheduled-legacy-d1",
+    openDefence: false,
+    claimSummary: "Legacy named scheduled demo case.",
+    requestedRemedy: "warn"
+  });
+  setCaseFiled(db, {
+    caseId: legacyNamed.caseId,
+    txSig: `legacy-scheduled-${legacyNamed.caseId}`,
+    scheduleDelaySec: 6 * 60 * 60,
+    defenceCutoffSec: 2 * 60 * 60
+  });
+
+  const legacyOpen = createCaseDraft(db, {
+    prosecutionAgentId: "scheduled-legacy-p2",
+    openDefence: true,
+    claimSummary: "Legacy open defence scheduled demo case.",
+    requestedRemedy: "warn"
+  });
+  setCaseFiled(db, {
+    caseId: legacyOpen.caseId,
+    txSig: `legacy-scheduled-${legacyOpen.caseId}`,
+    scheduleDelaySec: 8 * 60 * 60,
+    defenceCutoffSec: 3 * 60 * 60
+  });
+
+  upsertAgent(db, "closed-showcase-p", true);
+  upsertAgent(db, "closed-showcase-d", true);
+  const closedShowcase = createCaseDraft(
+    db,
+    {
+      prosecutionAgentId: "closed-showcase-p",
+      defendantAgentId: "closed-showcase-d",
+      openDefence: false,
+      claimSummary: "Closed showcase decision should remain untouched.",
+      requestedRemedy: "warn"
+    },
+    {
+      showcaseSample: true,
+      sealedDisabled: true
+    }
+  );
+  const closedAtIso = new Date().toISOString();
+  db.prepare(
+    `UPDATE cases
+     SET status = 'closed',
+         outcome = 'for_prosecution',
+         closed_at = ?,
+         decided_at = ?,
+         case_title = ?
+     WHERE case_id = ?`
+  ).run(closedAtIso, closedAtIso, "Closed Showcase Control", closedShowcase.caseId);
+
+  const dryRun = await replaceScheduledShowcaseCases(db, {
+    dryRun: true,
+    deleteCaseIds: [legacyNamed.caseId, legacyOpen.caseId]
+  });
+  assert.equal(dryRun.dryRun, true);
+  assert.deepEqual(dryRun.explicitDeleteCaseIds.sort(), [legacyNamed.caseId, legacyOpen.caseId].sort());
+  assert.equal(dryRun.visibleScheduledCaseIds.length, 2);
+  assert.equal(dryRun.scenarios.length, 5);
+
+  const replaced = await replaceScheduledShowcaseCases(db, {
+    deleteCaseIds: [legacyNamed.caseId, legacyOpen.caseId]
+  });
+  assert.equal(replaced.deletedExplicitCaseIds?.length, 2);
+  assert.equal(replaced.inserted?.length, 5);
+  assert.equal(replaced.scheduledCountAfter, 5);
+
+  const liveScheduled = listCasesByStatuses(db, ["draft", "filed", "jury_selected", "voting"]).filter(
+    (caseRecord) =>
+      !["jury_readiness", "opening_addresses", "evidence", "closing_addresses", "summing_up", "voting"].includes(
+        caseRecord.sessionStage
+      ) && caseRecord.status !== "voting"
+  );
+  assert.equal(liveScheduled.length, 5);
+  assert.ok(liveScheduled.every((caseRecord) => caseRecord.showcaseSample === true));
+  assert.ok(liveScheduled.every((caseRecord) => Boolean(caseRecord.caseTitle)));
+  assert.ok(liveScheduled.every((caseRecord) => Boolean(caseRecord.scheduledForIso)));
+
+  const openDefenceRows = listOpenDefenceCases(
+    db,
+    { limit: 20, status: "all" },
+    { nowIso: new Date().toISOString(), namedExclusiveSec: config.rules.namedDefendantResponseSeconds }
+  );
+  assert.equal(openDefenceRows.length, 5);
+  assert.equal(openDefenceRows.filter((row) => row.claimStatus === "open").length, 2);
+
+  const transcriptRows = db
+    .prepare(
+      `SELECT actor_role, message_text FROM case_transcript_events WHERE case_id = ? ORDER BY seq_no ASC`
+    )
+    .all(replaced.inserted?.[0]?.caseId) as Array<{ actor_role: string; message_text: string }>;
+  assert.ok(transcriptRows.length >= 2);
+  assert.equal(transcriptRows[0]?.actor_role, "court");
+  assert.equal(transcriptRows[1]?.actor_role, "prosecution");
+  assert.ok(transcriptRows.some((row) => row.message_text.includes("The court records a filed allegation")));
+  assert.ok(transcriptRows.some((row) => row.message_text.includes("I filed because")));
+  assert.equal(transcriptRows.some((row) => row.actor_role === "defence"), false);
+  assert.equal(transcriptRows.some((row) => row.actor_role === "juror"), false);
+  assert.ok(getCaseById(db, closedShowcase.caseId));
+  assert.equal(listDecisions(db).length, 1);
+
+  db.close();
+}
+
 function testDeleteCaseRemovesTreasuryAndAuxiliaryRefs() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_delete_case_cleanup.sqlite";
@@ -2496,6 +2616,7 @@ async function run() {
   testAlphaCaseDraftAndPurge();
   testShowcaseCaseSegregationAndPresentation();
   await testShowcaseReplacementFunction();
+  await testScheduledShowcaseReplacementFunction();
   testDeleteCaseRemovesTreasuryAndAuxiliaryRefs();
   testOpenDefenceQuery();
   testCaseOfDayViewAggregation();

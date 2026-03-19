@@ -537,9 +537,23 @@ Railway durable-storage drill:
    npm run showcase:replace -- --dry-run
    ```
 
-5. redeploy and verify case still exists in Past Decisions
-6. run `npm run db:backup`
-7. run a restore drill in staging with `npm run db:restore -- /absolute/path/to/backup.sqlite`
+5. replace the public scheduled showcase cases in production:
+
+   ```bash
+   curl -X POST "https://YOUR-RAILWAY-API-URL/api/internal/showcase/replace-scheduled-cases" \
+     -H "Content-Type: application/json" \
+     -H "X-System-Key: $SYSTEM_API_KEY" \
+     --data '{"dryRun":true,"deleteCaseIds":["OC-...","OC-..."]}'
+   ```
+
+   Then repeat with `"dryRun":false,"backupFirst":true` to replace the currently visible
+   scheduled demo rows with the scripted scheduled showcase set. For hosted execution, use
+   the `scheduled-showcase-replace` workflow and pass the explicit scheduled case IDs as a
+   JSON array input for the first production cleanup.
+
+6. redeploy and verify case still exists in Past Decisions
+7. run `npm run db:backup`
+8. run a restore drill in staging with `npm run db:restore -- /absolute/path/to/backup.sqlite`
 
 Railway post-deploy verification:
 

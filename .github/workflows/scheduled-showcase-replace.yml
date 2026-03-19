@@ -1,0 +1,74 @@
+name: scheduled-showcase-replace
+
+on:
+  workflow_dispatch:
+    inputs:
+      delete_case_ids_json:
+        description: 'JSON array of scheduled case IDs to delete explicitly, e.g. ["OC-...","OC-..."]'
+        required: false
+        default: ""
+
+jobs:
+  replace-scheduled-showcase:
+    runs-on: ubuntu-latest
+    env:
+      API_URL: ${{ secrets.PRODUCTION_API_URL }}
+      SYSTEM_API_KEY: ${{ secrets.PRODUCTION_SYSTEM_API_KEY }}
+      DELETE_CASE_IDS_JSON: ${{ inputs.delete_case_ids_json }}
+    steps:
+      - name: Check scheduled showcase replace inputs
+        run: |
+          missing=()
+          for key in API_URL SYSTEM_API_KEY; do
+            if [ -z "${!key}" ]; then
+              missing+=("$key")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required scheduled showcase vars: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Fetch current production schedule
+        run: |
+          curl -fsS "$API_URL/api/schedule" > schedule-before.json
+          jq '{scheduledCount:(.scheduled|length), activeCount:(.active|length), scheduledIds:[.scheduled[].id]}' schedule-before.json
+
+      - name: Prepare delete IDs
+        run: |
+          if [ -n "$DELETE_CASE_IDS_JSON" ]; then
+            printf '%s' "$DELETE_CASE_IDS_JSON" | jq -e 'if type == "array" then . else error("delete_case_ids_json must be a JSON array") end' > scheduled-delete-ids.json
+          else
+            printf '[]\n' > scheduled-delete-ids.json
+          fi
+          jq . scheduled-delete-ids.json
+
+      - name: Dry run scheduled showcase replacement
+        run: |
+          delete_ids_json="$(cat scheduled-delete-ids.json)"
+          jq -n --argjson deleteCaseIds "$delete_ids_json" '{dryRun:true, deleteCaseIds:$deleteCaseIds}' > scheduled-showcase-dry-run.json
+          curl -fsS "$API_URL/api/internal/showcase/replace-scheduled-cases" \
+            -H "Content-Type: application/json" \
+            -H "X-System-Key: $SYSTEM_API_KEY" \
+            --data @scheduled-showcase-dry-run.json > scheduled-showcase-dry-run-response.json
+          jq . scheduled-showcase-dry-run-response.json
+
+      - name: Execute scheduled showcase replacement
+        run: |
+          delete_ids_json="$(cat scheduled-delete-ids.json)"
+          jq -n --argjson deleteCaseIds "$delete_ids_json" '{dryRun:false, backupFirst:true, deleteCaseIds:$deleteCaseIds}' > scheduled-showcase-replace.json
+          curl -fsS "$API_URL/api/internal/showcase/replace-scheduled-cases" \
+            -H "Content-Type: application/json" \
+            -H "X-System-Key: $SYSTEM_API_KEY" \
+            --data @scheduled-showcase-replace.json > scheduled-showcase-replace-response.json
+          jq . scheduled-showcase-replace-response.json
+
+      - name: Verify scheduled showcase data
+        run: |
+          curl -fsS "$API_URL/api/schedule" > schedule-after.json
+          jq '{scheduledCount:(.scheduled|length), activeCount:(.active|length), scheduled:[.scheduled[] | {id,caseTitle,summary,scheduledForIso,defendantAgentId}]}' schedule-after.json
+          jq -e '(.scheduled | length) == 5' schedule-after.json >/dev/null
+          jq -e '(.active | length) == 0' schedule-after.json >/dev/null
+          jq -e 'all(.scheduled[]; (.caseTitle // "") | length > 0)' schedule-after.json >/dev/null
+          jq -e 'all(.scheduled[]; (.scheduledForIso // "") | length > 0)' schedule-after.json >/dev/null
+          jq -e '([.scheduled[] | select(.defendantAgentId == null)] | length) == 2' schedule-after.json >/dev/null
