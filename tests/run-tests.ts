@@ -1581,6 +1581,112 @@ async function testDefenceCutoffVoiding() {
   db.close();
 }
 
+async function testScheduledShowcasePreSessionSkipsInviteAndVoid() {
+  const config = getConfig();
+  config.dbPath = "/tmp/opencawt_showcase_presession_skip.sqlite";
+  rmSync(config.dbPath, { force: true });
+  const db = openDatabase(config);
+  resetDatabase(db);
+
+  upsertAgent(db, "agent-showcase-p", true);
+  upsertAgent(db, "agent-showcase-d", true);
+
+  const draft = createCaseDraft(
+    db,
+    {
+      prosecutionAgentId: "agent-showcase-p",
+      defendantAgentId: "agent-showcase-d",
+      openDefence: false,
+      claimSummary: "Showcase scheduled case should not invite or auto-void.",
+      requestedRemedy: "warn"
+    },
+    {
+      showcaseSample: true,
+      alphaCohort: true,
+      sealedDisabled: true
+    }
+  );
+  setCaseFiled(db, {
+    caseId: draft.caseId,
+    txSig: "tx-showcase-presession",
+    scheduleDelaySec: 5,
+    defenceCutoffSec: 1
+  });
+  db.prepare(
+    `UPDATE cases
+     SET filed_at = ?, defence_window_deadline = ?, scheduled_for = ?, countdown_end_at = ?
+     WHERE case_id = ?`
+  ).run(
+    new Date(Date.now() - 10_000).toISOString(),
+    new Date(Date.now() - 5_000).toISOString(),
+    new Date(Date.now() - 5_000).toISOString(),
+    new Date(Date.now() - 5_000).toISOString(),
+    draft.caseId
+  );
+  db.prepare(
+    `UPDATE case_runtime
+     SET stage_started_at = ?, stage_deadline_at = ?, scheduled_session_start_at = ?
+     WHERE case_id = ?`
+  ).run(
+    new Date(Date.now() - 10_000).toISOString(),
+    new Date(Date.now() - 5_000).toISOString(),
+    new Date(Date.now() - 5_000).toISOString(),
+    draft.caseId
+  );
+
+  let defenceInviteTicks = 0;
+  const engine = createSessionEngine({
+    db,
+    config,
+    drand: {
+      async getRoundAtOrAfter() {
+        return {
+          round: 1,
+          randomness: "stub",
+          chainInfo: {}
+        };
+      }
+    },
+    logger: {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined
+    } as any,
+    judge: {
+      async screenCase(input: { summary: string }) {
+        return { approved: true, caseTitle: input.summary.slice(0, 37) + "..." };
+      },
+      async breakTiebreak(_input: unknown) {
+        return { finding: "not_proven" as const, reasoning: "stub" };
+      },
+      async recommendRemedy(_input: unknown) {
+        return "";
+      },
+      async summariseStage() {
+        return "stub advisory";
+      },
+      isAvailable() {
+        return true;
+      }
+    },
+    async onCaseReadyToClose() {
+      return;
+    },
+    async onDefenceInviteTick() {
+      defenceInviteTicks += 1;
+    }
+  });
+
+  await engine.tickNow();
+  const updated = getCaseById(db, draft.caseId);
+  assert.equal(defenceInviteTicks, 0);
+  assert.equal(updated?.status, "filed");
+  assert.equal(updated?.voidReason, undefined);
+
+  db.close();
+}
+
 async function testJudgeScreeningQueuedRetryAndTerminalFailure() {
   const config = getConfig();
   config.dbPath = "/tmp/opencawt_phase41_judge_retry.sqlite";
@@ -2611,6 +2717,7 @@ async function run() {
   testDefenceClaimRace();
   testNamedDefendantExclusivity();
   await testDefenceCutoffVoiding();
+  await testScheduledShowcasePreSessionSkipsInviteAndVoid();
   await testJudgeScreeningQueuedRetryAndTerminalFailure();
   testVictoryScoreAndLeaderboard();
   testAlphaCaseDraftAndPurge();

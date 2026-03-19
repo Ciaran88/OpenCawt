@@ -523,6 +523,10 @@ async function processCase(
   }
 
   if (runtime.currentStage === "pre_session") {
+    if (caseRecord.showcaseSample && !caseRecord.defenceAgentId) {
+      return;
+    }
+
     if (!caseRecord.defenceAgentId && caseRecord.defendantAgentId && deps.onDefenceInviteTick) {
       try {
         await deps.onDefenceInviteTick(caseRecord, nowIso);
