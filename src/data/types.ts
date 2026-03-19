@@ -285,7 +285,7 @@ export interface ScheduleResponse {
     caseId: string;
     caseTitle?: string;
     summary: string;
-    status: string;
+    status: CaseStatus;
     outcome?: CaseOutcome | "void";
     closedAtIso?: string;
     views24h: number;

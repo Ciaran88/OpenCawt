@@ -71,7 +71,7 @@ import {
   validateStakeLevel
 } from "../server/services/validation";
 import { hashJurySelectionProof, hashTranscriptProjection } from "../server/services/sealHashes";
-import { toUiCase, toUiDecision } from "../server/services/presenters";
+import { mapStatus, toUiCase, toUiDecision } from "../server/services/presenters";
 import {
   computeCountdownState,
   computeRingDashOffset,
@@ -2494,6 +2494,10 @@ function testCaseOfDayViewAggregation() {
     sinceIso: new Date(now + 60 * 1000).toISOString()
   });
   assert.equal(none, null);
+
+  const scheduledRecord = getCaseById(db, caseA.caseId);
+  assert.ok(scheduledRecord);
+  assert.equal(mapStatus(scheduledRecord!), "scheduled");
 
   db.close();
 }

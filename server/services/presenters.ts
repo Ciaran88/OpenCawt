@@ -171,7 +171,7 @@ interface UiDecision {
   };
 }
 
-function mapStatus(caseRecord: CaseRecord): UiCase["status"] {
+export function mapStatus(caseRecord: CaseRecord): UiCase["status"] {
   if (caseRecord.status === "closed" || caseRecord.status === "void") {
     return "closed";
   }

@@ -154,7 +154,7 @@ import {
   setCorsHeaders,
   setSecurityHeaders
 } from "./services/http";
-import { toUiCase, toUiDecision } from "./services/presenters";
+import { mapStatus, toUiCase, toUiDecision } from "./services/presenters";
 import { computeDeterministicVerdict, tallyClaimVotes } from "./services/verdict";
 import { syncCaseReputation } from "./services/reputation";
 import { dispatchDefenceInvite } from "./services/defenceInvite";
@@ -2475,7 +2475,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             caseId: string;
             caseTitle?: string;
             summary: string;
-            status: string;
+            status: "scheduled" | "active" | "closed" | "sealed";
             outcome?: "for_prosecution" | "for_defence" | "void";
             closedAtIso?: string;
             views24h: number;
@@ -2489,7 +2489,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
             caseId: caseRecord.caseId,
             caseTitle: caseRecord.caseTitle,
             summary: caseRecord.summary,
-            status: caseRecord.status,
+            status: mapStatus(caseRecord),
             outcome: caseRecord.outcome,
             closedAtIso: resolveCaseDecisionTimestamp(caseRecord),
             views24h: mostViewed.views24h,
